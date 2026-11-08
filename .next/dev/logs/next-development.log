@@ -1,6 +1,7 @@
-{"timestamp":"00:00:01.008","source":"Server","level":"LOG","message":""}
-{"timestamp":"00:00:20.924","source":"Browser","level":"INFO","message":"Download the React DevTools for a better development experience: https://react.dev/link/react-devtools"}
-{"timestamp":"00:00:24.733","source":"Browser","level":"INFO","message":"Download the React DevTools for a better development experience: https://react.dev/link/react-devtools"}
-{"timestamp":"00:00:27.386","source":"Browser","level":"INFO","message":"Download the React DevTools for a better development experience: https://react.dev/link/react-devtools"}
-{"timestamp":"00:00:28.271","source":"Browser","level":"INFO","message":"Download the React DevTools for a better development experience: https://react.dev/link/react-devtools"}
-{"timestamp":"00:00:29.781","source":"Browser","level":"INFO","message":"Download the React DevTools for a better development experience: https://react.dev/link/react-devtools"}
+{"timestamp":"00:00:01.021","source":"Server","level":"LOG","message":""}
+{"timestamp":"00:00:03.129","source":"Browser","level":"INFO","message":"Download the React DevTools for a better development experience: https://react.dev/link/react-devtools"}
+{"timestamp":"00:00:04.150","source":"Browser","level":"INFO","message":"Download the React DevTools for a better development experience: https://react.dev/link/react-devtools"}
+{"timestamp":"00:00:04.248","source":"Server","level":"LOG","message":"Esquema híbrido (Caja + Insumos + Recetas) inicializado."}
+{"timestamp":"00:00:04.251","source":"Server","level":"LOG","message":"Conectado exitosamente a la base de datos SQLite local."}
+{"timestamp":"00:00:23.860","source":"Browser","level":"INFO","message":"Download the React DevTools for a better development experience: https://react.dev/link/react-devtools"}
+{"timestamp":"00:01:28.981","source":"Browser","level":"INFO","message":"Download the React DevTools for a better development experience: https://react.dev/link/react-devtools"}
