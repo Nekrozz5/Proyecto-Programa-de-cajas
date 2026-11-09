@@ -1,7 +1,13 @@
 import { NextResponse } from 'next/server';
 import {
+    obtenerConfiguracionNegocio,
+    guardarConfiguracionNegocio,
+    inicializarSistemaPrimeraVez,
+    autenticarUsuarioPorId,
     obtenerCajaAbierta,
+    obtenerHistorialCajas,
     abrirCaja,
+    reabrirCajaConPermiso,
     registrarVentaCompleta,
     registrarEgreso,
     cerrarCaja,
@@ -15,27 +21,39 @@ import {
     anularMovimientoConPermiso,
     crearUsuarioConPermiso,
     borrarUsuarioConPermiso,
+    cambiarPasswordConPermiso,
     crearProducto,
+    registrarCompraProductoDirecto,
     crearInsumo,
     registrarCompraInsumo,
     registrarMermaInsumo,
     asignarIngredienteReceta
 } from '../../../server/queries';
 
-// GET /api/caja -> Devuelve la caja abierta actual, catálogo, usuarios, insumos y estadísticas en vivo
+// GET /api/caja -> Devuelve configuración, caja abierta, historial de cierres, catálogo, usuarios, insumos y estadísticas
 export async function GET() {
     try {
-        const [caja, productos, insumos, usuarios, prediccionInsumos] = await Promise.all([
+        const [configuracionNegocio, caja, historialCajas, productos, insumos, usuarios, prediccionInsumos] = await Promise.all([
+            obtenerConfiguracionNegocio(),
             obtenerCajaAbierta(),
+            obtenerHistorialCajas(),
             obtenerProductos(),
             obtenerInsumos(),
             obtenerUsuarios(),
             obtenerPrediccionComprasInsumos()
         ]);
 
-        if (!caja) {
+        // Si no hay caja abierta, usamos la última caja cerrada para que el Admin pueda auditarla
+        const cajaReferencia = caja || (historialCajas.length > 0 ? historialCajas[0] : null);
+
+        if (!cajaReferencia) {
             return NextResponse.json({
+                configuracionNegocio,
                 cajaAbierta: null,
+                historialCajas,
+                estadisticas: null,
+                movimientos: [],
+                desglosePagos: [],
                 productos,
                 insumos,
                 usuarios,
@@ -44,13 +62,16 @@ export async function GET() {
         }
 
         const [estadisticas, movimientos, desglosePagos] = await Promise.all([
-            obtenerEstadisticasCaja(caja.id),
-            obtenerMovimientosCaja(caja.id),
-            obtenerDesgloseMetodosPago(caja.id)
+            obtenerEstadisticasCaja(cajaReferencia.id),
+            obtenerMovimientosCaja(cajaReferencia.id),
+            obtenerDesgloseMetodosPago(cajaReferencia.id)
         ]);
 
         return NextResponse.json({
+            configuracionNegocio,
             cajaAbierta: caja,
+            cajaAuditada: cajaReferencia,
+            historialCajas,
             estadisticas,
             movimientos,
             desglosePagos,
@@ -70,9 +91,19 @@ export async function POST(request) {
         const body = await request.json();
         const { accion } = body;
 
+        if (accion === 'login') {
+            const usuario = await autenticarUsuarioPorId(Number(body.usuarioId), String(body.pin || ''));
+            return NextResponse.json({ ok: true, usuario });
+        }
+
         if (accion === 'abrir') {
             const id = await abrirCaja(Number(body.usuarioId), Number(body.montoInicial));
             return NextResponse.json({ ok: true, cajaId: id });
+        }
+
+        if (accion === 'reabrir') {
+            await reabrirCajaConPermiso(Number(body.adminId), Number(body.cajaId), body.motivo);
+            return NextResponse.json({ ok: true });
         }
 
         if (accion === 'vender') {
@@ -81,7 +112,9 @@ export async function POST(request) {
                 body.items,
                 body.metodoPago,
                 body.montoRecibido !== undefined && body.montoRecibido !== '' ? Number(body.montoRecibido) : null,
-                body.descripcion
+                body.descripcion,
+                body.usuarioId ? Number(body.usuarioId) : null,
+                body.cambioEntregado !== undefined && body.cambioEntregado !== '' ? Number(body.cambioEntregado) : null
             );
             return NextResponse.json({ ok: true, venta: resultado });
         }
@@ -91,7 +124,8 @@ export async function POST(request) {
                 Number(body.cajaId),
                 Number(body.monto),
                 body.descripcion,
-                body.metodoPago || 'efectivo'
+                body.metodoPago || 'efectivo',
+                body.usuarioId ? Number(body.usuarioId) : null
             );
             return NextResponse.json({ ok: true, movimientoId: id });
         }
@@ -121,6 +155,26 @@ export async function POST(request) {
             return NextResponse.json({ ok: true });
         }
 
+        if (accion === 'cambiar_password') {
+            await cambiarPasswordConPermiso(
+                Number(body.ejecutorId),
+                Number(body.usuarioObjetivoId),
+                body.nuevoPin,
+                body.pinActual
+            );
+            return NextResponse.json({ ok: true });
+        }
+
+        if (accion === 'instalacion_inicial') {
+            const resultado = await inicializarSistemaPrimeraVez(body);
+            return NextResponse.json({ ok: true, ...resultado });
+        }
+
+        if (accion === 'guardar_configuracion') {
+            const config = await guardarConfiguracionNegocio(Number(body.adminId), body);
+            return NextResponse.json({ ok: true, configuracionNegocio: config });
+        }
+
         if (accion === 'crear_producto') {
             const stock = body.stock !== undefined && body.stock !== '' && body.stock !== null
                 ? Number(body.stock)
@@ -130,9 +184,22 @@ export async function POST(request) {
                 Number(body.precio),
                 Number(body.costo || 0),
                 body.categoria || 'General',
-                stock
+                stock,
+                body.unidadMedida || 'unidades',
+                Number(body.stockMinimo || 0),
+                body.fechaVencimiento || null
             );
             return NextResponse.json({ ok: true, productoId: id });
+        }
+
+        if (accion === 'comprar_producto_directo') {
+            const res = await registrarCompraProductoDirecto(
+                Number(body.productoId),
+                Number(body.cantidadComprada),
+                Number(body.costoTotalCompra),
+                body.fechaVencimiento || null
+            );
+            return NextResponse.json({ ok: true, compraProducto: res });
         }
 
         if (accion === 'crear_insumo') {
@@ -142,7 +209,8 @@ export async function POST(request) {
                 Number(body.stockInicial || 0),
                 Number(body.costoPorUnidad || 0),
                 Number(body.stockSeguridad || 0),
-                Number(body.tiempoEntregaDias || 1)
+                Number(body.tiempoEntregaDias || 1),
+                body.fechaVencimiento || null
             );
             return NextResponse.json({ ok: true, insumoId: id });
         }

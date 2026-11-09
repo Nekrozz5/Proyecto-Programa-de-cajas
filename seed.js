@@ -4,10 +4,10 @@ const db = require('./database/database');
 async function inicializarDatos() {
     console.log("🌱 Insertando datos iniciales en la base de datos...");
 
-    // 1. Crear un usuario Administrador por defecto
+    // 1. Crear un usuario Super Administrador por defecto
     db.run(
         `INSERT INTO usuarios (nombre, pin_o_password, rol) VALUES (?, ?, ?)`,
-        ['Dueño / Admin', '1234', 'admin'],
+        ['Dueño / Super Admin', '1234', 'superadmin'],
         function(err) {
             if (err) {
                 console.log("Nota: El usuario admin ya podría existir o hubo un aviso:", err.message);
