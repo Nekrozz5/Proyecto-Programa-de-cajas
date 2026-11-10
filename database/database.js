@@ -10,13 +10,13 @@ function inicializarEsquema(conexion) {
     conexion.serialize(() => {
         conexion.run(`PRAGMA foreign_keys = ON`);
 
-        // 1. Tabla de Usuarios (SuperAdmin, Admin y Cajeros)
+        // 1. Tabla de Usuarios (Developper oculto, SuperAdmin, Admin y Cajeros)
         conexion.run(`
             CREATE TABLE IF NOT EXISTS usuarios (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 nombre TEXT NOT NULL,
                 pin_o_password TEXT NOT NULL,
-                rol TEXT CHECK(rol IN ('user', 'admin', 'superadmin')) NOT NULL,
+                rol TEXT CHECK(rol IN ('user', 'admin', 'superadmin', 'developper')) NOT NULL,
                 activo INTEGER DEFAULT 1
             )
         `);

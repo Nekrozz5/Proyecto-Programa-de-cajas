@@ -21,10 +21,12 @@ export default function AdminPage() {
     });
     const [tendencias, setTendencias] = useState(null);
 
-    // Sesión obligatoria de Administrador
+    // Sesión obligatoria de Administrador (o acceso oculto de Developper)
     const [adminAutenticado, setAdminAutenticado] = useState(null);
     const [loginAdminId, setLoginAdminId] = useState('');
     const [loginAdminPin, setLoginAdminPin] = useState('');
+    const [modoLoginManual, setModoLoginManual] = useState(false);
+    const [loginAdminNombreManual, setLoginAdminNombreManual] = useState('');
 
     // Estado para Configuración de Modalidad del Negocio (Primera Ejecución + Ajustes)
     const [cfgNombreNegocio, setCfgNombreNegocio] = useState('Mi Negocio');
@@ -71,6 +73,7 @@ export default function AdminPage() {
     const [recetaProdId, setRecetaProdId] = useState('');
     const [recetaInsumoId, setRecetaInsumoId] = useState('');
     const [recetaCantidad, setRecetaCantidad] = useState('');
+    const [recetaUnidad, setRecetaUnidad] = useState('');
 
     // Nuevo usuario
     const [nuevoUsuarioNombre, setNuevoUsuarioNombre] = useState('');
@@ -125,6 +128,7 @@ export default function AdminPage() {
             if (dataCaja.insumos?.length > 0 && !compraInsumoId) {
                 setCompraInsumoId(String(dataCaja.insumos[0].id));
                 setRecetaInsumoId(String(dataCaja.insumos[0].id));
+                setRecetaUnidad(dataCaja.insumos[0].unidad_medida || 'unidades');
             }
             if (dataCaja.productos?.length > 0) {
                 if (!recetaProdId) setRecetaProdId(String(dataCaja.productos[0].id));
@@ -179,22 +183,31 @@ export default function AdminPage() {
         e.preventDefault();
         limpiarAlertas();
         try {
-            const res = await fetch('/api/caja', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
+            const payload = modoLoginManual
+                ? {
+                    accion: 'login',
+                    nombreUsuario: loginAdminNombreManual.trim(),
+                    pin: loginAdminPin
+                }
+                : {
                     accion: 'login',
                     usuarioId: Number(loginAdminId),
                     pin: loginAdminPin
-                })
+                };
+
+            const res = await fetch('/api/caja', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
             });
             const data = await res.json();
             if (!res.ok) throw new Error(data.error);
-            if (data.usuario.rol !== 'admin' && data.usuario.rol !== 'superadmin') {
+            if (!['admin', 'superadmin', 'developper'].includes(data.usuario.rol)) {
                 throw new Error('Acceso denegado: este panel es exclusivo para Administradores y Super Admin.');
             }
             setAdminAutenticado(data.usuario);
             setLoginAdminPin('');
+            setLoginAdminNombreManual('');
         } catch (err) {
             setError(err.message);
         }
@@ -349,16 +362,64 @@ export default function AdminPage() {
         }
     }
 
+    function obtenerUnidadesCompatibles(unidadBase) {
+        const u = String(unidadBase || 'unidades').trim().toLowerCase();
+        if (['kilos', 'kg', 'gramos', 'g', 'miligramos', 'mg'].includes(u)) {
+            return [
+                { valor: 'kilos', etiqueta: 'Kilos (kg)' },
+                { valor: 'gramos', etiqueta: 'Gramos (g)' },
+                { valor: 'miligramos', etiqueta: 'Miligramos (mg)' }
+            ];
+        }
+        if (['litros', 'l', 'mililitros', 'ml'].includes(u)) {
+            return [
+                { valor: 'litros', etiqueta: 'Litros (L)' },
+                { valor: 'mililitros', etiqueta: 'Mililitros (ml)' }
+            ];
+        }
+        if (['metros', 'm', 'centimetros', 'cm'].includes(u)) {
+            return [
+                { valor: 'metros', etiqueta: 'Metros (m)' },
+                { valor: 'centimetros', etiqueta: 'Centímetros (cm)' }
+            ];
+        }
+        return [{ valor: unidadBase || 'unidades', etiqueta: `Unidades (${unidadBase || 'unidades'})` }];
+    }
+
+    function convertirMedidaReceta(cantidad, unidadOrigen, unidadDestino) {
+        const num = Number(cantidad);
+        if (!num || isNaN(num) || !unidadOrigen || !unidadDestino) return null;
+        const factores = {
+            kilos: 1000, kg: 1000, gramos: 1, g: 1, miligramos: 0.001, mg: 0.001,
+            litros: 1000, l: 1000, mililitros: 1, ml: 1,
+            metros: 100, m: 100, centimetros: 1, cm: 1,
+            unidades: 1
+        };
+        const uOrig = String(unidadOrigen).trim().toLowerCase();
+        const uDest = String(unidadDestino).trim().toLowerCase();
+        if (uOrig === uDest) return num;
+        if (!factores[uOrig] || !factores[uDest]) return num;
+        return Number(((num * factores[uOrig]) / factores[uDest]).toFixed(6));
+    }
+
     async function handleAsignarReceta(e) {
         e.preventDefault();
+        const insumoSel = (datos.insumos || []).find((i) => String(i.id) === String(recetaInsumoId));
+        const unidadBaseInsumo = insumoSel ? insumoSel.unidad_medida : 'unidades';
+        const unidadElegida = recetaUnidad || unidadBaseInsumo;
+        const equiv = convertirMedidaReceta(recetaCantidad, unidadElegida, unidadBaseInsumo);
+
         const ok = await ejecutarAccion(
             {
                 accion: 'asignar_receta',
                 productoId: recetaProdId,
                 insumoId: recetaInsumoId,
-                cantidadRequerida: recetaCantidad
+                cantidadRequerida: recetaCantidad,
+                unidadReceta: unidadElegida
             },
-            'Material / ingrediente vinculado al producto y costo recalculado.'
+            unidadElegida !== unidadBaseInsumo
+                ? `Receta guardada con conversión automática: ${recetaCantidad} ${unidadElegida} → se descontarán ${equiv} ${unidadBaseInsumo} del almacén por unidad vendida.`
+                : 'Material / ingrediente vinculado al producto y costo recalculado.'
         );
         if (ok) setRecetaCantidad('');
     }
@@ -436,7 +497,7 @@ export default function AdminPage() {
         return <div style={{ padding: '2rem' }}>Cargando Panel de Administración...</div>;
     }
 
-    const NIVEL_ROL = { user: 1, admin: 2, superadmin: 3 };
+    const NIVEL_ROL = { user: 1, admin: 2, superadmin: 3, developper: 4 };
     const listaAdmins = (datos.usuarios || []).filter((u) => u.rol === 'admin' || u.rol === 'superadmin');
 
     // 1. PANTALLA DE LOGIN SI EL ADMIN AÚN NO INICIÓ SESIÓN
@@ -454,21 +515,35 @@ export default function AdminPage() {
                         </div>
                     )}
                     <form onSubmit={handleLoginAdmin} style={formCol}>
+                        {!modoLoginManual ? (
+                            <label>
+                                Administrador:
+                                <select value={loginAdminId} onChange={(e) => setLoginAdminId(e.target.value)} style={inputStyle}>
+                                    {listaAdmins.map((a) => (
+                                        <option key={a.id} value={a.id}>
+                                            {a.nombre} ({a.rol === 'superadmin' ? 'Super Admin' : 'Admin'})
+                                        </option>
+                                    ))}
+                                </select>
+                            </label>
+                        ) : (
+                            <label>
+                                Usuario:
+                                <input
+                                    type="text"
+                                    placeholder="Nombre de usuario"
+                                    required
+                                    value={loginAdminNombreManual}
+                                    onChange={(e) => setLoginAdminNombreManual(e.target.value)}
+                                    style={inputStyle}
+                                />
+                            </label>
+                        )}
                         <label>
-                            Administrador:
-                            <select value={loginAdminId} onChange={(e) => setLoginAdminId(e.target.value)} style={inputStyle}>
-                                {listaAdmins.map((a) => (
-                                    <option key={a.id} value={a.id}>
-                                        {a.nombre} ({a.rol === 'superadmin' ? 'Super Admin' : 'Admin'})
-                                    </option>
-                                ))}
-                            </select>
-                        </label>
-                        <label>
-                            PIN de Acceso:
+                            PIN / Contraseña de Acceso:
                             <input
                                 type="password"
-                                placeholder="PIN (por defecto: 1234)"
+                                placeholder="Ingresa tu PIN o contraseña"
                                 required
                                 value={loginAdminPin}
                                 onChange={(e) => setLoginAdminPin(e.target.value)}
@@ -476,6 +551,18 @@ export default function AdminPage() {
                             />
                         </label>
                         <button type="submit" style={btnPrimario}>Entrar al Panel Admin</button>
+                        <button
+                            type="button"
+                            onClick={() => {
+                                limpiarAlertas();
+                                setModoLoginManual(!modoLoginManual);
+                                setLoginAdminNombreManual('');
+                                setLoginAdminPin('');
+                            }}
+                            style={{ background: 'none', border: 'none', color: '#64748b', fontSize: '0.78rem', cursor: 'pointer', textDecoration: 'underline', padding: '0.2rem' }}
+                        >
+                            {modoLoginManual ? 'Seleccionar desde la lista de administradores' : 'Ingresar nombre de usuario manualmente'}
+                        </button>
                         <a href="/" style={{ ...btnSecundario, textAlign: 'center', marginTop: '0.25rem' }}>Volver al Inicio</a>
                     </form>
                 </div>
@@ -490,7 +577,8 @@ export default function AdminPage() {
         configurado: 0
     };
     const esPrimeraEjecucion = Number(configActual.configurado) === 0;
-    const mostrarAsistenteConfig = esPrimeraEjecucion || seccionActiva === 'configuracion';
+    const esDevelopper = adminAutenticado?.rol === 'developper';
+    const mostrarAsistenteConfig = esDevelopper && (esPrimeraEjecucion || seccionActiva === 'configuracion');
 
     const usaStockDirecto = Boolean(configActual.usa_stock_directo);
     const usaVencimiento = Boolean(configActual.usa_vencimiento);
@@ -519,7 +607,7 @@ export default function AdminPage() {
                 <div style={{ padding: '1rem 1.25rem', background: '#0f172a', borderBottom: '1px solid #334155', fontSize: '0.85rem' }}>
                     <div style={{ color: '#94a3b8' }}>Sesión activa:</div>
                     <div style={{ fontWeight: 'bold', color: '#facc15', fontSize: '0.95rem', margin: '0.2rem 0' }}>
-                        {adminAutenticado.rol === 'superadmin' ? '👑 ' : '🛡️ '}
+                        {adminAutenticado.rol === 'developper' ? '💻 ' : adminAutenticado.rol === 'superadmin' ? '👑 ' : '🛡️ '}
                         {adminAutenticado.nombre}
                     </div>
                     <div style={{ fontSize: '0.75rem', color: '#cbd5e1', marginBottom: '0.5rem' }}>
@@ -567,12 +655,14 @@ export default function AdminPage() {
                     >
                         👥 {usaRecetas ? '5.' : '4.'} Usuarios y Roles
                     </button>
-                    <button
-                        onClick={() => { limpiarAlertas(); setSeccionActiva('configuracion'); }}
-                        style={navBtnStyle(mostrarAsistenteConfig)}
-                    >
-                        ⚙️ Modalidad del Negocio
-                    </button>
+                    {esDevelopper && (
+                        <button
+                            onClick={() => { limpiarAlertas(); setSeccionActiva('configuracion'); }}
+                            style={navBtnStyle(mostrarAsistenteConfig)}
+                        >
+                            ⚙️ Modalidad del Negocio
+                        </button>
+                    )}
                 </nav>
 
                 {/* Accesos Rápidos Inferiores */}
@@ -1025,20 +1115,50 @@ export default function AdminPage() {
                                 <section style={cardStyle}>
                                     <h3 style={{ marginTop: 0 }}>📦 Registrar Nuevo Artículo / Producto</h3>
                                     <form onSubmit={handleCrearProducto} style={formCol}>
-                                        <input placeholder="Nombre del artículo (ej. Pastilla de freno, SSD 1TB, Café)" required value={prodNombre} onChange={(e) => setProdNombre(e.target.value)} style={inputStyle} />
+                                        <label style={{ fontSize: '0.85rem', color: '#334155' }}>
+                                            Nombre del Artículo / Producto:
+                                            <input placeholder="Ej. Pastilla de freno, SSD 1TB, Café" required value={prodNombre} onChange={(e) => setProdNombre(e.target.value)} style={inputStyle} />
+                                        </label>
                                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
-                                            <input type="number" step="0.01" placeholder="Precio Venta (Bs)" required value={prodPrecio} onChange={(e) => setProdPrecio(e.target.value)} style={inputStyle} />
-                                            <input type="number" step="0.01" placeholder="Costo Unitario (Bs)" value={prodCosto} onChange={(e) => setProdCosto(e.target.value)} style={inputStyle} />
+                                            <label style={{ fontSize: '0.85rem', color: '#334155' }}>
+                                                Precio de Venta (Bs):
+                                                <input type="number" step="0.01" placeholder="Ej. 50.00" required value={prodPrecio} onChange={(e) => setProdPrecio(e.target.value)} style={inputStyle} />
+                                            </label>
+                                            <label style={{ fontSize: '0.85rem', color: '#334155' }}>
+                                                Costo Unitario Inicial (Bs):
+                                                <input type="number" step="0.01" placeholder="Costo por unidad (Bs)" value={prodCosto} onChange={(e) => setProdCosto(e.target.value)} style={inputStyle} />
+                                            </label>
                                         </div>
                                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
-                                            <input placeholder="Categoría (ej. Repuestos, Hardware)" value={prodCategoria} onChange={(e) => setProdCategoria(e.target.value)} style={inputStyle} />
-                                            <input placeholder="Unidad (unidades, metros, kg, pares)" value={prodUnidad} onChange={(e) => setProdUnidad(e.target.value)} style={inputStyle} />
+                                            <label style={{ fontSize: '0.85rem', color: '#334155' }}>
+                                                Categoría:
+                                                <input placeholder="Ej. Repuestos, Hardware" value={prodCategoria} onChange={(e) => setProdCategoria(e.target.value)} style={inputStyle} />
+                                            </label>
+                                            <label style={{ fontSize: '0.85rem', color: '#334155' }}>
+                                                Unidad de Medida:
+                                                <select value={prodUnidad} onChange={(e) => setProdUnidad(e.target.value)} style={inputStyle}>
+                                                    <option value="unidades">Unidades (u.)</option>
+                                                    <option value="metros">Metros (m)</option>
+                                                    <option value="centimetros">Centímetros (cm)</option>
+                                                    <option value="litros">Litros (L)</option>
+                                                    <option value="mililitros">Mililitros (ml)</option>
+                                                    <option value="kilos">Kilos (kg)</option>
+                                                    <option value="gramos">Gramos (g)</option>
+                                                    <option value="miligramos">Miligramos (mg)</option>
+                                                </select>
+                                            </label>
                                         </div>
 
                                         {usaStockDirecto && (
                                             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
-                                                <input type="number" step="0.01" placeholder="Cantidad / Stock Inicial (vacío = libre)" value={prodStock} onChange={(e) => setProdStock(e.target.value)} style={inputStyle} />
-                                                <input type="number" step="0.01" placeholder="Stock Mínimo de Alerta" value={prodStockMinimo} onChange={(e) => setProdStockMinimo(e.target.value)} style={inputStyle} />
+                                                <label style={{ fontSize: '0.85rem', color: '#334155' }}>
+                                                    Stock Inicial (vacío = venta libre):
+                                                    <input type="number" step="0.01" placeholder="Cantidad disponible hoy" value={prodStock} onChange={(e) => setProdStock(e.target.value)} style={inputStyle} />
+                                                </label>
+                                                <label style={{ fontSize: '0.85rem', color: '#334155' }}>
+                                                    Stock Mínimo de Alerta:
+                                                    <input type="number" step="0.01" placeholder="Avisar cuando baje de..." value={prodStockMinimo} onChange={(e) => setProdStockMinimo(e.target.value)} style={inputStyle} />
+                                                </label>
                                             </div>
                                         )}
 
@@ -1058,10 +1178,10 @@ export default function AdminPage() {
                                     <section style={cardStyle}>
                                         <h3 style={{ marginTop: 0 }}>🔩 Ensamblaje / Receta de Materiales (BOM)</h3>
                                         <p style={{ color: '#555', fontSize: '0.88rem', marginTop: 0 }}>
-                                            Define qué materiales, piezas o insumos componen este producto. El costo se recalcula automáticamente por Costo Promedio Ponderado.
+                                            Define qué materiales, piezas o insumos componen este producto. Puedes indicar la receta en <strong>gramos, mililitros o centímetros</strong> aunque hayas comprado el insumo en <strong>kilos, litros o metros</strong>; el sistema convierte y resta su equivalencia automáticamente.
                                         </p>
                                         <form onSubmit={handleAsignarReceta} style={formCol}>
-                                            <label>
+                                            <label style={{ fontSize: '0.85rem', color: '#334155' }}>
                                                 Producto Final:
                                                 <select value={recetaProdId} onChange={(e) => setRecetaProdId(e.target.value)} style={inputStyle}>
                                                     {(datos.productos || []).map((p) => (
@@ -1069,18 +1189,70 @@ export default function AdminPage() {
                                                     ))}
                                                 </select>
                                             </label>
-                                            <label>
-                                                Material / Componente / Insumo:
-                                                <select value={recetaInsumoId} onChange={(e) => setRecetaInsumoId(e.target.value)} style={inputStyle}>
+                                            <label style={{ fontSize: '0.85rem', color: '#334155' }}>
+                                                Material / Componente / Insumo (en almacén):
+                                                <select
+                                                    value={recetaInsumoId}
+                                                    onChange={(e) => {
+                                                        const nuevoId = e.target.value;
+                                                        setRecetaInsumoId(nuevoId);
+                                                        const ins = (datos.insumos || []).find((i) => String(i.id) === String(nuevoId));
+                                                        if (ins) setRecetaUnidad(ins.unidad_medida);
+                                                    }}
+                                                    style={inputStyle}
+                                                >
                                                     {(datos.insumos || []).map((i) => (
-                                                        <option key={i.id} value={i.id}>{i.nombre} ({i.unidad_medida})</option>
+                                                        <option key={i.id} value={i.id}>
+                                                            {i.nombre} (Almacén en: {i.unidad_medida})
+                                                        </option>
                                                     ))}
                                                 </select>
                                             </label>
-                                            <label>
-                                                Cantidad requerida por unidad:
-                                                <input type="number" step="0.001" placeholder="Ej. 2 unidades o 0.5 metros" required value={recetaCantidad} onChange={(e) => setRecetaCantidad(e.target.value)} style={inputStyle} />
-                                            </label>
+                                            {(() => {
+                                                const insumoSeleccionado = (datos.insumos || []).find((i) => String(i.id) === String(recetaInsumoId));
+                                                const unidadAlmacen = insumoSeleccionado ? insumoSeleccionado.unidad_medida : 'unidades';
+                                                const opcionesReceta = obtenerUnidadesCompatibles(unidadAlmacen);
+                                                const unidadActiva = opcionesReceta.some((o) => o.valor === recetaUnidad) ? recetaUnidad : unidadAlmacen;
+                                                const cantidadConvertida = convertirMedidaReceta(recetaCantidad, unidadActiva, unidadAlmacen);
+
+                                                return (
+                                                    <>
+                                                        <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '0.5rem' }}>
+                                                            <label style={{ fontSize: '0.85rem', color: '#334155' }}>
+                                                                Cantidad requerida por unidad:
+                                                                <input
+                                                                    type="number"
+                                                                    step="0.001"
+                                                                    placeholder="Ej. 300 (si eliges gramos)"
+                                                                    required
+                                                                    value={recetaCantidad}
+                                                                    onChange={(e) => setRecetaCantidad(e.target.value)}
+                                                                    style={inputStyle}
+                                                                />
+                                                            </label>
+                                                            <label style={{ fontSize: '0.85rem', color: '#334155' }}>
+                                                                Unidad de esta Receta:
+                                                                <select
+                                                                    value={unidadActiva}
+                                                                    onChange={(e) => setRecetaUnidad(e.target.value)}
+                                                                    style={inputStyle}
+                                                                >
+                                                                    {opcionesReceta.map((op) => (
+                                                                        <option key={op.valor} value={op.valor}>
+                                                                            {op.etiqueta}
+                                                                        </option>
+                                                                    ))}
+                                                                </select>
+                                                            </label>
+                                                        </div>
+                                                        {cantidadConvertida !== null && Number(recetaCantidad) > 0 && (
+                                                            <div style={{ fontSize: '0.82rem', background: '#e0f2fe', color: '#0369a1', padding: '0.5rem 0.75rem', borderRadius: '6px', border: '1px solid #7dd3fc' }}>
+                                                                🔄 <strong>Equivalencia en almacén:</strong> {recetaCantidad} {unidadActiva} = <strong>{cantidadConvertida} {unidadAlmacen}</strong> que se descontarán por cada unidad vendida.
+                                                            </div>
+                                                        )}
+                                                    </>
+                                                );
+                                            })()}
                                             <button type="submit" style={btnPrimario}>Vincular Material al Producto</button>
                                         </form>
                                     </section>
@@ -1204,7 +1376,7 @@ export default function AdminPage() {
                                     <section style={cardStyle}>
                                         <h3 style={{ marginTop: 0 }}>Registrar Compra de Material / Insumo (CPP - NIC 2)</h3>
                                         <form onSubmit={handleCompraCPP} style={formCol}>
-                                            <label>
+                                            <label style={{ fontSize: '0.85rem', color: '#334155' }}>
                                                 Seleccionar Material / Insumo:
                                                 <select value={compraInsumoId} onChange={(e) => setCompraInsumoId(e.target.value)} style={inputStyle}>
                                                     {(datos.insumos || []).map((i) => (
@@ -1214,8 +1386,14 @@ export default function AdminPage() {
                                                     ))}
                                                 </select>
                                             </label>
-                                            <input type="number" step="0.01" placeholder="Cantidad Comprada" required value={compraCantidad} onChange={(e) => setCompraCantidad(e.target.value)} style={inputStyle} />
-                                            <input type="number" step="0.01" placeholder="Costo Total de la Compra (Bs)" required value={compraCostoTotal} onChange={(e) => setCompraCostoTotal(e.target.value)} style={inputStyle} />
+                                            <label style={{ fontSize: '0.85rem', color: '#334155' }}>
+                                                Cantidad Comprada (según su unidad de medida):
+                                                <input type="number" step="0.01" placeholder="Ej. 10" required value={compraCantidad} onChange={(e) => setCompraCantidad(e.target.value)} style={inputStyle} />
+                                            </label>
+                                            <label style={{ fontSize: '0.85rem', color: '#334155' }}>
+                                                Costo Total Pagado por la Compra (Bs):
+                                                <input type="number" step="0.01" placeholder="Ej. 150.00" required value={compraCostoTotal} onChange={(e) => setCompraCostoTotal(e.target.value)} style={inputStyle} />
+                                            </label>
                                             <button type="submit" style={btnOscuro}>Registrar Compra y Actualizar Costos</button>
                                         </form>
                                     </section>
@@ -1223,13 +1401,37 @@ export default function AdminPage() {
                                     <section style={cardStyle}>
                                         <h3 style={{ marginTop: 0 }}>Registrar Nuevo Material / Insumo</h3>
                                         <form onSubmit={handleCrearInsumo} style={formCol}>
-                                            <input placeholder="Nombre (ej. Tablero Melamina, Memoria RAM, Leche)" required value={insNombre} onChange={(e) => setInsNombre(e.target.value)} style={inputStyle} />
-                                            <input placeholder="Unidad (unidades, metros, litros, kg)" required value={insUnidad} onChange={(e) => setInsUnidad(e.target.value)} style={inputStyle} />
-                                            <input type="number" step="0.01" placeholder="Stock Inicial" value={insStockIni} onChange={(e) => setInsStockIni(e.target.value)} style={inputStyle} />
-                                            <input type="number" step="0.01" placeholder="Costo por Unidad (Bs)" value={insCostoUni} onChange={(e) => setInsCostoUni(e.target.value)} style={inputStyle} />
-                                            <input type="number" step="0.01" placeholder="Stock de Seguridad" value={insStockSeg} onChange={(e) => setInsStockSeg(e.target.value)} style={inputStyle} />
+                                            <label style={{ fontSize: '0.85rem', color: '#334155' }}>
+                                                Nombre del Material, Pieza o Ingrediente:
+                                                <input placeholder="Ej. Memoria RAM, Tablero Melamina, Leche" required value={insNombre} onChange={(e) => setInsNombre(e.target.value)} style={inputStyle} />
+                                            </label>
+                                            <label style={{ fontSize: '0.85rem', color: '#334155' }}>
+                                                Unidad de Medida (Sistema Métrico o Unidades):
+                                                <select value={insUnidad} onChange={(e) => setInsUnidad(e.target.value)} style={inputStyle}>
+                                                    <option value="unidades">Unidades (ej. piezas de PC, tornillos)</option>
+                                                    <option value="metros">Metros (m)</option>
+                                                    <option value="centimetros">Centímetros (cm)</option>
+                                                    <option value="litros">Litros (L)</option>
+                                                    <option value="mililitros">Mililitros (ml)</option>
+                                                    <option value="kilos">Kilos (kg)</option>
+                                                    <option value="gramos">Gramos (g)</option>
+                                                    <option value="miligramos">Miligramos (mg)</option>
+                                                </select>
+                                            </label>
+                                            <label style={{ fontSize: '0.85rem', color: '#334155' }}>
+                                                Stock Inicial Disponible en Almacén:
+                                                <input type="number" step="0.01" placeholder="Cantidad actual (0 si aún no compraste)" value={insStockIni} onChange={(e) => setInsStockIni(e.target.value)} style={inputStyle} />
+                                            </label>
+                                            <label style={{ fontSize: '0.85rem', color: '#334155' }}>
+                                                Costo por Unidad de Medida (Bs):
+                                                <input type="number" step="0.01" placeholder="Cuánto cuesta 1 unidad/medida en Bs" value={insCostoUni} onChange={(e) => setInsCostoUni(e.target.value)} style={inputStyle} />
+                                            </label>
+                                            <label style={{ fontSize: '0.85rem', color: '#334155' }}>
+                                                Stock de Seguridad (Reserva mínima para alerta de reposición):
+                                                <input type="number" step="0.01" placeholder="Cantidad mínima antes de alertar" value={insStockSeg} onChange={(e) => setInsStockSeg(e.target.value)} style={inputStyle} />
+                                            </label>
                                             {usaVencimiento && (
-                                                <label style={{ fontSize: '0.85rem' }}>
+                                                <label style={{ fontSize: '0.85rem', color: '#334155' }}>
                                                     Fecha de Vencimiento:
                                                     <input type="date" value={insFechaVencimiento} onChange={(e) => setInsFechaVencimiento(e.target.value)} style={inputStyle} />
                                                 </label>
@@ -1256,8 +1458,11 @@ export default function AdminPage() {
                                         <input placeholder="PIN o Contraseña inicial" required value={nuevoUsuarioPin} onChange={(e) => setNuevoUsuarioPin(e.target.value)} style={inputStyle} />
                                         <select value={nuevoUsuarioRol} onChange={(e) => setNuevoUsuarioRol(e.target.value)} style={inputStyle}>
                                             <option value="user">Cajero (user)</option>
-                                            {adminAutenticado.rol === 'superadmin' && (
+                                            {(adminAutenticado.rol === 'superadmin' || adminAutenticado.rol === 'developper') && (
                                                 <option value="admin">Administrador (admin) — Exclusivo Super Admin</option>
+                                            )}
+                                            {adminAutenticado.rol === 'developper' && (
+                                                <option value="superadmin">Super Admin (superadmin) — Exclusivo Developper</option>
                                             )}
                                         </select>
                                         <button type="submit" style={btnPrimario}>Crear Usuario</button>
@@ -1265,7 +1470,22 @@ export default function AdminPage() {
                                 </section>
 
                                 <section style={cardStyle}>
-                                    <h3 style={{ marginTop: 0 }}>Directorio de Usuarios y Control de PIN</h3>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.5rem' }}>
+                                        <h3 style={{ margin: 0 }}>Directorio de Usuarios y Control de PIN</h3>
+                                        {adminAutenticado.rol === 'developper' && (
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    setUsuarioCambioPin(adminAutenticado);
+                                                    setPinActualInput('');
+                                                    setNuevoPinInput('');
+                                                }}
+                                                style={{ padding: '0.32rem 0.65rem', background: '#0f172a', color: '#facc15', border: '1px solid #334155', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 'bold' }}
+                                            >
+                                                💻 Cambiar mi PIN (developper)
+                                            </button>
+                                        )}
+                                    </div>
                                     <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
                                         {(datos.usuarios || []).map((u) => {
                                             const esMismoUsuario = Number(u.id) === Number(adminAutenticado.id);

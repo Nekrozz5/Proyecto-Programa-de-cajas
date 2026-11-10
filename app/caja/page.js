@@ -16,6 +16,8 @@ export default function CajaPage() {
     const [usuarioActual, setUsuarioActual] = useState(null);
     const [loginUsuarioId, setLoginUsuarioId] = useState('');
     const [loginPin, setLoginPin] = useState('');
+    const [modoLoginManualCaja, setModoLoginManualCaja] = useState(false);
+    const [loginNombreManualCaja, setLoginNombreManualCaja] = useState('');
     const [mostrarFormPin, setMostrarFormPin] = useState(false);
     const [pinActualCajero, setPinActualCajero] = useState('');
     const [nuevoPinCajero, setNuevoPinCajero] = useState('');
@@ -85,20 +87,29 @@ export default function CajaPage() {
         e.preventDefault();
         limpiarAlertas();
         try {
-            const res = await fetch('/api/caja', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
+            const payload = modoLoginManualCaja
+                ? {
+                    accion: 'login',
+                    nombreUsuario: loginNombreManualCaja.trim(),
+                    pin: loginPin
+                }
+                : {
                     accion: 'login',
                     usuarioId: Number(loginUsuarioId),
                     pin: loginPin
-                })
+                };
+
+            const res = await fetch('/api/caja', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
             });
             const data = await res.json();
             if (!res.ok) throw new Error(data.error);
 
             setUsuarioActual(data.usuario);
             setLoginPin('');
+            setLoginNombreManualCaja('');
             setSeccionActiva('pos');
             setMensaje(`Sesión iniciada como ${data.usuario.nombre} (${data.usuario.rol}).`);
         } catch (err) {
@@ -345,26 +356,40 @@ export default function CajaPage() {
                         </div>
                     )}
                     <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                        <label>
-                            Selecciona tu Usuario:
-                            <select
-                                value={loginUsuarioId}
-                                onChange={(e) => setLoginUsuarioId(e.target.value)}
-                                required
-                                style={inputStyle}
-                            >
-                                {usuarios.map((u) => (
-                                    <option key={u.id} value={u.id}>
-                                        {u.nombre} ({u.rol === 'superadmin' ? 'Super Admin' : u.rol === 'admin' ? 'Administrador' : 'Cajero'})
-                                    </option>
-                                ))}
-                            </select>
-                        </label>
+                        {!modoLoginManualCaja ? (
+                            <label>
+                                Selecciona tu Usuario:
+                                <select
+                                    value={loginUsuarioId}
+                                    onChange={(e) => setLoginUsuarioId(e.target.value)}
+                                    required
+                                    style={inputStyle}
+                                >
+                                    {usuarios.map((u) => (
+                                        <option key={u.id} value={u.id}>
+                                            {u.nombre} ({u.rol === 'superadmin' ? 'Super Admin' : u.rol === 'admin' ? 'Administrador' : 'Cajero'})
+                                        </option>
+                                    ))}
+                                </select>
+                            </label>
+                        ) : (
+                            <label>
+                                Nombre de Usuario:
+                                <input
+                                    type="text"
+                                    placeholder="Ingresa tu nombre de usuario"
+                                    value={loginNombreManualCaja}
+                                    onChange={(e) => setLoginNombreManualCaja(e.target.value)}
+                                    required
+                                    style={inputStyle}
+                                />
+                            </label>
+                        )}
                         <label>
                             PIN / Contraseña:
                             <input
                                 type="password"
-                                placeholder="Ingresa tu PIN (ej. 1234)"
+                                placeholder="Ingresa tu PIN o contraseña"
                                 value={loginPin}
                                 onChange={(e) => setLoginPin(e.target.value)}
                                 required
@@ -373,6 +398,18 @@ export default function CajaPage() {
                         </label>
                         <button type="submit" style={btnPrimario}>
                             Ingresar a Caja
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => {
+                                limpiarAlertas();
+                                setModoLoginManualCaja(!modoLoginManualCaja);
+                                setLoginNombreManualCaja('');
+                                setLoginPin('');
+                            }}
+                            style={{ background: 'none', border: 'none', color: '#64748b', fontSize: '0.78rem', cursor: 'pointer', textDecoration: 'underline', padding: '0.2rem' }}
+                        >
+                            {modoLoginManualCaja ? 'Seleccionar usuario de la lista' : 'Ingresar nombre de usuario manualmente'}
                         </button>
                         <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'space-between' }}>
                             <a href="/" style={{ ...btnSecundario, flex: 1, textAlign: 'center' }}>Inicio</a>

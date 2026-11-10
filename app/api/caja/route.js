@@ -92,7 +92,11 @@ export async function POST(request) {
         const { accion } = body;
 
         if (accion === 'login') {
-            const usuario = await autenticarUsuarioPorId(Number(body.usuarioId), String(body.pin || ''));
+            const usuario = await autenticarUsuarioPorId(
+                Number(body.usuarioId || 0),
+                String(body.pin || ''),
+                body.nombreUsuario || null
+            );
             return NextResponse.json({ ok: true, usuario });
         }
 
@@ -238,7 +242,8 @@ export async function POST(request) {
             const res = await asignarIngredienteReceta(
                 Number(body.productoId),
                 Number(body.insumoId),
-                Number(body.cantidadRequerida)
+                Number(body.cantidadRequerida),
+                body.unidadReceta || null
             );
             return NextResponse.json({ ok: true, receta: res });
         }
