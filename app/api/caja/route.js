@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import {
+    esRolAdministrativo,
     obtenerConfiguracionNegocio,
     guardarConfiguracionNegocio,
     inicializarSistemaPrimeraVez,
@@ -29,18 +30,51 @@ import {
     registrarMermaInsumo,
     asignarIngredienteReceta
 } from '../../../server/queries';
+import {
+    crearTokenSesion,
+    obtenerUsuarioSesion,
+    exigirUsuarioSesion,
+    adjuntarCookieSesion,
+    limpiarCookieSesion
+} from '../../../server/sesion';
 
-// GET /api/caja -> Devuelve configuración, caja abierta, historial de cierres, catálogo, usuarios, insumos y estadísticas
-export async function GET() {
+const ROLES_ADMIN = ['admin', 'superadmin', 'developer'];
+
+// GET /api/caja -> Devuelve configuración, sesión activa y datos según el estado de autenticación
+export async function GET(request) {
     try {
-        const [configuracionNegocio, caja, historialCajas, productos, insumos, usuarios, prediccionInsumos] = await Promise.all([
+        const [usuarioSesion, configuracionNegocio, usuarios] = await Promise.all([
+            obtenerUsuarioSesion(request),
             obtenerConfiguracionNegocio(),
+            obtenerUsuarios()
+        ]);
+
+        // Si no hay sesión autenticada, devolver únicamente lo necesario para el arranque / selector de login
+        if (!usuarioSesion) {
+            return NextResponse.json({
+                usuarioSesion: null,
+                configuracionNegocio,
+                usuarios,
+                cajaAbierta: null,
+                cajaAuditada: null,
+                historialCajas: [],
+                estadisticas: null,
+                movimientos: [],
+                desglosePagos: [],
+                productos: [],
+                insumos: [],
+                prediccionInsumos: []
+            });
+        }
+
+        const esAdmin = esRolAdministrativo(usuarioSesion.rol);
+
+        const [caja, historialCajas, productos, insumos, prediccionInsumos] = await Promise.all([
             obtenerCajaAbierta(),
             obtenerHistorialCajas(),
             obtenerProductos(),
-            obtenerInsumos(),
-            obtenerUsuarios(),
-            obtenerPrediccionComprasInsumos()
+            esAdmin ? obtenerInsumos() : Promise.resolve([]),
+            esAdmin ? obtenerPrediccionComprasInsumos() : Promise.resolve([])
         ]);
 
         // Si no hay caja abierta, usamos la última caja cerrada para que el Admin pueda auditarla
@@ -48,8 +82,10 @@ export async function GET() {
 
         if (!cajaReferencia) {
             return NextResponse.json({
+                usuarioSesion,
                 configuracionNegocio,
                 cajaAbierta: null,
+                cajaAuditada: null,
                 historialCajas,
                 estadisticas: null,
                 movimientos: [],
@@ -62,12 +98,13 @@ export async function GET() {
         }
 
         const [estadisticas, movimientos, desglosePagos] = await Promise.all([
-            obtenerEstadisticasCaja(cajaReferencia.id),
+            esAdmin ? obtenerEstadisticasCaja(cajaReferencia.id) : Promise.resolve(null),
             obtenerMovimientosCaja(cajaReferencia.id),
-            obtenerDesgloseMetodosPago(cajaReferencia.id)
+            esAdmin ? obtenerDesgloseMetodosPago(cajaReferencia.id) : Promise.resolve([])
         ]);
 
         return NextResponse.json({
+            usuarioSesion,
             configuracionNegocio,
             cajaAbierta: caja,
             cajaAuditada: cajaReferencia,
@@ -81,32 +118,54 @@ export async function GET() {
             prediccionInsumos
         });
     } catch (error) {
-        return NextResponse.json({ error: error.message }, { status: 500 });
+        return NextResponse.json({ error: error.message }, { status: error.status || 500 });
     }
 }
 
-// POST /api/caja -> Ejecuta acciones según el campo "accion" enviado desde el frontend
+// POST /api/caja -> Ejecuta acciones usando exclusivamente el usuario de la sesión del servidor
 export async function POST(request) {
     try {
         const body = await request.json();
         const { accion } = body;
 
         if (accion === 'login') {
+            const ip = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
+                || request.headers.get('x-real-ip')
+                || 'local';
             const usuario = await autenticarUsuarioPorId(
                 Number(body.usuarioId || 0),
                 String(body.pin || ''),
-                body.nombreUsuario || null
+                body.nombreUsuario || null,
+                ip
             );
-            return NextResponse.json({ ok: true, usuario });
+            const token = await crearTokenSesion(usuario);
+            const response = NextResponse.json({ ok: true, usuario });
+            adjuntarCookieSesion(response, token);
+            return response;
         }
 
+        if (accion === 'logout') {
+            const response = NextResponse.json({ ok: true });
+            limpiarCookieSesion(response);
+            return response;
+        }
+
+        if (accion === 'instalacion_inicial') {
+            const resultado = await inicializarSistemaPrimeraVez(body);
+            return NextResponse.json({ ok: true, ...resultado });
+        }
+
+        // A partir de aquí, todas las acciones requieren sesión válida en el servidor
+        const usuarioSesion = await exigirUsuarioSesion(request);
+
         if (accion === 'abrir') {
-            const id = await abrirCaja(Number(body.usuarioId), Number(body.montoInicial));
+            const id = await abrirCaja(usuarioSesion.id, body.montoInicial);
             return NextResponse.json({ ok: true, cajaId: id });
         }
 
         if (accion === 'reabrir') {
-            await reabrirCajaConPermiso(Number(body.adminId), Number(body.cajaId), body.motivo);
+            await exigirUsuarioSesion(request, ROLES_ADMIN);
+            await reabrirCajaConPermiso(usuarioSesion.id, Number(body.cajaId), body.motivo);
             return NextResponse.json({ ok: true });
         }
 
@@ -115,10 +174,10 @@ export async function POST(request) {
                 Number(body.cajaId),
                 body.items,
                 body.metodoPago,
-                body.montoRecibido !== undefined && body.montoRecibido !== '' ? Number(body.montoRecibido) : null,
+                body.montoRecibido !== undefined && body.montoRecibido !== null && body.montoRecibido !== '' ? Number(body.montoRecibido) : null,
                 body.descripcion,
-                body.usuarioId ? Number(body.usuarioId) : null,
-                body.cambioEntregado !== undefined && body.cambioEntregado !== '' ? Number(body.cambioEntregado) : null
+                usuarioSesion.id,
+                body.cambioEntregado !== undefined && body.cambioEntregado !== null && body.cambioEntregado !== '' ? Number(body.cambioEntregado) : null
             );
             return NextResponse.json({ ok: true, venta: resultado });
         }
@@ -126,27 +185,29 @@ export async function POST(request) {
         if (accion === 'egreso') {
             const id = await registrarEgreso(
                 Number(body.cajaId),
-                Number(body.monto),
+                body.monto,
                 body.descripcion,
                 body.metodoPago || 'efectivo',
-                body.usuarioId ? Number(body.usuarioId) : null
+                usuarioSesion.id
             );
             return NextResponse.json({ ok: true, movimientoId: id });
         }
 
         if (accion === 'cerrar') {
-            const arqueo = await cerrarCaja(Number(body.cajaId), Number(body.efectivoReal));
+            const arqueo = await cerrarCaja(Number(body.cajaId), body.efectivoReal, usuarioSesion.id);
             return NextResponse.json({ ok: true, arqueo });
         }
 
         if (accion === 'anular') {
-            await anularMovimientoConPermiso(Number(body.adminId), Number(body.movimientoId), body.motivo);
+            await exigirUsuarioSesion(request, ROLES_ADMIN);
+            await anularMovimientoConPermiso(usuarioSesion.id, Number(body.movimientoId), body.motivo);
             return NextResponse.json({ ok: true });
         }
 
         if (accion === 'crear_usuario') {
+            await exigirUsuarioSesion(request, ROLES_ADMIN);
             const id = await crearUsuarioConPermiso(
-                Number(body.adminId),
+                usuarioSesion.id,
                 body.nombre,
                 body.pin,
                 body.rol
@@ -155,31 +216,30 @@ export async function POST(request) {
         }
 
         if (accion === 'borrar_usuario') {
-            await borrarUsuarioConPermiso(Number(body.adminId), Number(body.usuarioABorrarId));
+            await exigirUsuarioSesion(request, ROLES_ADMIN);
+            await borrarUsuarioConPermiso(usuarioSesion.id, Number(body.usuarioABorrarId));
             return NextResponse.json({ ok: true });
         }
 
         if (accion === 'cambiar_password') {
+            const objetivoId = body.usuarioObjetivoId ? Number(body.usuarioObjetivoId) : usuarioSesion.id;
             await cambiarPasswordConPermiso(
-                Number(body.ejecutorId),
-                Number(body.usuarioObjetivoId),
+                usuarioSesion.id,
+                objetivoId,
                 body.nuevoPin,
                 body.pinActual
             );
             return NextResponse.json({ ok: true });
         }
 
-        if (accion === 'instalacion_inicial') {
-            const resultado = await inicializarSistemaPrimeraVez(body);
-            return NextResponse.json({ ok: true, ...resultado });
-        }
-
         if (accion === 'guardar_configuracion') {
-            const config = await guardarConfiguracionNegocio(Number(body.adminId), body);
+            await exigirUsuarioSesion(request, ['developer']);
+            const config = await guardarConfiguracionNegocio(usuarioSesion.id, body);
             return NextResponse.json({ ok: true, configuracionNegocio: config });
         }
 
         if (accion === 'crear_producto') {
+            await exigirUsuarioSesion(request, ROLES_ADMIN);
             const stock = body.stock !== undefined && body.stock !== '' && body.stock !== null
                 ? Number(body.stock)
                 : null;
@@ -197,6 +257,7 @@ export async function POST(request) {
         }
 
         if (accion === 'comprar_producto_directo') {
+            await exigirUsuarioSesion(request, ROLES_ADMIN);
             const res = await registrarCompraProductoDirecto(
                 Number(body.productoId),
                 Number(body.cantidadComprada),
@@ -207,6 +268,7 @@ export async function POST(request) {
         }
 
         if (accion === 'crear_insumo') {
+            await exigirUsuarioSesion(request, ROLES_ADMIN);
             const id = await crearInsumo(
                 body.nombre,
                 body.unidadMedida,
@@ -220,6 +282,7 @@ export async function POST(request) {
         }
 
         if (accion === 'comprar_insumo') {
+            await exigirUsuarioSesion(request, ROLES_ADMIN);
             const res = await registrarCompraInsumo(
                 Number(body.insumoId),
                 Number(body.cantidadComprada),
@@ -230,6 +293,7 @@ export async function POST(request) {
         }
 
         if (accion === 'merma_insumo') {
+            await exigirUsuarioSesion(request, ROLES_ADMIN);
             const res = await registrarMermaInsumo(
                 Number(body.insumoId),
                 Number(body.cantidadPerdida),
@@ -239,6 +303,7 @@ export async function POST(request) {
         }
 
         if (accion === 'asignar_receta') {
+            await exigirUsuarioSesion(request, ROLES_ADMIN);
             const res = await asignarIngredienteReceta(
                 Number(body.productoId),
                 Number(body.insumoId),
@@ -250,6 +315,6 @@ export async function POST(request) {
 
         return NextResponse.json({ error: 'Acción no reconocida' }, { status: 400 });
     } catch (error) {
-        return NextResponse.json({ error: error.message }, { status: 400 });
+        return NextResponse.json({ error: error.message }, { status: error.status || 400 });
     }
 }

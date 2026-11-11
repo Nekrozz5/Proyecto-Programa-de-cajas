@@ -6,3 +6,5 @@ caja.db
 *.db-wal
 *.db-shm
 .env
+.env.local
+.env*.local

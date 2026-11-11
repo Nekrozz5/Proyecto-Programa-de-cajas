@@ -1,8 +1,13 @@
 import { NextResponse } from 'next/server';
 import { generarReporteCSV, obtenerTendenciasVentas } from '../../../server/queries';
+import { exigirUsuarioSesion } from '../../../server/sesion';
+
+const ROLES_ADMIN = ['admin', 'superadmin', 'developer'];
 
 export async function GET(request) {
     try {
+        await exigirUsuarioSesion(request, ROLES_ADMIN);
+
         const { searchParams } = new URL(request.url);
         const formato = searchParams.get('formato');
         const cajaId = searchParams.get('cajaId');
@@ -21,6 +26,6 @@ export async function GET(request) {
         const tendencias = await obtenerTendenciasVentas();
         return NextResponse.json(tendencias);
     } catch (error) {
-        return NextResponse.json({ error: error.message }, { status: 500 });
+        return NextResponse.json({ error: error.message }, { status: error.status || 500 });
     }
 }

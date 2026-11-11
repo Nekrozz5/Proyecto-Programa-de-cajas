@@ -21,7 +21,7 @@ export default function AdminPage() {
     });
     const [tendencias, setTendencias] = useState(null);
 
-    // Sesión obligatoria de Administrador (o acceso oculto de Developper)
+    // Sesión obligatoria de Administrador (o acceso oculto de Developer)
     const [adminAutenticado, setAdminAutenticado] = useState(null);
     const [loginAdminId, setLoginAdminId] = useState('');
     const [loginAdminPin, setLoginAdminPin] = useState('');
@@ -94,15 +94,10 @@ export default function AdminPage() {
     async function cargarTodo() {
         try {
             setCargando(true);
-            const [resCaja, resRep] = await Promise.all([
-                fetch('/api/caja'),
-                fetch('/api/reportes')
-            ]);
+            const resCaja = await fetch('/api/caja');
             const dataCaja = await resCaja.json();
-            const dataRep = await resRep.json();
 
             if (!resCaja.ok) throw new Error(dataCaja.error || 'Error al consultar /api/caja');
-            if (!resRep.ok) throw new Error(dataRep.error || 'Error al consultar /api/reportes');
 
             if (!dataCaja.configuracionNegocio || Number(dataCaja.configuracionNegocio.configurado) === 0 || (dataCaja.usuarios || []).length === 0) {
                 window.location.href = '/';
@@ -110,7 +105,16 @@ export default function AdminPage() {
             }
 
             setDatos(dataCaja);
-            setTendencias(dataRep);
+
+            const sesionAdminValida = dataCaja.usuarioSesion && ['admin', 'superadmin', 'developer'].includes(dataCaja.usuarioSesion.rol);
+            if (sesionAdminValida) {
+                setAdminAutenticado(dataCaja.usuarioSesion);
+                const resRep = await fetch('/api/reportes');
+                if (resRep.ok) {
+                    const dataRep = await resRep.json();
+                    setTendencias(dataRep);
+                }
+            }
 
             if (dataCaja.configuracionNegocio) {
                 const c = dataCaja.configuracionNegocio;
@@ -202,12 +206,20 @@ export default function AdminPage() {
             });
             const data = await res.json();
             if (!res.ok) throw new Error(data.error);
-            if (!['admin', 'superadmin', 'developper'].includes(data.usuario.rol)) {
+            if (!['admin', 'superadmin', 'developer'].includes(data.usuario.rol)) {
+                await fetch('/api/caja', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ accion: 'logout' })
+                }).catch((logoutErr) => {
+                    console.error('Error al revocar sesión no autorizada:', logoutErr);
+                });
                 throw new Error('Acceso denegado: este panel es exclusivo para Administradores y Super Admin.');
             }
             setAdminAutenticado(data.usuario);
             setLoginAdminPin('');
             setLoginAdminNombreManual('');
+            await cargarTodo();
         } catch (err) {
             setError(err.message);
         }
@@ -237,7 +249,6 @@ export default function AdminPage() {
         const ok = await ejecutarAccion(
             {
                 accion: 'guardar_configuracion',
-                adminId: adminAutenticado.id,
                 nombreNegocio: cfgNombreNegocio,
                 modalidadNombre: cfgModalidadNombre,
                 usaStockDirecto: cfgUsaStockDirecto,
@@ -255,7 +266,6 @@ export default function AdminPage() {
         const ok = await ejecutarAccion(
             {
                 accion: 'reabrir',
-                adminId: adminAutenticado.id,
                 cajaId,
                 motivo: motivoReapertura.trim() || 'Revisión administrativa'
             },
@@ -272,7 +282,6 @@ export default function AdminPage() {
         await ejecutarAccion(
             {
                 accion: 'abrir',
-                usuarioId: adminAutenticado.id,
                 montoInicial: Number(nuevoFondoInicial)
             },
             'Nuevo turno de caja habilitado por el Administrador.'
@@ -432,7 +441,6 @@ export default function AdminPage() {
         const ok = await ejecutarAccion(
             {
                 accion: 'anular',
-                adminId: adminAutenticado.id,
                 movimientoId,
                 motivo: motivoAnulacion.trim()
             },
@@ -449,7 +457,6 @@ export default function AdminPage() {
         const ok = await ejecutarAccion(
             {
                 accion: 'crear_usuario',
-                adminId: adminAutenticado.id,
                 nombre: nuevoUsuarioNombre,
                 pin: nuevoUsuarioPin,
                 rol: nuevoUsuarioRol
@@ -466,7 +473,6 @@ export default function AdminPage() {
         await ejecutarAccion(
             {
                 accion: 'borrar_usuario',
-                adminId: adminAutenticado.id,
                 usuarioABorrarId: idBorrar
             },
             `Usuario #${idBorrar} dado de baja lógica.`
@@ -479,7 +485,6 @@ export default function AdminPage() {
         const ok = await ejecutarAccion(
             {
                 accion: 'cambiar_password',
-                ejecutorId: adminAutenticado.id,
                 usuarioObjetivoId: usuarioCambioPin.id,
                 nuevoPin: nuevoPinInput,
                 pinActual: Number(usuarioCambioPin.id) === Number(adminAutenticado.id) ? pinActualInput : null
@@ -497,7 +502,7 @@ export default function AdminPage() {
         return <div style={{ padding: '2rem' }}>Cargando Panel de Administración...</div>;
     }
 
-    const NIVEL_ROL = { user: 1, admin: 2, superadmin: 3, developper: 4 };
+    const NIVEL_ROL = { user: 1, admin: 2, superadmin: 3, developer: 4 };
     const listaAdmins = (datos.usuarios || []).filter((u) => u.rol === 'admin' || u.rol === 'superadmin');
 
     // 1. PANTALLA DE LOGIN SI EL ADMIN AÚN NO INICIÓ SESIÓN
@@ -577,8 +582,8 @@ export default function AdminPage() {
         configurado: 0
     };
     const esPrimeraEjecucion = Number(configActual.configurado) === 0;
-    const esDevelopper = adminAutenticado?.rol === 'developper';
-    const mostrarAsistenteConfig = esDevelopper && (esPrimeraEjecucion || seccionActiva === 'configuracion');
+    const esDeveloper = adminAutenticado?.rol === 'developer';
+    const mostrarAsistenteConfig = esDeveloper && (esPrimeraEjecucion || seccionActiva === 'configuracion');
 
     const usaStockDirecto = Boolean(configActual.usa_stock_directo);
     const usaVencimiento = Boolean(configActual.usa_vencimiento);
@@ -607,14 +612,23 @@ export default function AdminPage() {
                 <div style={{ padding: '1rem 1.25rem', background: '#0f172a', borderBottom: '1px solid #334155', fontSize: '0.85rem' }}>
                     <div style={{ color: '#94a3b8' }}>Sesión activa:</div>
                     <div style={{ fontWeight: 'bold', color: '#facc15', fontSize: '0.95rem', margin: '0.2rem 0' }}>
-                        {adminAutenticado.rol === 'developper' ? '💻 ' : adminAutenticado.rol === 'superadmin' ? '👑 ' : '🛡️ '}
+                        {adminAutenticado.rol === 'developer' ? '💻 ' : adminAutenticado.rol === 'superadmin' ? '👑 ' : '🛡️ '}
                         {adminAutenticado.nombre}
                     </div>
                     <div style={{ fontSize: '0.75rem', color: '#cbd5e1', marginBottom: '0.5rem' }}>
                         Rango: {adminAutenticado.rol.toUpperCase()}
                     </div>
                     <button
-                        onClick={() => setAdminAutenticado(null)}
+                        onClick={async () => {
+                            await fetch('/api/caja', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ accion: 'logout' })
+                            }).catch((err) => {
+                                console.error('Error al cerrar sesión:', err);
+                            });
+                            setAdminAutenticado(null);
+                        }}
                         style={{ width: '100%', padding: '0.35rem', background: '#475569', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8rem' }}
                     >
                         Cerrar Sesión Admin
@@ -655,7 +669,7 @@ export default function AdminPage() {
                     >
                         👥 {usaRecetas ? '5.' : '4.'} Usuarios y Roles
                     </button>
-                    {esDevelopper && (
+                    {esDeveloper && (
                         <button
                             onClick={() => { limpiarAlertas(); setSeccionActiva('configuracion'); }}
                             style={navBtnStyle(mostrarAsistenteConfig)}
@@ -1458,11 +1472,11 @@ export default function AdminPage() {
                                         <input placeholder="PIN o Contraseña inicial" required value={nuevoUsuarioPin} onChange={(e) => setNuevoUsuarioPin(e.target.value)} style={inputStyle} />
                                         <select value={nuevoUsuarioRol} onChange={(e) => setNuevoUsuarioRol(e.target.value)} style={inputStyle}>
                                             <option value="user">Cajero (user)</option>
-                                            {(adminAutenticado.rol === 'superadmin' || adminAutenticado.rol === 'developper') && (
+                                            {(adminAutenticado.rol === 'superadmin' || adminAutenticado.rol === 'developer') && (
                                                 <option value="admin">Administrador (admin) — Exclusivo Super Admin</option>
                                             )}
-                                            {adminAutenticado.rol === 'developper' && (
-                                                <option value="superadmin">Super Admin (superadmin) — Exclusivo Developper</option>
+                                            {adminAutenticado.rol === 'developer' && (
+                                                <option value="superadmin">Super Admin (superadmin) — Exclusivo Developer</option>
                                             )}
                                         </select>
                                         <button type="submit" style={btnPrimario}>Crear Usuario</button>
@@ -1472,7 +1486,7 @@ export default function AdminPage() {
                                 <section style={cardStyle}>
                                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.5rem' }}>
                                         <h3 style={{ margin: 0 }}>Directorio de Usuarios y Control de PIN</h3>
-                                        {adminAutenticado.rol === 'developper' && (
+                                        {adminAutenticado.rol === 'developer' && (
                                             <button
                                                 type="button"
                                                 onClick={() => {
@@ -1482,7 +1496,7 @@ export default function AdminPage() {
                                                 }}
                                                 style={{ padding: '0.32rem 0.65rem', background: '#0f172a', color: '#facc15', border: '1px solid #334155', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 'bold' }}
                                             >
-                                                💻 Cambiar mi PIN (developper)
+                                                💻 Cambiar mi PIN (developer)
                                             </button>
                                         )}
                                     </div>

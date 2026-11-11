@@ -63,6 +63,9 @@ export default function CajaPage() {
             setProductos(data.productos || []);
             setUsuarios(data.usuarios || []);
             setMovimientos(data.cajaAbierta ? (data.movimientos || []) : []);
+            if (data.usuarioSesion) {
+                setUsuarioActual(data.usuarioSesion);
+            }
 
             if (data.usuarios?.length > 0 && !loginUsuarioId) {
                 setLoginUsuarioId(String(data.usuarios[0].id));
@@ -111,14 +114,22 @@ export default function CajaPage() {
             setLoginPin('');
             setLoginNombreManualCaja('');
             setSeccionActiva('pos');
+            await cargarDatos();
             setMensaje(`Sesión iniciada como ${data.usuario.nombre} (${data.usuario.rol}).`);
         } catch (err) {
             setError(err.message);
         }
     }
 
-    function cerrarSesion() {
+    async function cerrarSesion() {
         limpiarAlertas();
+        await fetch('/api/caja', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ accion: 'logout' })
+        }).catch((err) => {
+            console.error('Error al cerrar sesión:', err);
+        });
         setUsuarioActual(null);
         setCarrito([]);
         setSeccionActiva('pos');
@@ -133,7 +144,6 @@ export default function CajaPage() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     accion: 'cambiar_password',
-                    ejecutorId: usuarioActual.id,
                     usuarioObjetivoId: usuarioActual.id,
                     pinActual: pinActualCajero,
                     nuevoPin: nuevoPinCajero
@@ -225,7 +235,6 @@ export default function CajaPage() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     accion: 'abrir',
-                    usuarioId: usuarioActual.id,
                     montoInicial: Number(montoInicial)
                 })
             });
@@ -252,7 +261,6 @@ export default function CajaPage() {
                 body: JSON.stringify({
                     accion: 'vender',
                     cajaId: cajaAbierta.id,
-                    usuarioId: usuarioActual.id,
                     items: carrito.map((i) => ({ productoId: i.productoId, cantidad: i.cantidad })),
                     metodoPago,
                     montoRecibido: metodoPago === 'efectivo' && montoRecibido !== '' ? Number(montoRecibido) : null,
@@ -285,7 +293,6 @@ export default function CajaPage() {
                 body: JSON.stringify({
                     accion: 'egreso',
                     cajaId: cajaAbierta.id,
-                    usuarioId: usuarioActual.id,
                     monto: Number(montoEgreso),
                     descripcion: `${motivoEgreso} (Por: ${usuarioActual.nombre})`,
                     metodoPago: usuarioActual.rol === 'user' ? 'efectivo' : metodoEgreso
@@ -334,8 +341,7 @@ export default function CajaPage() {
         }
     }
 
-    const huboCajasCerradasAntes = historialCajas.some((c) => c.estado === 'cerrada');
-    const puedeAbrirCaja = !huboCajasCerradasAntes || (usuarioActual && (usuarioActual.rol === 'admin' || usuarioActual.rol === 'superadmin'));
+    const puedeAbrirCaja = Boolean(usuarioActual);
 
     if (cargando) {
         return <div style={{ padding: '2rem' }}>Cargando módulo de caja...</div>;
