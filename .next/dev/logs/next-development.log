@@ -1,20 +1,16 @@
-{"timestamp":"00:00:03.680","source":"Server","level":"LOG","message":""}
-{"timestamp":"00:00:07.419","source":"Browser","level":"INFO","message":"Download the React DevTools for a better development experience: https://react.dev/link/react-devtools"}
-{"timestamp":"00:00:09.289","source":"Server","level":"LOG","message":"Conectado exitosamente a la base de datos SQLite local."}
-{"timestamp":"00:00:13.642","source":"Browser","level":"INFO","message":"Download the React DevTools for a better development experience: https://react.dev/link/react-devtools"}
-{"timestamp":"00:01:12.992","source":"Browser","level":"INFO","message":"Download the React DevTools for a better development experience: https://react.dev/link/react-devtools"}
-{"timestamp":"00:02:29.682","source":"Browser","level":"INFO","message":"Download the React DevTools for a better development experience: https://react.dev/link/react-devtools"}
-{"timestamp":"00:15:14.253","source":"Browser","level":"INFO","message":"Download the React DevTools for a better development experience: https://react.dev/link/react-devtools"}
-{"timestamp":"00:15:15.322","source":"Browser","level":"INFO","message":"Download the React DevTools for a better development experience: https://react.dev/link/react-devtools"}
-{"timestamp":"01:00:29.397","source":"Browser","level":"INFO","message":"Download the React DevTools for a better development experience: https://react.dev/link/react-devtools"}
-{"timestamp":"01:01:27.358","source":"Browser","level":"INFO","message":"Download the React DevTools for a better development experience: https://react.dev/link/react-devtools"}
-{"timestamp":"01:01:28.154","source":"Browser","level":"INFO","message":"Download the React DevTools for a better development experience: https://react.dev/link/react-devtools"}
-{"timestamp":"01:01:51.351","source":"Browser","level":"INFO","message":"Download the React DevTools for a better development experience: https://react.dev/link/react-devtools"}
-{"timestamp":"01:02:34.898","source":"Browser","level":"INFO","message":"Download the React DevTools for a better development experience: https://react.dev/link/react-devtools"}
-{"timestamp":"01:03:38.692","source":"Browser","level":"INFO","message":"Download the React DevTools for a better development experience: https://react.dev/link/react-devtools"}
-{"timestamp":"01:03:39.427","source":"Browser","level":"INFO","message":"Download the React DevTools for a better development experience: https://react.dev/link/react-devtools"}
-{"timestamp":"01:04:10.811","source":"Browser","level":"INFO","message":"Download the React DevTools for a better development experience: https://react.dev/link/react-devtools"}
-{"timestamp":"01:05:56.844","source":"Browser","level":"INFO","message":"Download the React DevTools for a better development experience: https://react.dev/link/react-devtools"}
-{"timestamp":"01:05:57.667","source":"Browser","level":"INFO","message":"Download the React DevTools for a better development experience: https://react.dev/link/react-devtools"}
-{"timestamp":"01:05:58.662","source":"Browser","level":"INFO","message":"Download the React DevTools for a better development experience: https://react.dev/link/react-devtools"}
-{"timestamp":"01:05:59.826","source":"Browser","level":"INFO","message":"Download the React DevTools for a better development experience: https://react.dev/link/react-devtools"}
+{"timestamp":"00:00:01.367","source":"Server","level":"LOG","message":""}
+{"timestamp":"00:00:06.274","source":"Browser","level":"INFO","message":"Download the React DevTools for a better development experience: https://react.dev/link/react-devtools"}
+{"timestamp":"00:00:06.431","source":"Server","level":"LOG","message":"Conectado exitosamente a la base de datos SQLite local."}
+{"timestamp":"00:00:06.434","source":"Server","level":"LOG","message":"[Migraciones] Aplicando v1: Esquema base completo, auditoría de anulaciones, FK movimiento_id en insumos, usuario_id NOT NULL en movimientos e índices..."}
+{"timestamp":"00:00:06.453","source":"Server","level":"LOG","message":"[Migraciones] v1 completada exitosamente."}
+{"timestamp":"00:00:06.455","source":"Server","level":"LOG","message":"[Migraciones] Aplicando v2: Migración de rol developper -> developer en tabla usuarios y aseguramiento de cuentas base..."}
+{"timestamp":"00:00:06.467","source":"Server","level":"LOG","message":"[Migraciones] v2 completada exitosamente."}
+{"timestamp":"00:00:06.468","source":"Server","level":"LOG","message":"[Migraciones] Aplicando v3: Hasheo de contraseñas/PIN con bcryptjs y generación única de clave aleatoria o por entorno para developer..."}
+{"timestamp":"00:00:06.542","source":"Server","level":"LOG","message":"=================================================================="}
+{"timestamp":"00:00:06.542","source":"Server","level":"LOG","message":"[SEGURIDAD] Clave aleatoria generada por única vez para 'developer':"}
+{"timestamp":"00:00:06.542","source":"Server","level":"LOG","message":"  Usuario: developer"}
+{"timestamp":"00:00:06.542","source":"Server","level":"LOG","message":"  Clave:   lOZ2-s8qnp8k"}
+{"timestamp":"00:00:06.542","source":"Server","level":"LOG","message":"  (Guárdala ahora o configura DEVELOPER_PASSWORD en .env.local)"}
+{"timestamp":"00:00:06.542","source":"Server","level":"LOG","message":"=================================================================="}
+{"timestamp":"00:00:06.549","source":"Server","level":"LOG","message":"[Migraciones] v3 completada exitosamente."}
+{"timestamp":"00:00:33.065","source":"Browser","level":"INFO","message":"Download the React DevTools for a better development experience: https://react.dev/link/react-devtools"}
