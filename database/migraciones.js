@@ -448,8 +448,96 @@ const MIGRACIONES = [
                 }
             }
         }
+    },
+    {
+        version: 4,
+        descripcion: 'Creación de tabla categorias para catálogo por pestañas y normalización de categorías en productos',
+        up: async (conn) => {
+            await runRaw(conn, `
+                CREATE TABLE IF NOT EXISTS categorias (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    nombre TEXT NOT NULL COLLATE NOCASE UNIQUE,
+                    activo INTEGER DEFAULT 1
+                )
+            `);
+
+            // Sembrar categorías preexistentes desde la tabla productos
+            const prods = await allRaw(conn, `SELECT DISTINCT TRIM(categoria) as cat FROM productos WHERE categoria IS NOT NULL AND TRIM(categoria) != ''`);
+            for (const p of prods) {
+                if (p.cat) {
+                    const partes = p.cat.split(',').map(s => s.trim()).filter(Boolean);
+                    for (const subCat of partes) {
+                        if (subCat.toLowerCase() !== 'todas') {
+                            await runRaw(conn, `INSERT OR IGNORE INTO categorias (nombre, activo) VALUES (?, 1)`, [subCat]);
+                        }
+                    }
+                }
+            }
+        }
+    },
+    {
+        version: 5,
+        descripcion: 'Limpieza de categoría por defecto General en favor de catálogo limpio sin categorías iniciales',
+        up: async (conn) => {
+            await runRaw(conn, `
+                DELETE FROM categorias 
+                WHERE LOWER(nombre) = 'general' 
+                  AND NOT EXISTS (
+                      SELECT 1 FROM productos 
+                      WHERE LOWER(categoria) LIKE '%general%'
+                  )
+            `);
+        }
     }
 ];
+
+async function sincronizarCuentaDeveloper(conn) {
+    let claveEnv = obtenerPasswordDeveloperDesdeEnv();
+    const envLocalPath = path.resolve(process.cwd(), '.env.local');
+
+    if (!claveEnv) {
+        claveEnv = 'developer123';
+        try {
+            const linea = `\nDEVELOPER_PASSWORD=${claveEnv}\n`;
+            if (fs.existsSync(envLocalPath)) {
+                fs.appendFileSync(envLocalPath, linea, 'utf8');
+            } else {
+                fs.writeFileSync(envLocalPath, `DEVELOPER_PASSWORD=${claveEnv}\n`, 'utf8');
+            }
+            console.log("[Seguridad] Se ha configurado automáticamente DEVELOPER_PASSWORD en .env.local.");
+        } catch (err) {
+            console.error('[Seguridad] No se pudo guardar DEVELOPER_PASSWORD en .env.local:', err.message);
+        }
+    }
+
+    try {
+        const devUser = await getRaw(conn, `SELECT id, pin_o_password, activo FROM usuarios WHERE LOWER(nombre) = 'developer' LIMIT 1`);
+        if (devUser) {
+            let coincide = false;
+            try {
+                coincide = await bcrypt.compare(claveEnv, devUser.pin_o_password);
+            } catch (_) {
+                coincide = false;
+            }
+
+            if (!coincide || Number(devUser.activo) !== 1) {
+                const nuevoHash = await bcrypt.hash(claveEnv, BCRYPT_ROUNDS);
+                await runRaw(conn, `UPDATE usuarios SET pin_o_password = ?, activo = 1 WHERE id = ?`, [nuevoHash, devUser.id]);
+                console.log(`[Seguridad] Credencial de 'developer' sincronizada con DEVELOPER_PASSWORD de .env.local.`);
+            }
+        } else {
+            const nuevoHash = await bcrypt.hash(claveEnv, BCRYPT_ROUNDS);
+            await runRaw(
+                conn,
+                `INSERT INTO usuarios (nombre, pin_o_password, rol, activo) VALUES ('developer', ?, 'developer', 1)`,
+                [nuevoHash]
+            );
+            console.log(`[Seguridad] Cuenta 'developer' creada y sincronizada con .env.local.`);
+        }
+    } catch (err) {
+        console.error('[Seguridad] Error al sincronizar cuenta developer:', err.message);
+    }
+}
 
 async function ejecutarMigraciones(conn) {
     await runRaw(conn, `PRAGMA foreign_keys = ON`);
@@ -458,37 +546,38 @@ async function ejecutarMigraciones(conn) {
 
     const pendientes = MIGRACIONES.filter((m) => m.version > versionActual).sort((a, b) => a.version - b.version);
 
-    if (pendientes.length === 0) {
-        return versionActual;
-    }
+    if (pendientes.length > 0) {
+        for (const migracion of pendientes) {
+            console.log(`[Migraciones] Aplicando v${migracion.version}: ${migracion.descripcion}...`);
+            // En SQLite, PRAGMA foreign_keys = OFF debe ejecutarse fuera de la transacción para recrear tablas
+            await runRaw(conn, `PRAGMA foreign_keys = OFF`);
+            await runRaw(conn, `BEGIN IMMEDIATE`);
+            try {
+                await migracion.up(conn);
 
-    for (const migracion of pendientes) {
-        console.log(`[Migraciones] Aplicando v${migracion.version}: ${migracion.descripcion}...`);
-        // En SQLite, PRAGMA foreign_keys = OFF debe ejecutarse fuera de la transacción para recrear tablas
-        await runRaw(conn, `PRAGMA foreign_keys = OFF`);
-        await runRaw(conn, `BEGIN IMMEDIATE`);
-        try {
-            await migracion.up(conn);
+                const violacionesFK = await allRaw(conn, `PRAGMA foreign_key_check`);
+                if (violacionesFK && violacionesFK.length > 0) {
+                    throw new Error(`Violación de integridad referencial detectada en migración v${migracion.version}: ${JSON.stringify(violacionesFK)}`);
+                }
 
-            const violacionesFK = await allRaw(conn, `PRAGMA foreign_key_check`);
-            if (violacionesFK && violacionesFK.length > 0) {
-                throw new Error(`Violación de integridad referencial detectada en migración v${migracion.version}: ${JSON.stringify(violacionesFK)}`);
+                await runRaw(conn, `PRAGMA user_version = ${Number(migracion.version)}`);
+                await runRaw(conn, `COMMIT`);
+                versionActual = migracion.version;
+                console.log(`[Migraciones] v${migracion.version} completada exitosamente.`);
+            } catch (err) {
+                await runRaw(conn, `ROLLBACK`).catch((rollbackErr) => {
+                    console.error(`[Migraciones] Error durante ROLLBACK de v${migracion.version}:`, rollbackErr.message);
+                });
+                console.error(`[Migraciones] Falló la migración v${migracion.version}:`, err.message);
+                throw err;
+            } finally {
+                await runRaw(conn, `PRAGMA foreign_keys = ON`);
             }
-
-            await runRaw(conn, `PRAGMA user_version = ${Number(migracion.version)}`);
-            await runRaw(conn, `COMMIT`);
-            versionActual = migracion.version;
-            console.log(`[Migraciones] v${migracion.version} completada exitosamente.`);
-        } catch (err) {
-            await runRaw(conn, `ROLLBACK`).catch((rollbackErr) => {
-                console.error(`[Migraciones] Error durante ROLLBACK de v${migracion.version}:`, rollbackErr.message);
-            });
-            console.error(`[Migraciones] Falló la migración v${migracion.version}:`, err.message);
-            throw err;
-        } finally {
-            await runRaw(conn, `PRAGMA foreign_keys = ON`);
         }
     }
+
+    // Asegurar y sincronizar la cuenta 'developer' siempre con .env.local
+    await sincronizarCuentaDeveloper(conn);
 
     return versionActual;
 }

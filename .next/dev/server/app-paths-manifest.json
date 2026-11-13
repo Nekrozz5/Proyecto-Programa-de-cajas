@@ -2,5 +2,6 @@
   "/admin/page": "app/admin/page.js",
   "/api/caja/route": "app/api/caja/route.js",
   "/api/reportes/route": "app/api/reportes/route.js",
+  "/caja/page": "app/caja/page.js",
   "/page": "app/page.js"
 }

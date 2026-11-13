@@ -41,17 +41,20 @@ export default function AdminPage() {
     const [mensaje, setMensaje] = useState(null);
     const [error, setError] = useState(null);
 
+    // Categorías y Pestañas
+    const [categoriaTabActiva, setCategoriaTabActiva] = useState('todas');
+    const [mostrarModalNuevaCat, setMostrarModalNuevaCat] = useState(false);
+    const [nuevaCatNombre, setNuevaCatNombre] = useState('');
+
     // Formularios de Catálogo de Artículos / Productos
     const [prodNombre, setProdNombre] = useState('');
     const [prodPrecio, setProdPrecio] = useState('');
-    const [prodCosto, setProdCosto] = useState('0');
-    const [prodCategoria, setProdCategoria] = useState('General');
-    const [prodUnidad, setProdUnidad] = useState('unidades');
-    const [prodStock, setProdStock] = useState('');
-    const [prodStockMinimo, setProdStockMinimo] = useState('2');
-    const [prodFechaVencimiento, setProdFechaVencimiento] = useState('');
+    const [prodCategorias, setProdCategorias] = useState([]);
+    const [tipoComposicion, setTipoComposicion] = useState('unitario'); // 'unitario' | 'receta' | 'libre'
+    const [insumoUnitarioId, setInsumoUnitarioId] = useState('');
+    const [filasReceta, setFilasReceta] = useState([{ insumoId: '', cantidad: '', unidadReceta: '' }]);
 
-    // Reabastecimiento de Artículo Directo (con CPP)
+    // Compatibilidad y Reabastecimiento de Artículo Directo (con CPP)
     const [compraProdId, setCompraProdId] = useState('');
     const [compraProdCantidad, setCompraProdCantidad] = useState('');
     const [compraProdCostoTotal, setCompraProdCostoTotal] = useState('');
@@ -63,10 +66,13 @@ export default function AdminPage() {
     const [insStockIni, setInsStockIni] = useState('0');
     const [insCostoUni, setInsCostoUni] = useState('0');
     const [insStockSeg, setInsStockSeg] = useState('1');
+    const [insTieneVencimiento, setInsTieneVencimiento] = useState(false);
     const [insFechaVencimiento, setInsFechaVencimiento] = useState('');
+    const [insProveedor, setInsProveedor] = useState('');
 
     // Compra CPP de Insumo y Receta / Ensamblaje
     const [compraInsumoId, setCompraInsumoId] = useState('');
+    const [compraDistribuidora, setCompraDistribuidora] = useState('');
     const [compraCantidad, setCompraCantidad] = useState('');
     const [compraCostoTotal, setCompraCostoTotal] = useState('');
 
@@ -85,7 +91,7 @@ export default function AdminPage() {
     const [motivoReapertura, setMotivoReapertura] = useState('Reconteo / Corrección de cierre');
 
     const [movimientoAAnularId, setMovimientoAAnularId] = useState(null);
-    const [motivoAnulacion, setMotivoAnulacion] = useState('Error de cobro');
+    const [motivoAnulacion, setMotivoAnulacion] = useState('');
 
     const [usuarioCambioPin, setUsuarioCambioPin] = useState(null);
     const [pinActualInput, setPinActualInput] = useState('');
@@ -114,6 +120,8 @@ export default function AdminPage() {
                     const dataRep = await resRep.json();
                     setTendencias(dataRep);
                 }
+            } else {
+                setAdminAutenticado(null);
             }
 
             if (dataCaja.configuracionNegocio) {
@@ -136,7 +144,12 @@ export default function AdminPage() {
             }
             if (dataCaja.productos?.length > 0) {
                 if (!recetaProdId) setRecetaProdId(String(dataCaja.productos[0].id));
-                if (!compraProdId) setCompraProdId(String(dataCaja.productos[0].id));
+                const directos = dataCaja.productos.filter((p) => p.tipo_inventario === 'directo');
+                if (directos.length > 0) {
+                    setCompraProdId((prev) => (directos.some((d) => String(d.id) === String(prev)) ? prev : String(directos[0].id)));
+                } else {
+                    setCompraProdId('');
+                }
             }
         } catch (err) {
             setError(err.message);
@@ -148,6 +161,39 @@ export default function AdminPage() {
     useEffect(() => {
         cargarTodo();
     }, []);
+
+    // Cierre automático de sesión por inactividad para developer y administradores (15 minutos)
+    useEffect(() => {
+        if (!adminAutenticado) return;
+
+        const MINUTOS_INACTIVIDAD = adminAutenticado.rol === 'developer' ? 15 : 20;
+        const TIEMPO_LIMITE_MS = MINUTOS_INACTIVIDAD * 60 * 1000;
+        let timerInactividad = null;
+
+        const reiniciarTemporizador = () => {
+            if (timerInactividad) clearTimeout(timerInactividad);
+            timerInactividad = setTimeout(async () => {
+                try {
+                    await fetch('/api/caja', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ accion: 'logout' })
+                    });
+                } catch (_) {}
+                setAdminAutenticado(null);
+                setError(`Tu sesión de ${adminAutenticado.rol} se ha cerrado automáticamente tras ${MINUTOS_INACTIVIDAD} minutos de inactividad por seguridad.`);
+            }, TIEMPO_LIMITE_MS);
+        };
+
+        const eventos = ['mousedown', 'mousemove', 'keydown', 'scroll', 'touchstart'];
+        eventos.forEach((ev) => window.addEventListener(ev, reiniciarTemporizador, { passive: true }));
+        reiniciarTemporizador();
+
+        return () => {
+            if (timerInactividad) clearTimeout(timerInactividad);
+            eventos.forEach((ev) => window.removeEventListener(ev, reiniciarTemporizador));
+        };
+    }, [adminAutenticado]);
 
     function limpiarAlertas() {
         setMensaje(null);
@@ -221,6 +267,7 @@ export default function AdminPage() {
             setLoginAdminNombreManual('');
             await cargarTodo();
         } catch (err) {
+            setLoginAdminPin('');
             setError(err.message);
         }
     }
@@ -288,27 +335,116 @@ export default function AdminPage() {
         );
     }
 
+    async function handleCrearCategoria(e) {
+        e?.preventDefault();
+        const nom = nuevaCatNombre.trim();
+        if (!nom) return;
+        if (nom.toLowerCase() === 'todas') {
+            setError('No puedes crear una categoría llamada "Todas".');
+            return;
+        }
+        const ok = await ejecutarAccion(
+            { accion: 'crear_categoria', nombre: nom },
+            `Categoría "${nom}" creada exitosamente.`
+        );
+        if (ok) {
+            setNuevaCatNombre('');
+            setMostrarModalNuevaCat(false);
+            setCategoriaTabActiva(nom);
+            setProdCategorias((prev) => {
+                const existe = prev.some((c) => c.toLowerCase() === nom.toLowerCase());
+                return existe ? prev : [...prev, nom];
+            });
+        }
+    }
+
+    function toggleCategoriaProducto(nomCat) {
+        if (!nomCat) return;
+        setProdCategorias((prev) => {
+            const existe = prev.some((c) => c.toLowerCase() === nomCat.toLowerCase());
+            if (existe) {
+                return prev.filter((c) => c.toLowerCase() !== nomCat.toLowerCase());
+            } else {
+                return [...prev, nomCat];
+            }
+        });
+    }
+
+    function agregarFilaReceta() {
+        if (filasReceta.length >= 30) {
+            setError('Límite alcanzado: una receta no puede tener más de 30 insumos.');
+            return;
+        }
+        const primerInsumo = (datos.insumos || [])[0];
+        setFilasReceta([
+            ...filasReceta,
+            {
+                insumoId: primerInsumo ? String(primerInsumo.id) : '',
+                cantidad: '',
+                unidadReceta: primerInsumo ? primerInsumo.unidad_medida : 'unidades'
+            }
+        ]);
+    }
+
+    function quitarFilaReceta(index) {
+        if (filasReceta.length <= 1) return;
+        setFilasReceta(filasReceta.filter((_, i) => i !== index));
+    }
+
+    function cambiarFilaReceta(index, campo, valor) {
+        const copia = [...filasReceta];
+        copia[index] = { ...copia[index], [campo]: valor };
+        if (campo === 'insumoId') {
+            const ins = (datos.insumos || []).find((i) => String(i.id) === String(valor));
+            if (ins) {
+                copia[index].unidadReceta = ins.unidad_medida;
+            }
+        }
+        setFilasReceta(copia);
+    }
+
     async function handleCrearProducto(e) {
         e.preventDefault();
+        limpiarAlertas();
+
+        const catFinal = prodCategorias.join(', ');
+        const payload = {
+            accion: 'crear_producto',
+            nombre: prodNombre,
+            precio: prodPrecio,
+            categoria: catFinal,
+            tipoComposicion
+        };
+
+        if (tipoComposicion === 'unitario') {
+            if (!insumoUnitarioId) {
+                setError('Por favor selecciona el insumo de inventario para la venta unitaria.');
+                return;
+            }
+            payload.insumoUnitarioId = Number(insumoUnitarioId);
+        } else if (tipoComposicion === 'receta') {
+            const insumosLimpio = filasReceta.filter((f) => f.insumoId && Number(f.cantidad) > 0);
+            if (insumosLimpio.length === 0) {
+                setError('Debes agregar al menos un insumo con cantidad mayor a 0 para la receta.');
+                return;
+            }
+            if (insumosLimpio.length > 30) {
+                setError('Límite excedido: No se pueden agregar más de 30 insumos en una receta.');
+                return;
+            }
+            payload.insumosReceta = insumosLimpio;
+        }
+
         const ok = await ejecutarAccion(
-            {
-                accion: 'crear_producto',
-                nombre: prodNombre,
-                precio: prodPrecio,
-                costo: prodCosto,
-                categoria: prodCategoria,
-                unidadMedida: prodUnidad,
-                stock: cfgUsaStockDirecto ? prodStock : null,
-                stockMinimo: cfgUsaStockDirecto ? prodStockMinimo : 0,
-                fechaVencimiento: cfgUsaVencimiento ? prodFechaVencimiento : null
-            },
-            `Artículo "${prodNombre}" registrado en el catálogo.`
+            payload,
+            `Artículo "${prodNombre}" registrado en el catálogo con costo y stock automáticos.`
         );
         if (ok) {
             setProdNombre('');
             setProdPrecio('');
-            setProdStock('');
-            setProdFechaVencimiento('');
+            setInsumoUnitarioId('');
+            setFilasReceta([{ insumoId: '', cantidad: '', unidadReceta: '' }]);
+            setProdCategorias(categoriaTabActiva !== 'todas' ? [categoriaTabActiva] : []);
         }
     }
 
@@ -333,6 +469,7 @@ export default function AdminPage() {
 
     async function handleCrearInsumo(e) {
         e.preventDefault();
+        const distLimpia = insProveedor.trim();
         const ok = await ejecutarAccion(
             {
                 accion: 'crear_insumo',
@@ -341,7 +478,8 @@ export default function AdminPage() {
                 stockInicial: insStockIni,
                 costoPorUnidad: insCostoUni,
                 stockSeguridad: insStockSeg,
-                fechaVencimiento: cfgUsaVencimiento ? insFechaVencimiento : null
+                fechaVencimiento: insTieneVencimiento && insFechaVencimiento ? insFechaVencimiento : null,
+                proveedor: distLimpia
             },
             `Material / Insumo "${insNombre}" registrado.`
         );
@@ -349,25 +487,31 @@ export default function AdminPage() {
             setInsNombre('');
             setInsStockIni('0');
             setInsCostoUni('0');
+            setInsTieneVencimiento(false);
             setInsFechaVencimiento('');
+            setInsProveedor('');
         }
     }
 
     async function handleCompraCPP(e) {
         e.preventDefault();
+        const distLimpia = compraDistribuidora.trim();
+        const motivoCompra = distLimpia ? `Distribuidora: ${distLimpia}` : 'Compra con Costo Promedio Ponderado';
         const ok = await ejecutarAccion(
             {
                 accion: 'comprar_insumo',
                 insumoId: compraInsumoId,
                 cantidadComprada: compraCantidad,
                 costoTotalCompra: compraCostoTotal,
-                motivo: 'Compra con Costo Promedio Ponderado'
+                distribuidora: distLimpia,
+                motivo: motivoCompra
             },
             'Compra registrada con Costo Promedio Ponderado (NIC 2) y costos de ensamblaje/recetas recalculados.'
         );
         if (ok) {
             setCompraCantidad('');
             setCompraCostoTotal('');
+            setCompraDistribuidora('');
         }
     }
 
@@ -434,8 +578,8 @@ export default function AdminPage() {
     }
 
     async function confirmarAnularMovimiento(movimientoId) {
-        if (!motivoAnulacion.trim()) {
-            setError('Debes ingresar el motivo de la anulación.');
+        if (!motivoAnulacion || motivoAnulacion.trim().length < 3) {
+            setError('Debes ingresar un motivo descriptivo y justificado para realizar la anulación.');
             return;
         }
         const ok = await ejecutarAccion(
@@ -448,7 +592,7 @@ export default function AdminPage() {
         );
         if (ok) {
             setMovimientoAAnularId(null);
-            setMotivoAnulacion('Error de cobro');
+            setMotivoAnulacion('');
         }
     }
 
@@ -1084,14 +1228,15 @@ export default function AdminPage() {
                                                                         <div style={{ display: 'flex', gap: '0.3rem' }}>
                                                                             <button
                                                                                 type="button"
+                                                                                disabled={!motivoAnulacion || motivoAnulacion.trim().length < 3}
                                                                                 onClick={() => confirmarAnularMovimiento(m.id)}
-                                                                                style={{ padding: '0.25rem 0.5rem', background: '#dc2626', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.75rem', fontWeight: 'bold' }}
+                                                                                style={{ padding: '0.25rem 0.5rem', background: (!motivoAnulacion || motivoAnulacion.trim().length < 3) ? '#94a3b8' : '#dc2626', color: '#fff', border: 'none', borderRadius: '4px', cursor: (!motivoAnulacion || motivoAnulacion.trim().length < 3) ? 'not-allowed' : 'pointer', fontSize: '0.75rem', fontWeight: 'bold' }}
                                                                             >
                                                                                 Confirmar
                                                                             </button>
                                                                             <button
                                                                                 type="button"
-                                                                                onClick={() => setMovimientoAAnularId(null)}
+                                                                                onClick={() => { setMovimientoAAnularId(null); setMotivoAnulacion(''); }}
                                                                                 style={{ padding: '0.25rem 0.5rem', background: '#64748b', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.75rem' }}
                                                                             >
                                                                                 Cancelar
@@ -1103,7 +1248,7 @@ export default function AdminPage() {
                                                                         type="button"
                                                                         onClick={() => {
                                                                             setMovimientoAAnularId(m.id);
-                                                                            setMotivoAnulacion('Error de cobro');
+                                                                            setMotivoAnulacion('');
                                                                         }}
                                                                         style={{ padding: '0.3rem 0.65rem', background: '#dc2626', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
                                                                     >
@@ -1124,226 +1269,661 @@ export default function AdminPage() {
                         {/* ==========================================
                             MÓDULO 3: CATÁLOGO, STOCK DIRECTO Y ENSAMBLAJE
                            ========================================== */}
-                        {seccionActiva === 'catalogo' && (
-                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
-                                <section style={cardStyle}>
-                                    <h3 style={{ marginTop: 0 }}>📦 Registrar Nuevo Artículo / Producto</h3>
-                                    <form onSubmit={handleCrearProducto} style={formCol}>
-                                        <label style={{ fontSize: '0.85rem', color: '#334155' }}>
-                                            Nombre del Artículo / Producto:
-                                            <input placeholder="Ej. Pastilla de freno, SSD 1TB, Café" required value={prodNombre} onChange={(e) => setProdNombre(e.target.value)} style={inputStyle} />
-                                        </label>
-                                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
-                                            <label style={{ fontSize: '0.85rem', color: '#334155' }}>
-                                                Precio de Venta (Bs):
-                                                <input type="number" step="0.01" placeholder="Ej. 50.00" required value={prodPrecio} onChange={(e) => setProdPrecio(e.target.value)} style={inputStyle} />
-                                            </label>
-                                            <label style={{ fontSize: '0.85rem', color: '#334155' }}>
-                                                Costo Unitario Inicial (Bs):
-                                                <input type="number" step="0.01" placeholder="Costo por unidad (Bs)" value={prodCosto} onChange={(e) => setProdCosto(e.target.value)} style={inputStyle} />
-                                            </label>
-                                        </div>
-                                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
-                                            <label style={{ fontSize: '0.85rem', color: '#334155' }}>
-                                                Categoría:
-                                                <input placeholder="Ej. Repuestos, Hardware" value={prodCategoria} onChange={(e) => setProdCategoria(e.target.value)} style={inputStyle} />
-                                            </label>
-                                            <label style={{ fontSize: '0.85rem', color: '#334155' }}>
-                                                Unidad de Medida:
-                                                <select value={prodUnidad} onChange={(e) => setProdUnidad(e.target.value)} style={inputStyle}>
-                                                    <option value="unidades">Unidades (u.)</option>
-                                                    <option value="metros">Metros (m)</option>
-                                                    <option value="centimetros">Centímetros (cm)</option>
-                                                    <option value="litros">Litros (L)</option>
-                                                    <option value="mililitros">Mililitros (ml)</option>
-                                                    <option value="kilos">Kilos (kg)</option>
-                                                    <option value="gramos">Gramos (g)</option>
-                                                    <option value="miligramos">Miligramos (mg)</option>
-                                                </select>
-                                            </label>
-                                        </div>
+                        {seccionActiva === 'catalogo' && (() => {
+                            const insumoUnitarioSeleccionado = (datos.insumos || []).find((i) => String(i.id) === String(insumoUnitarioId));
+                            let costoEstimado = 0;
+                            if (tipoComposicion === 'unitario') {
+                                costoEstimado = insumoUnitarioSeleccionado ? Number(insumoUnitarioSeleccionado.costo_por_unidad || 0) : 0;
+                            } else if (tipoComposicion === 'receta') {
+                                for (const f of filasReceta) {
+                                    if (!f.insumoId || !f.cantidad) continue;
+                                    const ins = (datos.insumos || []).find((i) => String(i.id) === String(f.insumoId));
+                                    if (!ins) continue;
+                                    const cant = Number(f.cantidad) || 0;
+                                    const convertida = f.unidadReceta
+                                        ? convertirMedidaReceta(cant, f.unidadReceta, ins.unidad_medida)
+                                        : cant;
+                                    if (convertida !== null) {
+                                        costoEstimado += convertida * Number(ins.costo_por_unidad || 0);
+                                    }
+                                }
+                            }
+                            const gananciaEstimada = Number(prodPrecio || 0) - costoEstimado;
+                            const margenPorcentaje = Number(prodPrecio) > 0 ? (gananciaEstimada / Number(prodPrecio)) * 100 : 0;
 
-                                        {usaStockDirecto && (
-                                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
-                                                <label style={{ fontSize: '0.85rem', color: '#334155' }}>
-                                                    Stock Inicial (vacío = venta libre):
-                                                    <input type="number" step="0.01" placeholder="Cantidad disponible hoy" value={prodStock} onChange={(e) => setProdStock(e.target.value)} style={inputStyle} />
-                                                </label>
-                                                <label style={{ fontSize: '0.85rem', color: '#334155' }}>
-                                                    Stock Mínimo de Alerta:
-                                                    <input type="number" step="0.01" placeholder="Avisar cuando baje de..." value={prodStockMinimo} onChange={(e) => setProdStockMinimo(e.target.value)} style={inputStyle} />
-                                                </label>
-                                            </div>
-                                        )}
+                            const productosFiltrados = (datos.productos || []).filter((p) => {
+                                if (categoriaTabActiva === 'todas') return true;
+                                const cats = (p.categoria || '').split(',').map((c) => c.trim().toLowerCase());
+                                return cats.includes(categoriaTabActiva.toLowerCase());
+                            });
 
-                                        {usaVencimiento && (
-                                            <label style={{ fontSize: '0.85rem', color: '#334155' }}>
-                                                Fecha de Vencimiento del Lote:
-                                                <input type="date" value={prodFechaVencimiento} onChange={(e) => setProdFechaVencimiento(e.target.value)} style={inputStyle} />
-                                            </label>
-                                        )}
-
-                                        <button type="submit" style={btnPrimario}>Guardar en Catálogo</button>
-                                    </form>
-                                </section>
-
-                                {/* Si usa Recetas/Ensamblaje muestra el constructor BOM; si no, muestra Reabastecimiento Directo con CPP */}
-                                {usaRecetas ? (
-                                    <section style={cardStyle}>
-                                        <h3 style={{ marginTop: 0 }}>🔩 Ensamblaje / Receta de Materiales (BOM)</h3>
-                                        <p style={{ color: '#555', fontSize: '0.88rem', marginTop: 0 }}>
-                                            Define qué materiales, piezas o insumos componen este producto. Puedes indicar la receta en <strong>gramos, mililitros o centímetros</strong> aunque hayas comprado el insumo en <strong>kilos, litros o metros</strong>; el sistema convierte y resta su equivalencia automáticamente.
-                                        </p>
-                                        <form onSubmit={handleAsignarReceta} style={formCol}>
-                                            <label style={{ fontSize: '0.85rem', color: '#334155' }}>
-                                                Producto Final:
-                                                <select value={recetaProdId} onChange={(e) => setRecetaProdId(e.target.value)} style={inputStyle}>
-                                                    {(datos.productos || []).map((p) => (
-                                                        <option key={p.id} value={p.id}>{p.nombre} ({p.tipo_inventario})</option>
-                                                    ))}
-                                                </select>
-                                            </label>
-                                            <label style={{ fontSize: '0.85rem', color: '#334155' }}>
-                                                Material / Componente / Insumo (en almacén):
-                                                <select
-                                                    value={recetaInsumoId}
-                                                    onChange={(e) => {
-                                                        const nuevoId = e.target.value;
-                                                        setRecetaInsumoId(nuevoId);
-                                                        const ins = (datos.insumos || []).find((i) => String(i.id) === String(nuevoId));
-                                                        if (ins) setRecetaUnidad(ins.unidad_medida);
-                                                    }}
-                                                    style={inputStyle}
-                                                >
-                                                    {(datos.insumos || []).map((i) => (
-                                                        <option key={i.id} value={i.id}>
-                                                            {i.nombre} (Almacén en: {i.unidad_medida})
-                                                        </option>
-                                                    ))}
-                                                </select>
-                                            </label>
-                                            {(() => {
-                                                const insumoSeleccionado = (datos.insumos || []).find((i) => String(i.id) === String(recetaInsumoId));
-                                                const unidadAlmacen = insumoSeleccionado ? insumoSeleccionado.unidad_medida : 'unidades';
-                                                const opcionesReceta = obtenerUnidadesCompatibles(unidadAlmacen);
-                                                const unidadActiva = opcionesReceta.some((o) => o.valor === recetaUnidad) ? recetaUnidad : unidadAlmacen;
-                                                const cantidadConvertida = convertirMedidaReceta(recetaCantidad, unidadActiva, unidadAlmacen);
-
+                            return (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+                                    {/* PESTAÑAS HORIZONTALES DE CATEGORÍAS */}
+                                    <div style={{ background: '#fff', padding: '0.85rem 1.25rem', borderRadius: '10px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', border: '1px solid #e2e8f0' }}>
+                                        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                                            <span style={{ fontSize: '0.85rem', fontWeight: 'bold', color: '#475569', marginRight: '0.25rem' }}>
+                                                Categorías:
+                                            </span>
+                                            <button
+                                                type="button"
+                                                onClick={() => setCategoriaTabActiva('todas')}
+                                                style={{
+                                                    padding: '0.4rem 0.9rem',
+                                                    borderRadius: '999px',
+                                                    border: 'none',
+                                                    fontWeight: 'bold',
+                                                    fontSize: '0.84rem',
+                                                    cursor: 'pointer',
+                                                    background: categoriaTabActiva === 'todas' ? '#0284c7' : '#f1f5f9',
+                                                    color: categoriaTabActiva === 'todas' ? '#fff' : '#334155'
+                                                }}
+                                            >
+                                                🌐 Todas ({(datos.productos || []).length})
+                                            </button>
+                                            {(datos.categorias || []).map((cat) => {
+                                                const cant = (datos.productos || []).filter((p) => {
+                                                    const cats = (p.categoria || '').split(',').map((c) => c.trim().toLowerCase());
+                                                    return cats.includes(cat.nombre?.toLowerCase());
+                                                }).length;
+                                                const activa = categoriaTabActiva.toLowerCase() === cat.nombre?.toLowerCase();
                                                 return (
-                                                    <>
-                                                        <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '0.5rem' }}>
-                                                            <label style={{ fontSize: '0.85rem', color: '#334155' }}>
-                                                                Cantidad requerida por unidad:
-                                                                <input
-                                                                    type="number"
-                                                                    step="0.001"
-                                                                    placeholder="Ej. 300 (si eliges gramos)"
-                                                                    required
-                                                                    value={recetaCantidad}
-                                                                    onChange={(e) => setRecetaCantidad(e.target.value)}
-                                                                    style={inputStyle}
-                                                                />
-                                                            </label>
-                                                            <label style={{ fontSize: '0.85rem', color: '#334155' }}>
-                                                                Unidad de esta Receta:
-                                                                <select
-                                                                    value={unidadActiva}
-                                                                    onChange={(e) => setRecetaUnidad(e.target.value)}
-                                                                    style={inputStyle}
+                                                    <button
+                                                        key={cat.id || cat.nombre}
+                                                        type="button"
+                                                        onClick={() => {
+                                                            setCategoriaTabActiva(cat.nombre);
+                                                            setProdCategorias([cat.nombre]);
+                                                        }}
+                                                        style={{
+                                                            padding: '0.4rem 0.9rem',
+                                                            borderRadius: '999px',
+                                                            border: 'none',
+                                                            fontWeight: 'bold',
+                                                            fontSize: '0.84rem',
+                                                            cursor: 'pointer',
+                                                            background: activa ? '#0284c7' : '#f1f5f9',
+                                                            color: activa ? '#fff' : '#334155'
+                                                        }}
+                                                    >
+                                                        🏷️ {cat.nombre} ({cant})
+                                                    </button>
+                                                );
+                                            })}
+                                            <button
+                                                type="button"
+                                                onClick={() => setMostrarModalNuevaCat(!mostrarModalNuevaCat)}
+                                                style={{
+                                                    padding: '0.35rem 0.8rem',
+                                                    borderRadius: '999px',
+                                                    border: '1px dashed #0284c7',
+                                                    background: '#f0f9ff',
+                                                    color: '#0284c7',
+                                                    fontWeight: 'bold',
+                                                    fontSize: '0.82rem',
+                                                    cursor: 'pointer'
+                                                }}
+                                            >
+                                                ➕ {mostrarModalNuevaCat ? 'Cancelar' : 'Nueva Categoría'}
+                                            </button>
+                                        </div>
+
+                                        {/* Formulario rápido para crear categoría */}
+                                        {mostrarModalNuevaCat && (
+                                            <form onSubmit={handleCrearCategoria} style={{ marginTop: '0.85rem', display: 'flex', gap: '0.5rem', alignItems: 'center', background: '#f8fafc', padding: '0.65rem 0.85rem', borderRadius: '8px', border: '1px solid #cbd5e1' }}>
+                                                <input
+                                                    type="text"
+                                                    placeholder="Nombre de la nueva categoría (Ej. Bebidas, Repuestos, Postres)"
+                                                    required
+                                                    value={nuevaCatNombre}
+                                                    onChange={(e) => setNuevaCatNombre(e.target.value)}
+                                                    style={{ ...inputStyle, margin: 0, flex: 1 }}
+                                                />
+                                                <button type="submit" style={{ ...btnPrimario, padding: '0.55rem 1rem' }}>
+                                                    Guardar Categoría
+                                                </button>
+                                            </form>
+                                        )}
+                                    </div>
+
+                                    {/* CUERPO PRINCIPAL DEL CATÁLOGO: FORMULARIO Y RESUMEN */}
+                                    <div style={{ display: 'grid', gridTemplateColumns: '1.25fr 0.95fr', gap: '1.5rem', alignItems: 'start' }}>
+                                        {/* FORMULARIO SIMPLIFICADO DE REGISTRO */}
+                                        <section style={cardStyle}>
+                                            <h3 style={{ marginTop: 0, marginBottom: '0.35rem' }}>📦 Registrar Artículo / Producto</h3>
+                                            <p style={{ color: '#64748b', fontSize: '0.85rem', marginTop: 0, marginBottom: '1rem' }}>
+                                                El costo y la disponibilidad se calculan matemáticamente de forma automática a partir de los insumos seleccionados.
+                                            </p>
+
+                                            <form onSubmit={handleCrearProducto} style={formCol}>
+                                                <label style={{ fontSize: '0.85rem', color: '#334155' }}>
+                                                    Nombre del Artículo / Producto:
+                                                    <input
+                                                        placeholder="Ej. Café Capuchino, Filtro de Aceite, Tarta de Chocolate"
+                                                        required
+                                                        value={prodNombre}
+                                                        onChange={(e) => setProdNombre(e.target.value)}
+                                                        style={inputStyle}
+                                                    />
+                                                </label>
+
+                                                <label style={{ fontSize: '0.85rem', color: '#334155' }}>
+                                                    Precio de Venta al Público (Bs):
+                                                    <input
+                                                        type="number"
+                                                        step="0.01"
+                                                        min="0.01"
+                                                        placeholder="Ej. 25.00"
+                                                        required
+                                                        value={prodPrecio}
+                                                        onChange={(e) => setProdPrecio(e.target.value)}
+                                                        style={inputStyle}
+                                                    />
+                                                </label>
+
+                                                {/* BARRA DE ASIGNACIÓN MÚLTIPLE DE CATEGORÍAS */}
+                                                <div style={{ marginTop: '0.2rem', marginBottom: '0.4rem' }}>
+                                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem' }}>
+                                                        <span style={{ fontSize: '0.85rem', fontWeight: 'bold', color: '#334155' }}>
+                                                            Categorías del Producto: <span style={{ fontWeight: 'normal', color: '#64748b', fontSize: '0.8rem' }}>(Puede pertenecer a más de una)</span>
+                                                        </span>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setMostrarModalNuevaCat(!mostrarModalNuevaCat)}
+                                                            style={{
+                                                                background: 'transparent',
+                                                                border: 'none',
+                                                                color: '#0284c7',
+                                                                fontSize: '0.8rem',
+                                                                fontWeight: 'bold',
+                                                                cursor: 'pointer',
+                                                                textDecoration: 'underline'
+                                                            }}
+                                                        >
+                                                            ➕ {mostrarModalNuevaCat ? 'Cerrar' : 'Nueva Categoría'}
+                                                        </button>
+                                                    </div>
+
+                                                    {/* Barra interactiva de selección de categorías (sin opción Todas) */}
+                                                    <div style={{
+                                                        display: 'flex',
+                                                        gap: '0.45rem',
+                                                        flexWrap: 'wrap',
+                                                        alignItems: 'center',
+                                                        padding: '0.65rem 0.85rem',
+                                                        background: '#f8fafc',
+                                                        borderRadius: '8px',
+                                                        border: '1px solid #e2e8f0',
+                                                        minHeight: '44px'
+                                                    }}>
+                                                        {(!datos.categorias || datos.categorias.length === 0) ? (
+                                                            <div style={{ fontSize: '0.82rem', color: '#64748b', display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
+                                                                <span>Aún no hay categorías registradas.</span>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => setMostrarModalNuevaCat(true)}
+                                                                    style={{
+                                                                        padding: '0.25rem 0.65rem',
+                                                                        borderRadius: '6px',
+                                                                        border: '1px dashed #0284c7',
+                                                                        background: '#eff6ff',
+                                                                        color: '#0284c7',
+                                                                        fontWeight: 'bold',
+                                                                        fontSize: '0.8rem',
+                                                                        cursor: 'pointer'
+                                                                    }}
                                                                 >
-                                                                    {opcionesReceta.map((op) => (
-                                                                        <option key={op.valor} value={op.valor}>
-                                                                            {op.etiqueta}
+                                                                    ➕ Crear primera categoría
+                                                                </button>
+                                                            </div>
+                                                        ) : (
+                                                            datos.categorias.map((cat) => {
+                                                                const seleccionada = prodCategorias.some(
+                                                                    (c) => c.toLowerCase() === cat.nombre?.toLowerCase()
+                                                                );
+                                                                return (
+                                                                    <button
+                                                                        key={cat.id || cat.nombre}
+                                                                        type="button"
+                                                                        onClick={() => toggleCategoriaProducto(cat.nombre)}
+                                                                        style={{
+                                                                            padding: '0.35rem 0.8rem',
+                                                                            borderRadius: '999px',
+                                                                            border: seleccionada ? '1px solid #0284c7' : '1px solid #cbd5e1',
+                                                                            fontWeight: 'bold',
+                                                                            fontSize: '0.82rem',
+                                                                            cursor: 'pointer',
+                                                                            display: 'flex',
+                                                                            alignItems: 'center',
+                                                                            gap: '0.35rem',
+                                                                            background: seleccionada ? '#0284c7' : '#ffffff',
+                                                                            color: seleccionada ? '#ffffff' : '#334155',
+                                                                            boxShadow: seleccionada ? '0 1px 2px rgba(2,132,199,0.2)' : 'none',
+                                                                            transition: 'all 0.15s ease'
+                                                                        }}
+                                                                    >
+                                                                        <span>{seleccionada ? '✓' : '🏷️'}</span>
+                                                                        <span>{cat.nombre}</span>
+                                                                    </button>
+                                                                );
+                                                            })
+                                                        )}
+                                                    </div>
+                                                    {prodCategorias.length > 0 && (
+                                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.35rem' }}>
+                                                            <span style={{ fontSize: '0.78rem', color: '#0369a1', fontWeight: 500 }}>
+                                                                Asignadas: <strong>{prodCategorias.join(', ')}</strong>
+                                                            </span>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setProdCategorias([])}
+                                                                style={{
+                                                                    background: 'none',
+                                                                    border: 'none',
+                                                                    color: '#64748b',
+                                                                    fontSize: '0.75rem',
+                                                                    cursor: 'pointer',
+                                                                    textDecoration: 'underline'
+                                                                }}
+                                                            >
+                                                                Limpiar selección
+                                                            </button>
+                                                        </div>
+                                                    )}
+                                                </div>
+
+                                                {/* SELECTOR DE MODO DE COMPOSICIÓN / INVENTARIO */}
+                                                <div style={{ marginTop: '0.4rem' }}>
+                                                    <span style={{ fontSize: '0.85rem', fontWeight: 'bold', color: '#334155', display: 'block', marginBottom: '0.4rem' }}>
+                                                        Composición y Origen de Inventario:
+                                                    </span>
+                                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 0.9fr', gap: '0.4rem' }}>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setTipoComposicion('unitario')}
+                                                            style={{
+                                                                padding: '0.6rem 0.5rem',
+                                                                borderRadius: '8px',
+                                                                border: tipoComposicion === 'unitario' ? '2px solid #0284c7' : '1px solid #cbd5e1',
+                                                                background: tipoComposicion === 'unitario' ? '#f0f9ff' : '#fff',
+                                                                cursor: 'pointer',
+                                                                textAlign: 'center',
+                                                                fontSize: '0.82rem'
+                                                            }}
+                                                        >
+                                                            <strong>📦 Artículo Unitario</strong>
+                                                            <div style={{ fontSize: '0.72rem', color: '#64748b', marginTop: '0.2rem' }}>Reventa 1 a 1 de un insumo</div>
+                                                        </button>
+
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setTipoComposicion('receta')}
+                                                            style={{
+                                                                padding: '0.6rem 0.5rem',
+                                                                borderRadius: '8px',
+                                                                border: tipoComposicion === 'receta' ? '2px solid #0284c7' : '1px solid #cbd5e1',
+                                                                background: tipoComposicion === 'receta' ? '#f0f9ff' : '#fff',
+                                                                cursor: 'pointer',
+                                                                textAlign: 'center',
+                                                                fontSize: '0.82rem'
+                                                            }}
+                                                        >
+                                                            <strong>🧪 Receta / Ensamble</strong>
+                                                            <div style={{ fontSize: '0.72rem', color: '#64748b', marginTop: '0.2rem' }}>Hasta 30 insumos métricos</div>
+                                                        </button>
+
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setTipoComposicion('libre')}
+                                                            style={{
+                                                                padding: '0.6rem 0.5rem',
+                                                                borderRadius: '8px',
+                                                                border: tipoComposicion === 'libre' ? '2px solid #0284c7' : '1px solid #cbd5e1',
+                                                                background: tipoComposicion === 'libre' ? '#f0f9ff' : '#fff',
+                                                                cursor: 'pointer',
+                                                                textAlign: 'center',
+                                                                fontSize: '0.82rem'
+                                                            }}
+                                                        >
+                                                            <strong>✨ Venta Libre</strong>
+                                                            <div style={{ fontSize: '0.72rem', color: '#64748b', marginTop: '0.2rem' }}>Servicio sin inventario</div>
+                                                        </button>
+                                                    </div>
+                                                </div>
+
+                                                {/* OPCIÓN 1: PRODUCTO UNITARIO (1 a 1) */}
+                                                {tipoComposicion === 'unitario' && (
+                                                    <div style={{ background: '#f8fafc', padding: '0.85rem', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                                                        <label style={{ fontSize: '0.84rem', color: '#334155' }}>
+                                                            Selecciona el Insumo del Inventario:
+                                                            <select
+                                                                required
+                                                                value={insumoUnitarioId}
+                                                                onChange={(e) => setInsumoUnitarioId(e.target.value)}
+                                                                style={inputStyle}
+                                                            >
+                                                                <option value="">-- Elige el insumo/artículo a vender --</option>
+                                                                {(datos.insumos || []).map((ins) => (
+                                                                    <option key={ins.id} value={ins.id}>
+                                                                        {ins.nombre} (Stock: {ins.stock_actual} {ins.unidad_medida} | Costo: Bs {Number(ins.costo_por_unidad).toFixed(2)})
+                                                                    </option>
+                                                                ))}
+                                                            </select>
+                                                        </label>
+                                                        <div style={{ fontSize: '0.78rem', color: '#64748b', marginTop: '0.4rem' }}>
+                                                            🔒 <em>Relación 1 a 1: Cada venta descontará automáticamente 1 unidad de este insumo. No se pueden agregar insumos adicionales.</em>
+                                                        </div>
+                                                    </div>
+                                                )}
+
+                                                {/* OPCIÓN 2: RECETA / ENSAMBLE (HASTA 30 INSUMOS) */}
+                                                {tipoComposicion === 'receta' && (
+                                                    <div style={{ background: '#f8fafc', padding: '0.85rem', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                                                            <span style={{ fontSize: '0.84rem', fontWeight: 'bold', color: '#334155' }}>
+                                                                Insumos y Materiales de la Receta:
+                                                            </span>
+                                                            <span style={{ fontSize: '0.78rem', color: filasReceta.length >= 30 ? '#dc2626' : '#0284c7', fontWeight: 'bold' }}>
+                                                                {filasReceta.length} / 30 insumos
+                                                            </span>
+                                                        </div>
+
+                                                        {filasReceta.map((fila, index) => {
+                                                            const insSel = (datos.insumos || []).find((i) => String(i.id) === String(fila.insumoId));
+                                                            const unidadAlm = insSel ? insSel.unidad_medida : 'unidades';
+                                                            const opcionesComp = obtenerUnidadesCompatibles(unidadAlm);
+                                                            return (
+                                                                <div key={index} style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr 1fr 34px', gap: '0.4rem', marginBottom: '0.45rem', alignItems: 'center' }}>
+                                                                    <select
+                                                                        required
+                                                                        value={fila.insumoId}
+                                                                        onChange={(e) => cambiarFilaReceta(index, 'insumoId', e.target.value)}
+                                                                        style={{ ...inputStyle, margin: 0, fontSize: '0.82rem' }}
+                                                                    >
+                                                                        <option value="">-- Insumo --</option>
+                                                                        {(datos.insumos || []).map((i) => (
+                                                                            <option key={i.id} value={i.id}>
+                                                                                {i.nombre} ({i.unidad_medida})
+                                                                            </option>
+                                                                        ))}
+                                                                    </select>
+
+                                                                    <input
+                                                                        type="number"
+                                                                        step="0.001"
+                                                                        min="0.001"
+                                                                        required
+                                                                        placeholder="Cantidad"
+                                                                        value={fila.cantidad}
+                                                                        onChange={(e) => cambiarFilaReceta(index, 'cantidad', e.target.value)}
+                                                                        style={{ ...inputStyle, margin: 0, fontSize: '0.82rem' }}
+                                                                    />
+
+                                                                    <select
+                                                                        value={fila.unidadReceta || unidadAlm}
+                                                                        onChange={(e) => cambiarFilaReceta(index, 'unidadReceta', e.target.value)}
+                                                                        style={{ ...inputStyle, margin: 0, fontSize: '0.82rem' }}
+                                                                    >
+                                                                        {opcionesComp.map((o) => (
+                                                                            <option key={o.valor} value={o.valor}>{o.etiqueta}</option>
+                                                                        ))}
+                                                                    </select>
+
+                                                                    <button
+                                                                        type="button"
+                                                                        disabled={filasReceta.length <= 1}
+                                                                        onClick={() => quitarFilaReceta(index)}
+                                                                        style={{
+                                                                            padding: '0.4rem',
+                                                                            background: filasReceta.length <= 1 ? '#e2e8f0' : '#fee2e2',
+                                                                            color: filasReceta.length <= 1 ? '#94a3b8' : '#b91c1c',
+                                                                            border: 'none',
+                                                                            borderRadius: '4px',
+                                                                            cursor: filasReceta.length <= 1 ? 'not-allowed' : 'pointer',
+                                                                            fontWeight: 'bold'
+                                                                        }}
+                                                                        title="Quitar este insumo"
+                                                                    >
+                                                                        ✕
+                                                                    </button>
+                                                                </div>
+                                                            );
+                                                        })}
+
+                                                        <button
+                                                            type="button"
+                                                            disabled={filasReceta.length >= 30}
+                                                            onClick={agregarFilaReceta}
+                                                            style={{
+                                                                width: '100%',
+                                                                marginTop: '0.25rem',
+                                                                padding: '0.4rem',
+                                                                background: '#f1f5f9',
+                                                                color: '#0284c7',
+                                                                border: '1px dashed #cbd5e1',
+                                                                borderRadius: '6px',
+                                                                cursor: filasReceta.length >= 30 ? 'not-allowed' : 'pointer',
+                                                                fontSize: '0.82rem',
+                                                                fontWeight: 'bold'
+                                                            }}
+                                                        >
+                                                            ➕ Agregar otro insumo a la receta ({filasReceta.length}/30)
+                                                        </button>
+                                                    </div>
+                                                )}
+
+                                                {/* OPCIÓN 3: SERVICIO / LIBRE */}
+                                                {tipoComposicion === 'libre' && (
+                                                    <div style={{ background: '#f8fafc', padding: '0.75rem', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '0.82rem', color: '#64748b' }}>
+                                                        ✨ <em>Este producto se registrará como servicio o venta libre sin descontar stock físico del inventario.</em>
+                                                    </div>
+                                                )}
+
+                                                {/* PANEL DE CÁLCULO FINANCIERO AUTOMÁTICO EN VIVO */}
+                                                <div style={{ background: '#f0fdf4', padding: '0.85rem', borderRadius: '8px', border: '1px solid #bbf7d0', display: 'flex', justifyContent: 'space-around', alignItems: 'center', textAlign: 'center' }}>
+                                                    <div>
+                                                        <div style={{ fontSize: '0.75rem', color: '#166534', textTransform: 'uppercase', fontWeight: 'bold' }}>Costo Calculado</div>
+                                                        <div style={{ fontSize: '1.25rem', fontWeight: 'bold', color: '#15803d' }}>
+                                                            Bs {costoEstimado.toFixed(2)}
+                                                        </div>
+                                                    </div>
+                                                    <div style={{ borderLeft: '1px solid #86efac', height: '35px' }} />
+                                                    <div>
+                                                        <div style={{ fontSize: '0.75rem', color: '#166534', textTransform: 'uppercase', fontWeight: 'bold' }}>Ganancia Estimada</div>
+                                                        <div style={{ fontSize: '1.25rem', fontWeight: 'bold', color: gananciaEstimada >= 0 ? '#15803d' : '#b91c1c' }}>
+                                                            Bs {gananciaEstimada.toFixed(2)}
+                                                        </div>
+                                                    </div>
+                                                    <div style={{ borderLeft: '1px solid #86efac', height: '35px' }} />
+                                                    <div>
+                                                        <div style={{ fontSize: '0.75rem', color: '#166534', textTransform: 'uppercase', fontWeight: 'bold' }}>Margen Comercial</div>
+                                                        <div style={{ fontSize: '1.25rem', fontWeight: 'bold', color: margenPorcentaje >= 0 ? '#0284c7' : '#b91c1c' }}>
+                                                            {margenPorcentaje.toFixed(1)}%
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                <button type="submit" style={{ ...btnPrimario, marginTop: '0.5rem', padding: '0.75rem' }}>
+                                                    ✅ Guardar Producto en Catálogo
+                                                </button>
+                                            </form>
+                                        </section>
+
+                                        {/* COLUMNA DERECHA: ATAJOS Y ESTADO DE INVENTARIO */}
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                                            <section style={cardStyle}>
+                                                <h3 style={{ marginTop: 0 }}>🧱 Materiales e Insumos en Almacén</h3>
+                                                <p style={{ color: '#64748b', fontSize: '0.84rem', marginTop: 0 }}>
+                                                    Los costos de tus productos y su disponibilidad máxima se actualizan automáticamente cuando ingresas compras de insumos.
+                                                </p>
+                                                <div style={{ maxHeight: '220px', overflowY: 'auto', border: '1px solid #e2e8f0', borderRadius: '6px' }}>
+                                                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
+                                                        <thead style={{ background: '#f8fafc', position: 'sticky', top: 0 }}>
+                                                            <tr style={{ borderBottom: '1px solid #e2e8f0', textAlign: 'left' }}>
+                                                                <th style={{ padding: '0.4rem' }}>Insumo</th>
+                                                                <th style={{ padding: '0.4rem' }}>Stock</th>
+                                                                <th style={{ padding: '0.4rem' }}>Costo Unit.</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody>
+                                                            {(datos.insumos || []).length === 0 ? (
+                                                                <tr>
+                                                                    <td colSpan="3" style={{ padding: '1rem', textAlign: 'center', color: '#94a3b8' }}>
+                                                                        Aún no tienes insumos registrados.
+                                                                    </td>
+                                                                </tr>
+                                                            ) : (
+                                                                (datos.insumos || []).map((ins) => (
+                                                                    <tr key={ins.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                                                                        <td style={{ padding: '0.4rem' }}><strong>{ins.nombre}</strong></td>
+                                                                        <td style={{ padding: '0.4rem' }}>{ins.stock_actual} {ins.unidad_medida}</td>
+                                                                        <td style={{ padding: '0.4rem' }}>Bs {Number(ins.costo_por_unidad).toFixed(2)}</td>
+                                                                    </tr>
+                                                                ))
+                                                            )}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                                <div style={{ marginTop: '0.75rem', display: 'flex', gap: '0.5rem' }}>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => { limpiarAlertas(); setSeccionActiva('insumos'); }}
+                                                        style={{ ...btnSecundario, flex: 1, fontSize: '0.82rem', padding: '0.45rem' }}
+                                                    >
+                                                        🚚 Ir a Reabastecer Insumos
+                                                    </button>
+                                                </div>
+                                            </section>
+
+                                            {/* Si algún producto requiere compra directa tradicional */}
+                                            {usaStockDirecto && (
+                                                <section style={cardStyle}>
+                                                    <h3 style={{ marginTop: 0, fontSize: '0.98rem' }}>🚚 Reabastecer Artículo Directo (NIC 2)</h3>
+                                                    {(() => {
+                                                        const productosDirectos = (datos.productos || []).filter((p) => p.tipo_inventario === 'directo');
+                                                        if (productosDirectos.length === 0) {
+                                                            return (
+                                                                <p style={{ margin: 0, fontSize: '0.82rem', color: '#64748b', lineHeight: 1.4 }}>
+                                                                    No hay artículos de reventa directa registrados. Los artículos con receta (como café o bebidas) se abastecen automáticamente mediante sus insumos.
+                                                                </p>
+                                                            );
+                                                        }
+                                                        return (
+                                                            <form onSubmit={handleComprarProductoDirecto} style={formCol}>
+                                                                <select value={compraProdId} onChange={(e) => setCompraProdId(e.target.value)} style={inputStyle}>
+                                                                    <option value="">-- Selecciona el artículo directo --</option>
+                                                                    {productosDirectos.map((p) => (
+                                                                        <option key={p.id} value={p.id}>
+                                                                            {p.nombre} (Stock: {p.stock ?? 0} {p.unidad_medida || 'u.'} | Costo: Bs {Number(p.costo).toFixed(2)})
                                                                         </option>
                                                                     ))}
                                                                 </select>
-                                                            </label>
-                                                        </div>
-                                                        {cantidadConvertida !== null && Number(recetaCantidad) > 0 && (
-                                                            <div style={{ fontSize: '0.82rem', background: '#e0f2fe', color: '#0369a1', padding: '0.5rem 0.75rem', borderRadius: '6px', border: '1px solid #7dd3fc' }}>
-                                                                🔄 <strong>Equivalencia en almacén:</strong> {recetaCantidad} {unidadActiva} = <strong>{cantidadConvertida} {unidadAlmacen}</strong> que se descontarán por cada unidad vendida.
-                                                            </div>
-                                                        )}
-                                                    </>
-                                                );
-                                            })()}
-                                            <button type="submit" style={btnPrimario}>Vincular Material al Producto</button>
-                                        </form>
-                                    </section>
-                                ) : usaStockDirecto ? (
-                                    <section style={cardStyle}>
-                                        <h3 style={{ marginTop: 0 }}>🚚 Reabastecer Artículo (Compra con Costo Promedio NIC 2)</h3>
-                                        <p style={{ color: '#555', fontSize: '0.88rem', marginTop: 0 }}>
-                                            Ingresa mercadería nueva de tus proveedores. Suma al stock disponible y recalcula automáticamente el Costo Promedio Ponderado del artículo.
-                                        </p>
-                                        <form onSubmit={handleComprarProductoDirecto} style={formCol}>
-                                            <label>
-                                                Artículo a Reabastecer:
-                                                <select value={compraProdId} onChange={(e) => setCompraProdId(e.target.value)} style={inputStyle}>
-                                                    {(datos.productos || []).map((p) => (
-                                                        <option key={p.id} value={p.id}>
-                                                            {p.nombre} (Stock actual: {p.stock ?? 0} {p.unidad_medida || 'u.'} | Costo: Bs {Number(p.costo).toFixed(2)})
-                                                        </option>
-                                                    ))}
-                                                </select>
-                                            </label>
-                                            <input type="number" step="0.01" placeholder="Cantidad Comprada que entra a almacén" required value={compraProdCantidad} onChange={(e) => setCompraProdCantidad(e.target.value)} style={inputStyle} />
-                                            <input type="number" step="0.01" placeholder="Costo Total Pagado al Proveedor (Bs)" required value={compraProdCostoTotal} onChange={(e) => setCompraProdCostoTotal(e.target.value)} style={inputStyle} />
-                                            {usaVencimiento && (
-                                                <label style={{ fontSize: '0.85rem' }}>
-                                                    Nueva Fecha de Vencimiento del Lote:
-                                                    <input type="date" value={compraProdVencimiento} onChange={(e) => setCompraProdVencimiento(e.target.value)} style={inputStyle} />
-                                                </label>
+                                                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.4rem' }}>
+                                                                    <input type="number" step="0.01" placeholder="Cantidad" required value={compraProdCantidad} onChange={(e) => setCompraProdCantidad(e.target.value)} style={inputStyle} />
+                                                                    <input type="number" step="0.01" placeholder="Costo Total (Bs)" required value={compraProdCostoTotal} onChange={(e) => setCompraProdCostoTotal(e.target.value)} style={inputStyle} />
+                                                                </div>
+                                                                <button type="submit" style={{ ...btnOscuro, padding: '0.45rem', fontSize: '0.82rem' }}>Registrar Entrada</button>
+                                                            </form>
+                                                        );
+                                                    })()}
+                                                </section>
                                             )}
-                                            <button type="submit" style={btnOscuro}>Registrar Entrada de Mercadería</button>
-                                        </form>
-                                    </section>
-                                ) : null}
+                                        </div>
+                                    </div>
 
-                                <section style={{ ...cardStyle, gridColumn: '1 / -1' }}>
-                                    <h3 style={{ marginTop: 0 }}>Inventario Actual de Artículos</h3>
-                                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' }}>
-                                        <thead>
-                                            <tr style={{ borderBottom: '2px solid #e5e7eb', textAlign: 'left' }}>
-                                                <th style={thTd}>ID</th>
-                                                <th style={thTd}>Artículo</th>
-                                                <th style={thTd}>Categoría</th>
-                                                <th style={thTd}>Modalidad</th>
-                                                <th style={thTd}>Precio Venta</th>
-                                                <th style={thTd}>Costo Promedio</th>
-                                                <th style={thTd}>Stock / Disponibilidad</th>
-                                                {usaVencimiento && <th style={thTd}>Fecha Vencimiento</th>}
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {(datos.productos || []).map((p) => {
-                                                const stockBajo = p.tipo_inventario === 'directo' && Number(p.stock) <= Number(p.stock_minimo || 0);
-                                                return (
-                                                    <tr key={p.id} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                                                        <td style={thTd}>#{p.id}</td>
-                                                        <td style={thTd}><strong>{p.nombre}</strong></td>
-                                                        <td style={thTd}>{p.categoria}</td>
-                                                        <td style={thTd}>{p.tipo_inventario}</td>
-                                                        <td style={thTd}>Bs {Number(p.precio).toFixed(2)}</td>
-                                                        <td style={thTd}>Bs {Number(p.costo).toFixed(2)}</td>
-                                                        <td style={{ ...thTd, fontWeight: 'bold', color: stockBajo ? '#b91c1c' : '#166534' }}>
-                                                            {p.tipo_inventario === 'libre' || p.unidades_disponibles === null
-                                                                ? 'Libre (Servicio)'
-                                                                : `${p.unidades_disponibles} ${p.unidad_medida || 'u.'} ${stockBajo ? '⚠️ (Reponer)' : ''}`}
+                                    {/* TABLA INVENTARIO ACTUAL DE ARTÍCULOS FILTRADA POR PESTAÑA */}
+                                    <section style={{ ...cardStyle, marginTop: '0.5rem' }}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+                                            <h3 style={{ margin: 0 }}>
+                                                Catálogo de Artículos {categoriaTabActiva !== 'todas' ? `— Categoría: ${categoriaTabActiva}` : ''}
+                                            </h3>
+                                            <span style={{ fontSize: '0.82rem', color: '#64748b' }}>
+                                                Mostrando {productosFiltrados.length} artículo(s)
+                                            </span>
+                                        </div>
+
+                                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.88rem' }}>
+                                            <thead>
+                                                <tr style={{ borderBottom: '2px solid #e5e7eb', textAlign: 'left', background: '#f8fafc' }}>
+                                                    <th style={thTd}>ID</th>
+                                                    <th style={thTd}>Artículo</th>
+                                                    <th style={thTd}>Categoría</th>
+                                                    <th style={thTd}>Modalidad</th>
+                                                    <th style={thTd}>Precio Venta</th>
+                                                    <th style={thTd}>Costo Unitario</th>
+                                                    <th style={thTd}>Ganancia Unitaria</th>
+                                                    <th style={thTd}>Disponibilidad (Stock)</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {productosFiltrados.length === 0 ? (
+                                                    <tr>
+                                                        <td colSpan="8" style={{ padding: '2rem', textAlign: 'center', color: '#94a3b8' }}>
+                                                            No hay artículos registrados en esta categoría.
                                                         </td>
-                                                        {usaVencimiento && (
-                                                            <td style={thTd}>
-                                                                {p.fecha_vencimiento || 'Sin fecha'}
-                                                            </td>
-                                                        )}
                                                     </tr>
-                                                );
-                                            })}
-                                        </tbody>
-                                    </table>
-                                </section>
-                            </div>
-                        )}
+                                                ) : (
+                                                    productosFiltrados.map((p) => {
+                                                        const gananciaUni = Number(p.precio) - Number(p.costo || 0);
+                                                        const stockBajo = p.tipo_inventario === 'directo' && Number(p.stock) <= Number(p.stock_minimo || 0);
+                                                        return (
+                                                            <tr key={p.id} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                                                                <td style={thTd}>#{p.id}</td>
+                                                                <td style={thTd}><strong>{p.nombre}</strong></td>
+                                                                <td style={thTd}>
+                                                                    {p.categoria && p.categoria.trim() ? (
+                                                                        <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap' }}>
+                                                                            {p.categoria.split(',').map((catItem, idx) => {
+                                                                                const cTrim = catItem.trim();
+                                                                                if (!cTrim) return null;
+                                                                                return (
+                                                                                    <span
+                                                                                        key={idx}
+                                                                                        style={{
+                                                                                            background: '#eff6ff',
+                                                                                            color: '#0369a1',
+                                                                                            border: '1px solid #bae6fd',
+                                                                                            padding: '0.15rem 0.5rem',
+                                                                                            borderRadius: '999px',
+                                                                                            fontSize: '0.75rem',
+                                                                                            fontWeight: '600',
+                                                                                            whiteSpace: 'nowrap'
+                                                                                        }}
+                                                                                    >
+                                                                                        🏷️ {cTrim}
+                                                                                    </span>
+                                                                                );
+                                                                            })}
+                                                                        </div>
+                                                                    ) : (
+                                                                        <span style={{ color: '#94a3b8', fontSize: '0.78rem', fontStyle: 'italic' }}>
+                                                                            Sin categoría
+                                                                        </span>
+                                                                    )}
+                                                                </td>
+                                                                <td style={thTd}>
+                                                                    {p.tipo_inventario === 'receta' ? '🧪 Receta / Insumo' : p.tipo_inventario === 'directo' ? '📦 Reventa Directa' : '✨ Libre'}
+                                                                </td>
+                                                                <td style={{ ...thTd, fontWeight: 'bold' }}>Bs {Number(p.precio).toFixed(2)}</td>
+                                                                <td style={thTd}>Bs {Number(p.costo).toFixed(2)}</td>
+                                                                <td style={{ ...thTd, color: gananciaUni >= 0 ? '#15803d' : '#b91c1c', fontWeight: 'bold' }}>
+                                                                    Bs {gananciaUni.toFixed(2)}
+                                                                </td>
+                                                                <td style={{ ...thTd, fontWeight: 'bold', color: p.unidades_disponibles === 0 ? '#b91c1c' : '#166534' }}>
+                                                                    {p.tipo_inventario === 'libre' || p.unidades_disponibles === null
+                                                                        ? 'Libre (Servicio)'
+                                                                        : `${p.unidades_disponibles} ${p.unidad_medida || 'u.'} ${p.insumo_limitante ? `(Límite: ${p.insumo_limitante})` : ''} ${stockBajo ? '⚠️ (Reponer)' : ''}`}
+                                                                </td>
+                                                            </tr>
+                                                        );
+                                                    })
+                                                )}
+                                            </tbody>
+                                        </table>
+                                    </section>
+                                </div>
+                            );
+                        })()}
 
                         {/* ==========================================
                             MÓDULO 4: MATERIALES / INSUMOS (SOLO SI USA RECETAS/ENSAMBLAJE)
@@ -1395,10 +1975,20 @@ export default function AdminPage() {
                                                 <select value={compraInsumoId} onChange={(e) => setCompraInsumoId(e.target.value)} style={inputStyle}>
                                                     {(datos.insumos || []).map((i) => (
                                                         <option key={i.id} value={i.id}>
-                                                            {i.nombre} (Stock: {i.stock_actual} {i.unidad_medida} | Bs {i.costo_por_unidad}/{i.unidad_medida})
+                                                            {i.nombre} (Stock: {i.stock_actual} {i.unidad_medida})
                                                         </option>
                                                     ))}
                                                 </select>
+                                            </label>
+                                            <label style={{ fontSize: '0.85rem', color: '#334155' }}>
+                                                Nombre de la distribuidora:
+                                                <input
+                                                    type="text"
+                                                    placeholder="Nombre de la distribuidora"
+                                                    value={compraDistribuidora}
+                                                    onChange={(e) => setCompraDistribuidora(e.target.value)}
+                                                    style={inputStyle}
+                                                />
                                             </label>
                                             <label style={{ fontSize: '0.85rem', color: '#334155' }}>
                                                 Cantidad Comprada (según su unidad de medida):
@@ -1417,12 +2007,12 @@ export default function AdminPage() {
                                         <form onSubmit={handleCrearInsumo} style={formCol}>
                                             <label style={{ fontSize: '0.85rem', color: '#334155' }}>
                                                 Nombre del Material, Pieza o Ingrediente:
-                                                <input placeholder="Ej. Memoria RAM, Tablero Melamina, Leche" required value={insNombre} onChange={(e) => setInsNombre(e.target.value)} style={inputStyle} />
+                                                <input placeholder="Nombre del material o insumo" required value={insNombre} onChange={(e) => setInsNombre(e.target.value)} style={inputStyle} />
                                             </label>
                                             <label style={{ fontSize: '0.85rem', color: '#334155' }}>
                                                 Unidad de Medida (Sistema Métrico o Unidades):
                                                 <select value={insUnidad} onChange={(e) => setInsUnidad(e.target.value)} style={inputStyle}>
-                                                    <option value="unidades">Unidades (ej. piezas de PC, tornillos)</option>
+                                                    <option value="unidades">Unidades (u. / piezas / paquetes)</option>
                                                     <option value="metros">Metros (m)</option>
                                                     <option value="centimetros">Centímetros (cm)</option>
                                                     <option value="litros">Litros (L)</option>
@@ -1434,22 +2024,47 @@ export default function AdminPage() {
                                             </label>
                                             <label style={{ fontSize: '0.85rem', color: '#334155' }}>
                                                 Stock Inicial Disponible en Almacén:
-                                                <input type="number" step="0.01" placeholder="Cantidad actual (0 si aún no compraste)" value={insStockIni} onChange={(e) => setInsStockIni(e.target.value)} style={inputStyle} />
+                                                <input type="number" step="0.01" min="0" placeholder="Cantidad actual (0 si aún no compraste)" value={insStockIni} onChange={(e) => setInsStockIni(e.target.value)} style={inputStyle} />
                                             </label>
                                             <label style={{ fontSize: '0.85rem', color: '#334155' }}>
-                                                Costo por Unidad de Medida (Bs):
-                                                <input type="number" step="0.01" placeholder="Cuánto cuesta 1 unidad/medida en Bs" value={insCostoUni} onChange={(e) => setInsCostoUni(e.target.value)} style={inputStyle} />
+                                                Costo por unidad (Bs):
+                                                <input type="number" step="0.01" min="0" placeholder="Cuánto cuesta 1 unidad en Bs" value={insCostoUni} onChange={(e) => setInsCostoUni(e.target.value)} style={inputStyle} />
                                             </label>
                                             <label style={{ fontSize: '0.85rem', color: '#334155' }}>
                                                 Stock de Seguridad (Reserva mínima para alerta de reposición):
-                                                <input type="number" step="0.01" placeholder="Cantidad mínima antes de alertar" value={insStockSeg} onChange={(e) => setInsStockSeg(e.target.value)} style={inputStyle} />
+                                                <input type="number" step="0.01" min="0" placeholder="Cantidad mínima antes de alertar" value={insStockSeg} onChange={(e) => setInsStockSeg(e.target.value)} style={inputStyle} />
                                             </label>
-                                            {usaVencimiento && (
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', margin: '0.2rem 0' }}>
+                                                <input
+                                                    type="checkbox"
+                                                    id="checkInsVencimiento"
+                                                    checked={insTieneVencimiento}
+                                                    onChange={(e) => {
+                                                        setInsTieneVencimiento(e.target.checked);
+                                                        if (!e.target.checked) setInsFechaVencimiento('');
+                                                    }}
+                                                    style={{ width: '16px', height: '16px', cursor: 'pointer' }}
+                                                />
+                                                <label htmlFor="checkInsVencimiento" style={{ fontSize: '0.85rem', color: '#334155', cursor: 'pointer', fontWeight: 500 }}>
+                                                    ¿Tiene fecha de vencimiento?
+                                                </label>
+                                            </div>
+                                            {insTieneVencimiento && (
                                                 <label style={{ fontSize: '0.85rem', color: '#334155' }}>
                                                     Fecha de Vencimiento:
-                                                    <input type="date" value={insFechaVencimiento} onChange={(e) => setInsFechaVencimiento(e.target.value)} style={inputStyle} />
+                                                    <input type="date" required={insTieneVencimiento} value={insFechaVencimiento} onChange={(e) => setInsFechaVencimiento(e.target.value)} style={inputStyle} />
                                                 </label>
                                             )}
+                                            <label style={{ fontSize: '0.85rem', color: '#334155' }}>
+                                                Proveedor:
+                                                <input
+                                                    type="text"
+                                                    placeholder="ingrese nombre de provedor"
+                                                    value={insProveedor}
+                                                    onChange={(e) => setInsProveedor(e.target.value)}
+                                                    style={inputStyle}
+                                                />
+                                            </label>
                                             <button type="submit" style={btnPrimario}>Crear Material / Insumo</button>
                                         </form>
                                     </section>

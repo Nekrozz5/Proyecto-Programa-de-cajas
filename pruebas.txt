@@ -1,0 +1,41 @@
+1. Arranque
+Cierra y vuelve a correr npm run dev. No debe haber errores rojos en la terminal.
+Reinícialo una segunda vez: las migraciones no deben volver a ejecutarse ni dar error.
+2. Seguridad y sesión
+Inicia sesión con una clave correcta y luego con una incorrecta. Después de 5 fallos seguidos debe bloquear unos minutos.
+La cuenta developer no debe aparecer en la lista de usuarios, pero sí poder entrar escribiéndola a mano.
+Como cajero, intenta abrir /admin escribiendo la URL: debe rechazarte.
+Con las herramientas del navegador (F12 → Network), reenvía una petición cambiando el usuarioId o adminId del cuerpo por el de un admin. Debe seguir usando tu sesión real, sin dejarte actuar como otro.
+Cambiar tu propia clave debe exigir la clave actual.
+3. Caja y validaciones
+Abre una caja y trata de abrir una segunda: debe rechazarlo.
+Egreso sin motivo, con monto 0 o negativo: debe rechazarlo.
+Venta con cantidad 0 o negativa: debe rechazarla.
+Cierra la caja y luego intenta vender o registrar un egreso en ella: debe rechazarlo.
+Con la caja cerrada, entra como cajero y abre un turno nuevo: ahora debe dejarte (decisión de la Fase 5).
+4. Stock
+
+Crea un producto directo con stock 3.
+
+Vende 4: debe rechazarlo.
+Vende el mismo producto en dos líneas (2 + 2): debe rechazarlo.
+Venta con dos productos, donde el segundo no tiene stock: el primero no debe descontarse (prueba de rollback).
+Abre la pantalla de venta en dos pestañas y trata de vender la última unidad en ambas casi a la vez: solo una debe pasar.
+5. Efectivo, cambio y arqueo
+Venta de 25 Bs recibiendo 50 Bs: cambio de 25.
+Prueba un cambio incorrecto (si la interfaz lo permite): debe rechazarlo.
+Con fondo inicial de 100 Bs, una venta en efectivo de 30, otra por QR de 20 y un egreso de 10 en efectivo:
+Efectivo esperado = 100 + 30 − 10 = 120
+QR esperado = 20
+Al cerrar, el cajero no debe ver el esperado. Si cuenta 118, la diferencia debe ser −2 (faltante).
+6. Insumos, recetas y costo promedio
+Crea un insumo en kilos y arma una receta en gramos; vende y verifica el descuento exacto.
+Costo promedio: compra 10 kg a 10 Bs/kg y luego 10 kg a 20 Bs/kg. El costo debe quedar en 15 Bs/kg, y el costo del producto con receta debe actualizarse.
+Vende más de lo que alcanza el insumo: debe rechazarlo y no descontar nada.
+Intenta asignar una receta a un producto directo con stock: debe bloquearlo con un mensaje claro.
+7. Anulación (la prueba más importante)
+Vende un producto con receta y anota el stock del insumo antes y después.
+Cambia la receta o compra el insumo a otro precio.
+Anula la venta con un motivo: el stock debe volver exactamente al valor de antes de vender.
+Anular sin motivo debe rechazarlo, y anular el mismo ticket otra vez también.
+Revisa que el ticket anulado no cuente en arqueo, estadísticas ni reportes.

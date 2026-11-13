@@ -11,6 +11,7 @@ import {
     reabrirCajaConPermiso,
     registrarVentaCompleta,
     registrarEgreso,
+    registrarIngresoEfectivo,
     cerrarCaja,
     obtenerEstadisticasCaja,
     obtenerMovimientosCaja,
@@ -23,6 +24,9 @@ import {
     crearUsuarioConPermiso,
     borrarUsuarioConPermiso,
     cambiarPasswordConPermiso,
+    obtenerCategorias,
+    crearCategoria,
+    crearProductoConInsumos,
     crearProducto,
     registrarCompraProductoDirecto,
     crearInsumo,
@@ -31,6 +35,7 @@ import {
     asignarIngredienteReceta
 } from '../../../server/queries';
 import {
+    NOMBRE_COOKIE_SESION,
     crearTokenSesion,
     obtenerUsuarioSesion,
     exigirUsuarioSesion,
@@ -43,18 +48,20 @@ const ROLES_ADMIN = ['admin', 'superadmin', 'developer'];
 // GET /api/caja -> Devuelve configuración, sesión activa y datos según el estado de autenticación
 export async function GET(request) {
     try {
-        const [usuarioSesion, configuracionNegocio, usuarios] = await Promise.all([
+        const [usuarioSesion, configuracionNegocio, usuarios, categorias] = await Promise.all([
             obtenerUsuarioSesion(request),
             obtenerConfiguracionNegocio(),
-            obtenerUsuarios()
+            obtenerUsuarios(),
+            obtenerCategorias()
         ]);
 
         // Si no hay sesión autenticada, devolver únicamente lo necesario para el arranque / selector de login
         if (!usuarioSesion) {
-            return NextResponse.json({
+            const respuestaSinSesion = NextResponse.json({
                 usuarioSesion: null,
                 configuracionNegocio,
                 usuarios,
+                categorias,
                 cajaAbierta: null,
                 cajaAuditada: null,
                 historialCajas: [],
@@ -65,6 +72,16 @@ export async function GET(request) {
                 insumos: [],
                 prediccionInsumos: []
             });
+
+            // Si el cliente traía una cookie de sesión previa que ya fue invalidada (p. ej. por reinicio del servidor o expiración),
+            // limpiamos la cookie de inmediato en el navegador para no dejar sesiones residuales
+            const teniaCookie = request.cookies?.get?.(NOMBRE_COOKIE_SESION)
+                || (request.headers.get('cookie') && request.headers.get('cookie').includes(NOMBRE_COOKIE_SESION));
+            if (teniaCookie) {
+                limpiarCookieSesion(respuestaSinSesion);
+            }
+
+            return respuestaSinSesion;
         }
 
         const esAdmin = esRolAdministrativo(usuarioSesion.rol);
@@ -93,6 +110,7 @@ export async function GET(request) {
                 productos,
                 insumos,
                 usuarios,
+                categorias,
                 prediccionInsumos
             });
         }
@@ -115,6 +133,7 @@ export async function GET(request) {
             productos,
             insumos,
             usuarios,
+            categorias,
             prediccionInsumos
         });
     } catch (error) {
@@ -140,7 +159,7 @@ export async function POST(request) {
             );
             const token = await crearTokenSesion(usuario);
             const response = NextResponse.json({ ok: true, usuario });
-            adjuntarCookieSesion(response, token);
+            adjuntarCookieSesion(response, token, usuario.rol);
             return response;
         }
 
@@ -193,6 +212,16 @@ export async function POST(request) {
             return NextResponse.json({ ok: true, movimientoId: id });
         }
 
+        if (accion === 'ingreso_efectivo') {
+            const id = await registrarIngresoEfectivo(
+                Number(body.cajaId),
+                body.monto,
+                body.motivo,
+                usuarioSesion.id
+            );
+            return NextResponse.json({ ok: true, movimientoId: id });
+        }
+
         if (accion === 'cerrar') {
             const arqueo = await cerrarCaja(Number(body.cajaId), body.efectivoReal, usuarioSesion.id);
             return NextResponse.json({ ok: true, arqueo });
@@ -238,22 +267,16 @@ export async function POST(request) {
             return NextResponse.json({ ok: true, configuracionNegocio: config });
         }
 
+        if (accion === 'crear_categoria') {
+            await exigirUsuarioSesion(request, ROLES_ADMIN);
+            const cat = await crearCategoria(body.nombre);
+            return NextResponse.json({ ok: true, categoria: cat });
+        }
+
         if (accion === 'crear_producto') {
             await exigirUsuarioSesion(request, ROLES_ADMIN);
-            const stock = body.stock !== undefined && body.stock !== '' && body.stock !== null
-                ? Number(body.stock)
-                : null;
-            const id = await crearProducto(
-                body.nombre,
-                Number(body.precio),
-                Number(body.costo || 0),
-                body.categoria || 'General',
-                stock,
-                body.unidadMedida || 'unidades',
-                Number(body.stockMinimo || 0),
-                body.fechaVencimiento || null
-            );
-            return NextResponse.json({ ok: true, productoId: id });
+            const resultado = await crearProductoConInsumos(body);
+            return NextResponse.json({ ok: true, ...resultado });
         }
 
         if (accion === 'comprar_producto_directo') {
@@ -276,7 +299,8 @@ export async function POST(request) {
                 Number(body.costoPorUnidad || 0),
                 Number(body.stockSeguridad || 0),
                 Number(body.tiempoEntregaDias || 1),
-                body.fechaVencimiento || null
+                body.fechaVencimiento || null,
+                body.proveedor || null
             );
             return NextResponse.json({ ok: true, insumoId: id });
         }
@@ -287,7 +311,8 @@ export async function POST(request) {
                 Number(body.insumoId),
                 Number(body.cantidadComprada),
                 Number(body.costoTotalCompra),
-                body.motivo
+                body.motivo,
+                body.distribuidora || null
             );
             return NextResponse.json({ ok: true, compra: res });
         }

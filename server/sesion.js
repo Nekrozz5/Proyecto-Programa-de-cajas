@@ -5,7 +5,22 @@ const path = require('path');
 const { obtenerUsuarioPorId } = require('./queries');
 
 const NOMBRE_COOKIE_SESION = 'pos_session';
-const DURACION_SESION_SEGUNDOS = 60 * 60 * 12; // 12 horas
+
+// Identificador único en memoria generado por cada arranque del servidor/proyecto.
+// Si el servidor se detiene o reinicia (npm run dev), cualquier sesión previa
+// de developer o administradores queda automáticamente invalidada.
+const INSTANCE_BOOT_ID = crypto.randomUUID();
+
+const ROLES_ADMINISTRATIVOS_O_TECNICOS = ['developer', 'superadmin', 'admin'];
+
+const TTL_POR_ROL = {
+    developer: 15 * 60,    // 15 minutos (rol técnico de diagnóstico puntual)
+    superadmin: 30 * 60,   // 30 minutos
+    admin: 30 * 60,        // 30 minutos
+    user: 8 * 60 * 60      // 8 horas (turno normal de cajero)
+};
+
+const DURACION_SESION_SEGUNDOS = TTL_POR_ROL.user;
 
 let secretoCache = null;
 
@@ -53,15 +68,27 @@ function obtenerSecretoSesion() {
 
 async function crearTokenSesion(usuario) {
     const secreto = obtenerSecretoSesion();
-    return await new SignJWT({
+    const rol = String(usuario.rol || 'user');
+    const esAdminODev = ROLES_ADMINISTRATIVOS_O_TECNICOS.includes(rol);
+    const ttlSegundos = TTL_POR_ROL[rol] || TTL_POR_ROL.user;
+
+    const payload = {
         id: Number(usuario.id),
         nombre: String(usuario.nombre),
-        rol: String(usuario.rol)
-    })
+        rol
+    };
+
+    // Para developer y administradores, vincular la sesión estrictamente a la ejecución actual del servidor.
+    // Al reiniciar el proyecto (npm run dev), el bootId cambia y el token anterior queda invalidado.
+    if (esAdminODev) {
+        payload.bootId = INSTANCE_BOOT_ID;
+    }
+
+    return await new SignJWT(payload)
         .setProtectedHeader({ alg: 'HS256' })
         .setSubject(String(usuario.id))
         .setIssuedAt()
-        .setExpirationTime(`${DURACION_SESION_SEGUNDOS}s`)
+        .setExpirationTime(`${ttlSegundos}s`)
         .sign(secreto);
 }
 
@@ -73,6 +100,14 @@ async function verificarTokenSesion(token) {
             algorithms: ['HS256']
         });
         if (!payload || !payload.id) return null;
+
+        // Si es rol administrativo o developer, invalidar inmediatamente si el proyecto se reinició
+        if (ROLES_ADMINISTRATIVOS_O_TECNICOS.includes(payload.rol)) {
+            if (!payload.bootId || payload.bootId !== INSTANCE_BOOT_ID) {
+                return null;
+            }
+        }
+
         return payload;
     } catch (err) {
         // Token inválido, expirado o con firma alterada
@@ -104,25 +139,38 @@ function extraerTokenDeRequest(request) {
     return null;
 }
 
-function obtenerOpcionesCookieSesion(maxAge = DURACION_SESION_SEGUNDOS) {
-    return {
+function obtenerOpcionesCookieSesion(rol = null, maxAge = null) {
+    const esAdminODev = rol && ROLES_ADMINISTRATIVOS_O_TECNICOS.includes(rol);
+
+    const opciones = {
         name: NOMBRE_COOKIE_SESION,
         httpOnly: true,
         sameSite: 'lax',
         secure: process.env.NODE_ENV === 'production',
-        path: '/',
-        maxAge
+        path: '/'
     };
+
+    if (maxAge === 0) {
+        opciones.maxAge = 0;
+    } else if (!esAdminODev) {
+        // Para cajeros (user), persiste durante su turno
+        opciones.maxAge = maxAge !== null ? maxAge : TTL_POR_ROL.user;
+    }
+    // NOTA: Para developer y administradores NO se especifica maxAge.
+    // Esto convierte la cookie en una 'Session Cookie' que el navegador destruye
+    // automáticamente al cerrar la ventana o navegador.
+
+    return opciones;
 }
 
-function adjuntarCookieSesion(response, token) {
-    const opciones = obtenerOpcionesCookieSesion(DURACION_SESION_SEGUNDOS);
+function adjuntarCookieSesion(response, token, rol = null) {
+    const opciones = obtenerOpcionesCookieSesion(rol);
     response.cookies.set(opciones.name, token, opciones);
     return response;
 }
 
 function limpiarCookieSesion(response) {
-    const opciones = obtenerOpcionesCookieSesion(0);
+    const opciones = obtenerOpcionesCookieSesion(null, 0);
     response.cookies.set(opciones.name, '', opciones);
     return response;
 }
@@ -167,6 +215,8 @@ async function exigirUsuarioSesion(request, rolesPermitidos = null) {
 module.exports = {
     NOMBRE_COOKIE_SESION,
     DURACION_SESION_SEGUNDOS,
+    TTL_POR_ROL,
+    ROLES_ADMINISTRATIVOS_O_TECNICOS,
     crearTokenSesion,
     verificarTokenSesion,
     obtenerUsuarioSesion,

@@ -16,6 +16,12 @@ function obtenerClaveRateLimitLogin(identificadorUsuario, ip = 'local') {
     return `${idNorm}|${ipNorm}`;
 }
 
+function formatearMinutosYSegundos(segundosTotales) {
+    const mins = Math.floor(segundosTotales / 60);
+    const segs = segundosTotales % 60;
+    return `${mins}:${segs < 10 ? '0' : ''}${segs}`;
+}
+
 function verificarBloqueoLogin(clave) {
     const registro = intentosFallidosLogin.get(clave);
     if (!registro) return;
@@ -23,8 +29,9 @@ function verificarBloqueoLogin(clave) {
     const ahora = Date.now();
     if (registro.bloqueadoHasta && registro.bloqueadoHasta > ahora) {
         const segundosRestantes = Math.ceil((registro.bloqueadoHasta - ahora) / 1000);
+        const reloj = formatearMinutosYSegundos(segundosRestantes);
         throw new Error(
-            `Cuenta bloqueada temporalmente tras ${MAX_INTENTOS_LOGIN} intentos fallidos. Intenta nuevamente en ${segundosRestantes} segundos.`
+            `Cuenta bloqueada temporalmente tras ${MAX_INTENTOS_LOGIN} intentos fallidos. Intenta nuevamente en ${reloj} (min:seg).`
         );
     }
 
@@ -41,9 +48,10 @@ function registrarIntentoFallidoLogin(clave) {
     if (actual.intentos >= MAX_INTENTOS_LOGIN) {
         actual.bloqueadoHasta = ahora + TIEMPO_BLOQUEO_LOGIN_MS;
         intentosFallidosLogin.set(clave, actual);
-        const minutos = Math.ceil(TIEMPO_BLOQUEO_LOGIN_MS / 60000);
+        const segundosRestantes = Math.ceil(TIEMPO_BLOQUEO_LOGIN_MS / 1000);
+        const reloj = formatearMinutosYSegundos(segundosRestantes);
         throw new Error(
-            `Demasiados intentos fallidos (${MAX_INTENTOS_LOGIN}). El acceso se ha bloqueado temporalmente por ${minutos} minutos.`
+            `Demasiados intentos fallidos (${MAX_INTENTOS_LOGIN}). El acceso se ha bloqueado temporalmente por ${reloj} (min:seg).`
         );
     }
 
@@ -438,19 +446,30 @@ async function inicializarSistemaPrimeraVez(datos) {
 // ==========================================
 // 2. INSUMOS (MATERIA PRIMA) Y RECETAS (ESCANDALLO / BOM)
 // ==========================================
-async function crearInsumo(nombre, unidadMedida, stockInicial = 0, costoPorUnidad = 0, stockSeguridad = 0, tiempoEntregaDias = 1, fechaVencimiento = null) {
+async function crearInsumo(nombre, unidadMedida, stockInicial = 0, costoPorUnidad = 0, stockSeguridad = 0, tiempoEntregaDias = 1, fechaVencimiento = null, proveedor = null) {
+    if (!nombre || String(nombre).trim() === '') {
+        throw new Error('El nombre del insumo es obligatorio.');
+    }
+    const stockInicialValidado = redondear2(numeroNoNegativo(stockInicial ?? 0, 'El stock inicial del insumo'));
+    const costoPorUnidadValidado = redondear2(numeroNoNegativo(costoPorUnidad ?? 0, 'El costo por unidad del insumo'));
+    const stockSeguridadValidado = redondear2(numeroNoNegativo(stockSeguridad ?? 0, 'El stock de seguridad'));
+    const tiempoEntregaValidado = numeroNoNegativo(tiempoEntregaDias ?? 1, 'El tiempo de entrega en días');
+
     const res = await runQuery(
         `INSERT INTO insumos (nombre, unidad_medida, stock_actual, costo_por_unidad, stock_seguridad, tiempo_entrega_dias, fecha_vencimiento)
          VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [nombre, unidadMedida, stockInicial, costoPorUnidad, stockSeguridad, tiempoEntregaDias, fechaVencimiento || null]
+        [nombre.trim(), unidadMedida || 'unidades', stockInicialValidado, costoPorUnidadValidado, stockSeguridadValidado, tiempoEntregaValidado, fechaVencimiento || null]
     );
     const insumoId = res.lastID;
 
-    if (stockInicial > 0) {
+    if (stockInicialValidado > 0) {
+        const motivoInicial = proveedor && String(proveedor).trim() !== ''
+            ? `Inventario inicial (Proveedor: ${String(proveedor).trim()})`
+            : 'Inventario inicial';
         await runQuery(
             `INSERT INTO movimientos_insumos (insumo_id, tipo, cantidad, costo_unitario, motivo)
-             VALUES (?, 'compra', ?, ?, 'Inventario inicial')`,
-            [insumoId, stockInicial, costoPorUnidad]
+             VALUES (?, 'compra', ?, ?, ?)`,
+            [insumoId, stockInicialValidado, costoPorUnidadValidado, motivoInicial]
         );
     }
     return insumoId;
@@ -475,7 +494,7 @@ async function recalcularCostoProductoPorReceta(productoId) {
 }
 
 // Compra de insumo con Costo Promedio Ponderado (CPP) y actualización en cascada de recetas
-async function registrarCompraInsumo(insumoId, cantidadComprada, costoTotalCompra, motivo = 'Compra a proveedor') {
+async function registrarCompraInsumo(insumoId, cantidadComprada, costoTotalCompra, motivo = 'Compra a proveedor', distribuidora = null) {
     const cantValidada = numeroPositivo(cantidadComprada, 'La cantidad comprada');
     const costoValidado = redondear2(numeroNoNegativo(costoTotalCompra, 'El costo total de compra'));
 
@@ -496,10 +515,14 @@ async function registrarCompraInsumo(insumoId, cantidadComprada, costoTotalCompr
         [Number(nuevoStock.toFixed(4)), Number(nuevoCostoUnitario.toFixed(4)), insumoId]
     );
 
+    const motivoFinal = distribuidora && String(distribuidora).trim() !== ''
+        ? `Compra a distribuidora: ${String(distribuidora).trim()}`
+        : (motivo || 'Compra a proveedor');
+
     await runQuery(
         `INSERT INTO movimientos_insumos (insumo_id, tipo, cantidad, costo_unitario, motivo)
          VALUES (?, 'compra', ?, ?, ?)`,
-        [insumoId, cantValidada, Number((costoValidado / cantValidada).toFixed(4)), motivo]
+        [insumoId, cantValidada, Number((costoValidado / cantValidada).toFixed(4)), motivoFinal]
     );
 
     // Actualizar en cascada el costo de todos los productos que usan este insumo
@@ -678,16 +701,167 @@ async function calcularDisponibilidadProducto(productoId) {
 }
 
 // ==========================================
-// 3. PRODUCTOS DEL CATÁLOGO
+// 3. PRODUCTOS DEL CATÁLOGO Y CATEGORÍAS
 // ==========================================
-async function crearProducto(nombre, precio, costo = 0, categoria = 'General', stock = null, unidadMedida = 'unidades', stockMinimo = 0, fechaVencimiento = null) {
+async function obtenerCategorias() {
+    return await allQuery(`SELECT id, nombre FROM categorias WHERE activo = 1 ORDER BY nombre ASC`);
+}
+
+async function crearCategoria(nombre) {
+    if (!nombre || String(nombre).trim() === '') {
+        throw new Error('El nombre de la categoría es obligatorio.');
+    }
+    const nombreLimpio = String(nombre).trim();
+    if (nombreLimpio.toLowerCase() === 'todas') {
+        throw new Error('"Todas" es una vista general del sistema y no puede usarse como nombre de categoría.');
+    }
+    await runQuery(`INSERT OR IGNORE INTO categorias (nombre, activo) VALUES (?, 1)`, [nombreLimpio]);
+    const cat = await getQuery(`SELECT id, nombre FROM categorias WHERE LOWER(nombre) = LOWER(?) AND activo = 1`, [nombreLimpio]);
+    return cat || { id: null, nombre: nombreLimpio };
+}
+
+async function crearProductoConInsumos({
+    nombre,
+    precio,
+    categoria = '',
+    categorias = [],
+    tipoComposicion = 'unitario',
+    insumoUnitarioId = null,
+    insumosReceta = []
+}) {
+    if (!nombre || String(nombre).trim() === '') {
+        throw new Error('El nombre del producto es obligatorio.');
+    }
+    const precioValidado = redondear2(numeroPositivo(precio, 'El precio del producto'));
+
+    // Normalizar categorías múltiples: puede venir como array o string separado por comas
+    let listaCategorias = [];
+    if (Array.isArray(categorias) && categorias.length > 0) {
+        listaCategorias = categorias;
+    } else if (Array.isArray(categoria)) {
+        listaCategorias = categoria;
+    } else if (typeof categoria === 'string' && categoria.trim() !== '') {
+        listaCategorias = categoria.split(',').map((c) => c.trim()).filter(Boolean);
+    }
+
+    // Filtrar vacíos y la palabra reservada 'todas'
+    listaCategorias = listaCategorias
+        .map((c) => String(c).trim())
+        .filter((c) => c !== '' && c.toLowerCase() !== 'todas');
+
+    // Desduplicar manteniendo el primer case encontrado
+    const catsUnicas = [];
+    const seenCats = new Set();
+    for (const c of listaCategorias) {
+        if (!seenCats.has(c.toLowerCase())) {
+            seenCats.add(c.toLowerCase());
+            catsUnicas.push(c);
+        }
+    }
+
+    const catFinal = catsUnicas.join(', ');
+
+    return await enTransaccion(async () => {
+        // Asegurar que cada categoría seleccionada exista en la tabla categorias
+        for (const c of catsUnicas) {
+            await runQuery(`INSERT OR IGNORE INTO categorias (nombre, activo) VALUES (?, 1)`, [c]);
+        }
+
+        if (tipoComposicion === 'unitario') {
+            if (!insumoUnitarioId) {
+                throw new Error('Debes seleccionar el insumo del inventario para la venta unitaria.');
+            }
+            const insumo = await getQuery(`SELECT id, nombre, costo_por_unidad, unidad_medida FROM insumos WHERE id = ? AND activo = 1`, [insumoUnitarioId]);
+            if (!insumo) {
+                throw new Error('El insumo seleccionado para el producto unitario no existe o está inactivo.');
+            }
+            const costoInicial = Number(insumo.costo_por_unidad || 0);
+
+            const resProd = await runQuery(
+                `INSERT INTO productos (nombre, precio, costo, categoria, unidad_medida, tipo_inventario, stock, stock_minimo, fecha_vencimiento)
+                 VALUES (?, ?, ?, ?, 'unidades', 'receta', NULL, 0, NULL)`,
+                [nombre.trim(), precioValidado, costoInicial, catFinal]
+            );
+            const productoId = resProd.lastID;
+
+            // Relación 1 a 1: 1 unidad del insumo
+            await runQuery(
+                `INSERT INTO recetas (producto_id, insumo_id, cantidad_requerida) VALUES (?, ?, 1)`,
+                [productoId, insumo.id]
+            );
+
+            await recalcularCostoProductoPorReceta(productoId);
+            return { id: productoId, nombre: nombre.trim(), precio: precioValidado, costo: costoInicial, categoria: catFinal };
+
+        } else if (tipoComposicion === 'receta') {
+            if (!Array.isArray(insumosReceta) || insumosReceta.length === 0) {
+                throw new Error('Debes agregar al menos un insumo para la receta o ensamblaje.');
+            }
+            if (insumosReceta.length > 30) {
+                throw new Error('Límite excedido: No se pueden agregar más de 30 insumos en una sola receta.');
+            }
+
+            const resProd = await runQuery(
+                `INSERT INTO productos (nombre, precio, costo, categoria, unidad_medida, tipo_inventario, stock, stock_minimo, fecha_vencimiento)
+                 VALUES (?, ?, 0, ?, 'unidades', 'receta', NULL, 0, NULL)`,
+                [nombre.trim(), precioValidado, catFinal]
+            );
+            const productoId = resProd.lastID;
+
+            const insumosUnicos = new Set();
+            for (const ing of insumosReceta) {
+                if (!ing || !ing.insumoId) continue;
+                const insumoId = Number(ing.insumoId);
+                if (insumosUnicos.has(insumoId)) {
+                    throw new Error(`El insumo ID ${insumoId} está duplicado en la receta.`);
+                }
+                insumosUnicos.add(insumoId);
+
+                const insumo = await getQuery(`SELECT id, nombre, unidad_medida FROM insumos WHERE id = ? AND activo = 1`, [insumoId]);
+                if (!insumo) throw new Error(`El insumo con ID ${insumoId} no existe.`);
+
+                const cantVal = numeroPositivo(ing.cantidad, `La cantidad del insumo ${insumo.nombre}`);
+                const cantidadConvertidaAlmacen = ing.unidadReceta
+                    ? convertirCantidadMedida(cantVal, ing.unidadReceta, insumo.unidad_medida)
+                    : cantVal;
+
+                await runQuery(
+                    `INSERT INTO recetas (producto_id, insumo_id, cantidad_requerida) VALUES (?, ?, ?)`,
+                    [productoId, insumoId, cantidadConvertidaAlmacen]
+                );
+            }
+
+            const costoFinal = await recalcularCostoProductoPorReceta(productoId);
+            return { id: productoId, nombre: nombre.trim(), precio: precioValidado, costo: costoFinal, categoria: catFinal };
+
+        } else {
+            // Venta libre / servicio sin insumo
+            const resProd = await runQuery(
+                `INSERT INTO productos (nombre, precio, costo, categoria, unidad_medida, tipo_inventario, stock, stock_minimo, fecha_vencimiento)
+                 VALUES (?, ?, 0, ?, 'unidades', 'libre', NULL, 0, NULL)`,
+                [nombre.trim(), precioValidado, catFinal]
+            );
+            return { id: resProd.lastID, nombre: nombre.trim(), precio: precioValidado, costo: 0, categoria: catFinal };
+        }
+    });
+}
+
+async function crearProducto(nombre, precio, costo = 0, categoria = '', stock = null, unidadMedida = 'unidades', stockMinimo = 0, fechaVencimiento = null) {
+    if (!nombre || String(nombre).trim() === '') {
+        throw new Error('El nombre del producto es obligatorio.');
+    }
     const precioValidado = redondear2(numeroPositivo(precio, 'El precio del producto'));
     const costoValidado = redondear2(numeroNoNegativo(costo ?? 0, 'El costo del producto'));
-    const tipoInventario = stock !== null ? 'directo' : 'libre';
+    const stockValidado = (stock !== null && stock !== undefined && stock !== '')
+        ? redondear2(numeroNoNegativo(stock, 'El stock inicial del producto'))
+        : null;
+    const stockMinimoValidado = redondear2(numeroNoNegativo(stockMinimo ?? 0, 'El stock mínimo de alerta'));
+    const tipoInventario = stockValidado !== null ? 'directo' : 'libre';
+
     const res = await runQuery(
         `INSERT INTO productos (nombre, precio, costo, categoria, unidad_medida, tipo_inventario, stock, stock_minimo, fecha_vencimiento)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [nombre, precioValidado, costoValidado, categoria, unidadMedida || 'unidades', tipoInventario, stock, Number(stockMinimo || 0), fechaVencimiento || null]
+        [nombre.trim(), precioValidado, costoValidado, categoria ? String(categoria).trim() : '', unidadMedida || 'unidades', tipoInventario, stockValidado, stockMinimoValidado, fechaVencimiento || null]
     );
     return res.lastID;
 }
@@ -697,37 +871,43 @@ async function registrarCompraProductoDirecto(productoId, cantidadComprada, cost
     const cantValidada = numeroPositivo(cantidadComprada, 'La cantidad comprada');
     const costoValidado = redondear2(numeroNoNegativo(costoTotalCompra, 'El costo total de compra'));
 
-    const prod = await getQuery(`SELECT * FROM productos WHERE id = ? AND activo = 1`, [productoId]);
-    if (!prod) throw new Error('Producto no encontrado.');
+    return await enTransaccion(async () => {
+        const prod = await getQuery(`SELECT * FROM productos WHERE id = ? AND activo = 1`, [productoId]);
+        if (!prod) throw new Error('Producto no encontrado.');
 
-    const stockAnterior = Math.max(0, Number(prod.stock || 0));
-    const valorAnterior = stockAnterior * Number(prod.costo || 0);
-    const nuevoStock = stockAnterior + cantValidada;
+        if (prod.tipo_inventario === 'receta') {
+            throw new Error('El artículo seleccionado es de elaboración por Receta. Su stock y costo se gestionan reabasteciendo sus Insumos.');
+        }
 
-    // Fórmula de Costo Promedio Ponderado (NIC 2) aplicada directamente al artículo
-    const nuevoCostoUnitario = nuevoStock > 0
-        ? (valorAnterior + costoValidado) / nuevoStock
-        : (costoValidado / cantValidada);
+        const stockAnterior = Math.max(0, Number(prod.stock || 0));
+        const valorAnterior = stockAnterior * Number(prod.costo || 0);
+        const nuevoStock = stockAnterior + cantValidada;
 
-    const vencimientoActualizado = fechaVencimiento && String(fechaVencimiento).trim() !== ''
-        ? String(fechaVencimiento).trim()
-        : prod.fecha_vencimiento;
+        // Fórmula de Costo Promedio Ponderado (NIC 2) aplicada directamente al artículo
+        const nuevoCostoUnitario = nuevoStock > 0
+            ? (valorAnterior + costoValidado) / nuevoStock
+            : (costoValidado / cantValidada);
 
-    await runQuery(
-        `UPDATE productos
-         SET tipo_inventario = 'directo',
-             stock = ?,
-             costo = ?,
-             fecha_vencimiento = ?
-         WHERE id = ?`,
-        [Number(nuevoStock.toFixed(4)), Number(nuevoCostoUnitario.toFixed(4)), vencimientoActualizado, productoId]
-    );
+        const vencimientoActualizado = fechaVencimiento && String(fechaVencimiento).trim() !== ''
+            ? String(fechaVencimiento).trim()
+            : prod.fecha_vencimiento;
 
-    return {
-        productoId,
-        nuevoStock: Number(nuevoStock.toFixed(4)),
-        nuevoCostoUnitario: Number(nuevoCostoUnitario.toFixed(4))
-    };
+        await runQuery(
+            `UPDATE productos
+             SET tipo_inventario = 'directo',
+                 stock = ?,
+                 costo = ?,
+                 fecha_vencimiento = ?
+             WHERE id = ?`,
+            [Number(nuevoStock.toFixed(4)), Number(nuevoCostoUnitario.toFixed(4)), vencimientoActualizado, productoId]
+        );
+
+        return {
+            productoId,
+            nuevoStock: Number(nuevoStock.toFixed(4)),
+            nuevoCostoUnitario: Number(nuevoCostoUnitario.toFixed(4))
+        };
+    });
 }
 
 async function obtenerProductos() {
@@ -1076,15 +1256,54 @@ async function registrarEgreso(cajaId, monto, descripcion, metodoPago = 'efectiv
     return res.lastID;
 }
 
+// Inyección / Reposición de efectivo a la caja (ej. cambio o sencillo provisto por administrador o dueño)
+async function registrarIngresoEfectivo(cajaId, monto, motivo, usuarioId = null) {
+    const montoValidado = redondear2(numeroPositivo(monto, 'El monto a ingresar'));
+
+    if (!motivo || String(motivo).trim() === '') {
+        throw new Error('Debes indicar el motivo de la reposición de efectivo (ej. Aporte de sencillo para cambio).');
+    }
+
+    if (usuarioId === null || usuarioId === undefined || usuarioId === '') {
+        throw new Error('El usuario que registra el ingreso de efectivo es obligatorio.');
+    }
+
+    const ejecutor = await obtenerUsuarioPorId(usuarioId);
+    if (!ejecutor) {
+        throw new Error('El usuario que intenta registrar el ingreso no existe o está inactivo.');
+    }
+
+    const caja = await getQuery(`SELECT id, usuario_id, estado FROM cajas WHERE id = ?`, [cajaId]);
+    if (!caja) {
+        throw new Error('La caja indicada no existe.');
+    }
+    if (caja.estado !== 'abierta') {
+        throw new Error('No se puede ingresar efectivo porque la caja no está abierta.');
+    }
+    if (Number(caja.usuario_id) !== Number(ejecutor.id) && !esRolAdministrativo(ejecutor.rol)) {
+        throw new Error('Permiso denegado: solo el cajero titular o un Administrador puede ingresar efectivo en este turno.');
+    }
+
+    const descripcionFinal = `[REPOSICIÓN DE EFECTIVO] ${String(motivo).trim()}`;
+    const res = await runQuery(
+        `INSERT INTO movimientos (caja_id, usuario_id, tipo, monto, metodo_pago, monto_recibido, cambio, descripcion, estado)
+         VALUES (?, ?, 'ingreso', ?, 'efectivo', ?, 0, ?, 'completado')`,
+        [cajaId, ejecutor.id, montoValidado, montoValidado, descripcionFinal]
+    );
+    return res.lastID;
+}
+
 async function anularMovimientoConPermiso(adminId, movimientoId, motivoAnulacion) {
     const ejecutor = await obtenerUsuarioPorId(adminId);
     if (!ejecutor || !esRolAdministrativo(ejecutor.rol)) {
         throw new Error('Permiso denegado: solo el administrador puede anular movimientos.');
     }
 
-    const motivoLimpio = (motivoAnulacion && String(motivoAnulacion).trim() !== '')
-        ? String(motivoAnulacion).trim()
-        : 'Error';
+    if (!motivoAnulacion || String(motivoAnulacion).trim().length < 3) {
+        throw new Error('Debes ingresar un motivo descriptivo y justificado para realizar la anulación.');
+    }
+
+    const motivoLimpio = String(motivoAnulacion).trim();
 
     return await enTransaccion(async () => {
         const mov = await getQuery(`SELECT * FROM movimientos WHERE id = ?`, [movimientoId]);
@@ -1304,9 +1523,12 @@ async function obtenerPrediccionComprasInsumos(diasAnalisis = 30, diasCobertura 
 // 6. ESTADÍSTICAS Y CONTABILIDAD (PANEL ADMIN)
 // ==========================================
 async function obtenerEstadisticasCaja(cajaId) {
+    // Solo contamos ventas comerciales de productos para no distorsionar ingresos con reposiciones de efectivo
     const kpiVentas = await getQuery(
-        `SELECT COUNT(id) as cantidad_tickets, COALESCE(SUM(monto), 0) as ventas_totales
-         FROM movimientos WHERE caja_id = ? AND tipo = 'ingreso' AND estado = 'completado'`,
+        `SELECT COUNT(DISTINCT m.id) as cantidad_tickets, COALESCE(SUM(d.subtotal), 0) as ventas_totales
+         FROM movimientos m
+         INNER JOIN detalle_movimientos d ON m.id = d.movimiento_id
+         WHERE m.caja_id = ? AND m.tipo = 'ingreso' AND m.estado = 'completado'`,
         [cajaId]
     );
 
@@ -1321,6 +1543,14 @@ async function obtenerEstadisticasCaja(cajaId) {
     const kpiEgresos = await getQuery(
         `SELECT COALESCE(SUM(monto), 0) as total_egresos
          FROM movimientos WHERE caja_id = ? AND tipo = 'egreso' AND estado = 'completado'`,
+        [cajaId]
+    );
+
+    const kpiReposiciones = await getQuery(
+        `SELECT COALESCE(SUM(monto), 0) as total_reposiciones
+         FROM movimientos m
+         WHERE m.caja_id = ? AND m.tipo = 'ingreso' AND m.estado = 'completado'
+           AND NOT EXISTS (SELECT 1 FROM detalle_movimientos d WHERE d.movimiento_id = m.id)`,
         [cajaId]
     );
 
@@ -1344,6 +1574,7 @@ async function obtenerEstadisticasCaja(cajaId) {
     const ventasTotales = redondear2(kpiVentas.ventas_totales);
     const costoTotalVentas = redondear2(kpiCostos.costo_total_ventas);
     const totalEgresos = redondear2(kpiEgresos.total_egresos);
+    const totalReposiciones = redondear2(kpiReposiciones.total_reposiciones);
 
     const ticketPromedio = kpiVentas.cantidad_tickets > 0
         ? ventasTotales / kpiVentas.cantidad_tickets
@@ -1359,6 +1590,7 @@ async function obtenerEstadisticasCaja(cajaId) {
         costoTotalVentas,
         gananciaBruta,
         totalEgresos,
+        totalReposiciones,
         flujoNetoOperativo,
         productosMasVendidos: rendimientoProductos.filter(p => p.unidades_vendidas > 0),
         productosSinRotacion: rendimientoProductos.filter(p => p.unidades_vendidas === 0)
@@ -1477,6 +1709,9 @@ module.exports = {
     registrarMermaInsumo,
     asignarIngredienteReceta,
     calcularDisponibilidadProducto,
+    obtenerCategorias,
+    crearCategoria,
+    crearProductoConInsumos,
     crearProducto,
     registrarCompraProductoDirecto,
     obtenerProductos,
@@ -1486,6 +1721,7 @@ module.exports = {
     reabrirCajaConPermiso,
     registrarVentaCompleta,
     registrarEgreso,
+    registrarIngresoEfectivo,
     anularMovimientoConPermiso,
     obtenerMovimientosCaja,
     cerrarCaja,

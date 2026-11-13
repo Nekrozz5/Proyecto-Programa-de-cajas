@@ -1,10 +1,12 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 
 export default function CajaPage() {
     const [cargando, setCargando] = useState(true);
     const [seccionActiva, setSeccionActiva] = useState('pos'); // 'pos' | 'egresos' | 'cierre' | 'movimientos'
+
+    const typingTimers = useRef({});
 
     const [cajaAbierta, setCajaAbierta] = useState(null);
     const [historialCajas, setHistorialCajas] = useState([]);
@@ -38,6 +40,10 @@ export default function CajaPage() {
     const [motivoEgreso, setMotivoEgreso] = useState('');
     const [metodoEgreso, setMetodoEgreso] = useState('efectivo');
 
+    // Estado para inyección / reposición de efectivo (cambio / sencillo)
+    const [montoIngresoEfectivo, setMontoIngresoEfectivo] = useState('');
+    const [motivoIngresoEfectivo, setMotivoIngresoEfectivo] = useState('');
+
     // Estado para cierre ciego
     const [efectivoReal, setEfectivoReal] = useState('');
     const [confirmacionCierreCiego, setConfirmacionCierreCiego] = useState(null);
@@ -65,6 +71,8 @@ export default function CajaPage() {
             setMovimientos(data.cajaAbierta ? (data.movimientos || []) : []);
             if (data.usuarioSesion) {
                 setUsuarioActual(data.usuarioSesion);
+            } else {
+                setUsuarioActual(null);
             }
 
             if (data.usuarios?.length > 0 && !loginUsuarioId) {
@@ -80,6 +88,39 @@ export default function CajaPage() {
     useEffect(() => {
         cargarDatos();
     }, []);
+
+    // Cierre automático de sesión por inactividad si el usuario en caja es developer o admin (15 minutos)
+    useEffect(() => {
+        if (!usuarioActual || !['developer', 'superadmin', 'admin'].includes(usuarioActual.rol)) return;
+
+        const MINUTOS_INACTIVIDAD = 15;
+        const TIEMPO_LIMITE_MS = MINUTOS_INACTIVIDAD * 60 * 1000;
+        let timerInactividad = null;
+
+        const reiniciarTemporizador = () => {
+            if (timerInactividad) clearTimeout(timerInactividad);
+            timerInactividad = setTimeout(async () => {
+                try {
+                    await fetch('/api/caja', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ accion: 'logout' })
+                    });
+                } catch (_) {}
+                setUsuarioActual(null);
+                setError(`Tu sesión de ${usuarioActual.rol} se ha cerrado automáticamente tras ${MINUTOS_INACTIVIDAD} minutos de inactividad por seguridad.`);
+            }, TIEMPO_LIMITE_MS);
+        };
+
+        const eventos = ['mousedown', 'mousemove', 'keydown', 'scroll', 'touchstart'];
+        eventos.forEach((ev) => window.addEventListener(ev, reiniciarTemporizador, { passive: true }));
+        reiniciarTemporizador();
+
+        return () => {
+            if (timerInactividad) clearTimeout(timerInactividad);
+            eventos.forEach((ev) => window.removeEventListener(ev, reiniciarTemporizador));
+        };
+    }, [usuarioActual]);
 
     function limpiarAlertas() {
         setMensaje(null);
@@ -117,6 +158,7 @@ export default function CajaPage() {
             await cargarDatos();
             setMensaje(`Sesión iniciada como ${data.usuario.nombre} (${data.usuario.rol}).`);
         } catch (err) {
+            setLoginPin('');
             setError(err.message);
         }
     }
@@ -164,18 +206,22 @@ export default function CajaPage() {
         limpiarAlertas();
         setCarrito((prev) => {
             const existe = prev.find((item) => item.productoId === prod.id);
-            const nuevaCantidad = existe ? existe.cantidad + 1 : 1;
+            const cantidadActual = existe ? (Number(existe.cantidad) || 0) : 0;
+            const nuevaCantidad = cantidadActual + 1;
+            const maxDisponible = (prod.tipo_inventario !== 'libre' && prod.unidades_disponibles !== null)
+                ? prod.unidades_disponibles
+                : Infinity;
 
-            if (prod.tipo_inventario !== 'libre' && prod.unidades_disponibles !== null) {
-                if (nuevaCantidad > prod.unidades_disponibles) {
-                    setError(`Stock máximo alcanzado para ${prod.nombre} (${prod.unidades_disponibles} disponibles).`);
-                    return prev;
-                }
+            if (maxDisponible !== Infinity && nuevaCantidad > maxDisponible) {
+                setError(`⚠️ Stock máximo alcanzado para "${prod.nombre}" (${maxDisponible} productos disponibles).`);
+                return prev;
             }
 
             if (existe) {
                 return prev.map((item) =>
-                    item.productoId === prod.id ? { ...item, cantidad: nuevaCantidad } : item
+                    item.productoId === prod.id
+                        ? { ...item, cantidad: nuevaCantidad, cantidadTexto: String(nuevaCantidad), maximoDisponible: maxDisponible }
+                        : item
                 );
             }
             return [
@@ -184,7 +230,9 @@ export default function CajaPage() {
                     productoId: prod.id,
                     nombre: prod.nombre,
                     precio: prod.precio,
-                    cantidad: 1
+                    cantidad: 1,
+                    cantidadTexto: '1',
+                    maximoDisponible: maxDisponible
                 }
             ];
         });
@@ -192,20 +240,130 @@ export default function CajaPage() {
 
     function cambiarCantidad(productoId, delta) {
         limpiarAlertas();
+        if (typingTimers.current[productoId]) {
+            clearTimeout(typingTimers.current[productoId]);
+            delete typingTimers.current[productoId];
+        }
+
+        setCarrito((prev) => {
+            const item = prev.find((i) => i.productoId === productoId);
+            if (!item) return prev;
+
+            const prodOriginal = productos.find((p) => p.id === productoId);
+            const maxDisponible = (prodOriginal && prodOriginal.tipo_inventario !== 'libre' && prodOriginal.unidades_disponibles !== null)
+                ? prodOriginal.unidades_disponibles
+                : (item.maximoDisponible ?? Infinity);
+
+            const nuevaCantidad = (Number(item.cantidad) || 0) + delta;
+
+            if (nuevaCantidad <= 0) {
+                return prev.filter((i) => i.productoId !== productoId);
+            }
+
+            if (maxDisponible !== Infinity && nuevaCantidad > maxDisponible) {
+                setError(`⚠️ Límite alcanzado: La cantidad máxima disponible para "${item.nombre}" es de ${maxDisponible} productos.`);
+                return prev;
+            }
+
+            return prev.map((i) =>
+                i.productoId === productoId
+                    ? { ...i, cantidad: nuevaCantidad, cantidadTexto: String(nuevaCantidad), maximoDisponible: maxDisponible }
+                    : i
+            );
+        });
+    }
+
+    function handleInputCantidad(productoId, rawValor) {
+        limpiarAlertas();
+
+        // 1. Reflejar de inmediato el texto tipeado para fluidez total del teclado
         setCarrito((prev) =>
-            prev
-                .map((item) =>
-                    item.productoId === productoId
-                        ? { ...item, cantidad: item.cantidad + delta }
-                        : item
-                )
-                .filter((item) => item.cantidad > 0)
+            prev.map((item) =>
+                item.productoId === productoId
+                    ? { ...item, cantidadTexto: rawValor }
+                    : item
+            )
         );
+
+        if (typingTimers.current[productoId]) {
+            clearTimeout(typingTimers.current[productoId]);
+        }
+
+        // 2. Al terminar de escribir (pausa de 500ms) se valida y actualiza
+        typingTimers.current[productoId] = setTimeout(() => {
+            finalizarEdicionCantidad(productoId, rawValor);
+        }, 500);
+    }
+
+    function finalizarEdicionCantidad(productoId, valor) {
+        if (typingTimers.current[productoId]) {
+            clearTimeout(typingTimers.current[productoId]);
+            delete typingTimers.current[productoId];
+        }
+
+        setCarrito((prev) => {
+            const item = prev.find((i) => i.productoId === productoId);
+            if (!item) return prev;
+
+            const prodOriginal = productos.find((p) => p.id === productoId);
+            const maxDisponible = (prodOriginal && prodOriginal.tipo_inventario !== 'libre' && prodOriginal.unidades_disponibles !== null)
+                ? prodOriginal.unidades_disponibles
+                : (item.maximoDisponible ?? Infinity);
+
+            // Si el usuario lo dejó en blanco
+            if (valor === '' || valor === null || valor === undefined) {
+                return prev.map((i) =>
+                    i.productoId === productoId
+                        ? { ...i, cantidadTexto: '', cantidad: 0 }
+                        : i
+                );
+            }
+
+            const num = parseInt(valor, 10);
+
+            if (isNaN(num) || num <= 0) {
+                setError(`Ingresa una cantidad numérica mayor a 0 para "${item.nombre}".`);
+                return prev.map((i) =>
+                    i.productoId === productoId
+                        ? { ...i, cantidadTexto: '', cantidad: 0 }
+                        : i
+                );
+            }
+
+            if (maxDisponible !== Infinity && num > maxDisponible) {
+                // REBASA EL LÍMITE: Borra la cantidad y dice cuál es la cantidad máxima disponible
+                setError(`⚠️ Cantidad máxima superada: Para "${item.nombre}" el límite máximo disponible es de ${maxDisponible} productos. Se ha borrado la cantidad ingresada.`);
+                return prev.map((i) =>
+                    i.productoId === productoId
+                        ? { ...i, cantidadTexto: '', cantidad: 0 }
+                        : i
+                );
+            }
+
+            // Cantidad válida dentro de stock
+            limpiarAlertas();
+            return prev.map((i) =>
+                i.productoId === productoId
+                    ? { ...i, cantidad: num, cantidadTexto: String(num), maximoDisponible: maxDisponible }
+                    : i
+            );
+        });
+    }
+
+    function eliminarDelCarrito(productoId) {
+        limpiarAlertas();
+        if (typingTimers.current[productoId]) {
+            clearTimeout(typingTimers.current[productoId]);
+            delete typingTimers.current[productoId];
+        }
+        setCarrito((prev) => prev.filter((i) => i.productoId !== productoId));
     }
 
     const totalCarrito = Number(
-        carrito.reduce((acc, item) => acc + item.precio * item.cantidad, 0).toFixed(2)
+        carrito.reduce((acc, item) => acc + (Number(item.precio) || 0) * (Number(item.cantidad) || 0), 0).toFixed(2)
     );
+
+    const hayCantidadInvalida = carrito.some((i) => !i.cantidad || Number(i.cantidad) <= 0);
 
     const montoRecibidoNum = montoRecibido !== '' ? Number(montoRecibido) : 0;
     const faltaDineroRecibido = metodoPago === 'efectivo' && montoRecibido !== '' && montoRecibidoNum < totalCarrito;
@@ -215,6 +373,18 @@ export default function CajaPage() {
             : 0;
     const cambioQueSaleDeCaja =
         cambioManual !== '' ? Number(cambioManual) : cambioCalculadoAuto;
+
+    // Recalcular cambio automáticamente si cambia el total del carrito o el monto recibido
+    useEffect(() => {
+        if (montoRecibido !== '') {
+            const mNum = Number(montoRecibido);
+            if (mNum >= totalCarrito) {
+                setCambioManual(String(Number((mNum - totalCarrito).toFixed(2))));
+            } else {
+                setCambioManual('');
+            }
+        }
+    }, [totalCarrito, montoRecibido]);
 
     function handleChangeMontoRecibido(valor) {
         setMontoRecibido(valor);
@@ -252,6 +422,11 @@ export default function CajaPage() {
         limpiarAlertas();
         if (carrito.length === 0) {
             setError('Agrega al menos un producto al carrito.');
+            return;
+        }
+        const itemInvalido = carrito.find((i) => !i.cantidad || Number(i.cantidad) <= 0);
+        if (itemInvalido) {
+            setError(`El producto "${itemInvalido.nombre}" no tiene una cantidad válida. Ingresa un número mayor a 0 o elimínalo del pedido.`);
             return;
         }
         try {
@@ -304,6 +479,32 @@ export default function CajaPage() {
             setMontoEgreso('');
             setMotivoEgreso('');
             setMensaje(`Egreso #${data.movimientoId} registrado por ${usuarioActual.nombre}.`);
+            await cargarDatos();
+        } catch (err) {
+            setError(err.message);
+        }
+    }
+
+    async function handleRegistrarIngresoEfectivo(e) {
+        e.preventDefault();
+        limpiarAlertas();
+        try {
+            const res = await fetch('/api/caja', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    accion: 'ingreso_efectivo',
+                    cajaId: cajaAbierta.id,
+                    monto: Number(montoIngresoEfectivo),
+                    motivo: `${motivoIngresoEfectivo} (Entregado/Registrado por: ${usuarioActual.nombre})`
+                })
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error);
+
+            setMontoIngresoEfectivo('');
+            setMotivoIngresoEfectivo('');
+            setMensaje(`Reposición de efectivo #${data.movimientoId} ingresada exitosamente a la caja.`);
             await cargarDatos();
         } catch (err) {
             setError(err.message);
@@ -487,23 +688,29 @@ export default function CajaPage() {
                     {cajaAbierta && (
                         <>
                             <button
+                                onClick={() => { limpiarAlertas(); setSeccionActiva('ingreso_efectivo'); }}
+                                style={navBtnStyle(seccionActiva === 'ingreso_efectivo')}
+                            >
+                                📥 2. Ingresar Efectivo / Sencillo
+                            </button>
+                            <button
                                 onClick={() => { limpiarAlertas(); setSeccionActiva('egresos'); }}
                                 style={navBtnStyle(seccionActiva === 'egresos')}
                             >
-                                💸 2. Registrar Egreso
+                                💸 3. Registrar Egreso
                             </button>
                             <button
                                 onClick={() => { limpiarAlertas(); setSeccionActiva('cierre'); }}
                                 style={navBtnStyle(seccionActiva === 'cierre')}
                             >
-                                🔒 3. Cerrar Turno (Arqueo)
+                                🔒 4. Cerrar Turno (Arqueo)
                             </button>
                             {usuarioActual.rol !== 'user' && (
                                 <button
                                     onClick={() => { limpiarAlertas(); setSeccionActiva('movimientos'); }}
                                     style={navBtnStyle(seccionActiva === 'movimientos')}
                                 >
-                                    📋 4. Historial del Turno
+                                    📋 5. Historial del Turno
                                 </button>
                             )}
                         </>
@@ -596,7 +803,12 @@ export default function CajaPage() {
                                     ) : (
                                         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(175px, 1fr))', gap: '0.75rem' }}>
                                             {productos.map((p) => {
-                                                const sinStock = p.tipo_inventario !== 'libre' && p.unidades_disponibles !== null && p.unidades_disponibles <= 0;
+                                                const itemEnCarrito = carrito.find((item) => item.productoId === p.id);
+                                                const cantidadEnCarrito = itemEnCarrito ? (Number(itemEnCarrito.cantidad) || 0) : 0;
+                                                const esLibre = p.tipo_inventario === 'libre' || p.unidades_disponibles === null || p.unidades_disponibles === Infinity;
+                                                const disponiblesRestantes = esLibre ? Infinity : Math.max(0, p.unidades_disponibles - cantidadEnCarrito);
+                                                const sinStock = !esLibre && disponiblesRestantes <= 0;
+
                                                 return (
                                                     <button
                                                         key={p.id}
@@ -606,25 +818,53 @@ export default function CajaPage() {
                                                             textAlign: 'left',
                                                             padding: '0.8rem',
                                                             borderRadius: '8px',
-                                                            border: '1px solid #cbd5e1',
-                                                            background: sinStock ? '#f3f4f6' : '#fff',
+                                                            border: cantidadEnCarrito > 0 ? '2px solid #0284c7' : '1px solid #cbd5e1',
+                                                            background: sinStock ? '#f8fafc' : cantidadEnCarrito > 0 ? '#f0f9ff' : '#fff',
                                                             cursor: sinStock ? 'not-allowed' : 'pointer',
-                                                            opacity: sinStock ? 0.6 : 1
+                                                            opacity: sinStock ? 0.6 : 1,
+                                                            position: 'relative',
+                                                            transition: 'all 0.15s ease'
                                                         }}
                                                     >
+                                                        {cantidadEnCarrito > 0 && (
+                                                            <span style={{
+                                                                position: 'absolute',
+                                                                top: '6px',
+                                                                right: '6px',
+                                                                background: '#0284c7',
+                                                                color: '#fff',
+                                                                borderRadius: '999px',
+                                                                padding: '0.1rem 0.45rem',
+                                                                fontSize: '0.72rem',
+                                                                fontWeight: 'bold'
+                                                            }}>
+                                                                {cantidadEnCarrito} en pedido
+                                                            </span>
+                                                        )}
                                                         <div style={{ fontSize: '0.72rem', color: '#64748b', textTransform: 'uppercase' }}>
-                                                            {p.categoria} • {p.tipo_inventario}
+                                                            {(p.categoria && p.categoria.trim()) ? p.categoria : 'Sin categoría'} • {p.tipo_inventario}
                                                         </div>
-                                                        <div style={{ fontWeight: 'bold', fontSize: '0.98rem', margin: '0.2rem 0' }}>
+                                                        <div style={{ fontWeight: 'bold', fontSize: '0.98rem', margin: '0.2rem 0', color: '#0f172a' }}>
                                                             {p.nombre}
                                                         </div>
                                                         <div style={{ color: '#0070f3', fontWeight: 'bold', fontSize: '1.05rem' }}>
                                                             Bs {Number(p.precio).toFixed(2)}
                                                         </div>
-                                                        <div style={{ fontSize: '0.78rem', color: sinStock ? '#b91c1c' : '#166534', marginTop: '0.3rem' }}>
-                                                            {p.tipo_inventario === 'libre' || p.unidades_disponibles === null
-                                                                ? 'Disponible (Libre)'
-                                                                : `Stock: ${p.unidades_disponibles} u.`}
+                                                        <div style={{ fontSize: '0.78rem', color: sinStock ? '#b91c1c' : '#166534', marginTop: '0.3rem', fontWeight: 500 }}>
+                                                            {esLibre ? (
+                                                                'Disponible (Libre)'
+                                                            ) : sinStock ? (
+                                                                <span>⚠️ Sin stock disponible {cantidadEnCarrito > 0 ? `(${cantidadEnCarrito} en pedido)` : ''}</span>
+                                                            ) : (
+                                                                <span>
+                                                                    Stock: <strong>{disponiblesRestantes}</strong> disponibles
+                                                                    {cantidadEnCarrito > 0 && (
+                                                                        <span style={{ color: '#0369a1', marginLeft: '0.25rem' }}>
+                                                                            (de {p.unidades_disponibles})
+                                                                        </span>
+                                                                    )}
+                                                                </span>
+                                                            )}
                                                         </div>
                                                     </button>
                                                 );
@@ -729,31 +969,143 @@ export default function CajaPage() {
                                             </div>
                                         )}
 
-                                        <button type="submit" disabled={carrito.length === 0 || faltaDineroRecibido} style={{ ...btnPrimario, fontSize: '1rem' }}>
+                                        <button
+                                            type="submit"
+                                            disabled={carrito.length === 0 || faltaDineroRecibido || hayCantidadInvalida}
+                                            style={{
+                                                ...btnPrimario,
+                                                fontSize: '1rem',
+                                                opacity: (carrito.length === 0 || faltaDineroRecibido || hayCantidadInvalida) ? 0.6 : 1,
+                                                cursor: (carrito.length === 0 || faltaDineroRecibido || hayCantidadInvalida) ? 'not-allowed' : 'pointer'
+                                            }}
+                                        >
                                             Confirmar Cobro ({metodoPago.toUpperCase()})
                                         </button>
                                     </form>
 
                                     {/* Lista de productos en el carrito */}
-                                    <h4 style={{ margin: '0 0 0.5rem', color: '#334155' }}>Detalle del Pedido ({carrito.length} ítems)</h4>
+                                    <h4 style={{ margin: '0 0 0.5rem', color: '#334155' }}>
+                                        Detalle del Pedido ({carrito.length} {carrito.length === 1 ? 'ítem' : 'ítems'})
+                                    </h4>
                                     {carrito.length === 0 ? (
-                                        <p style={{ color: '#64748b', fontSize: '0.9rem', margin: 0 }}>Selecciona productos a la izquierda.</p>
+                                        <p style={{ color: '#64748b', fontSize: '0.9rem', margin: 0 }}>
+                                            Selecciona productos a la izquierda o haz clic para agregar al pedido.
+                                        </p>
                                     ) : (
-                                        <div>
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
                                             {carrito.map((item) => (
                                                 <div
                                                     key={item.productoId}
-                                                    style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.45rem 0', borderBottom: '1px solid #f1f5f9', fontSize: '0.9rem' }}
+                                                    style={{
+                                                        display: 'flex',
+                                                        justifyContent: 'space-between',
+                                                        alignItems: 'center',
+                                                        padding: '0.5rem 0',
+                                                        borderBottom: '1px solid #f1f5f9',
+                                                        fontSize: '0.9rem',
+                                                        gap: '0.5rem'
+                                                    }}
                                                 >
-                                                    <div>
-                                                        <strong>{item.nombre}</strong>
-                                                        <div style={{ fontSize: '0.8rem', color: '#64748b' }}>
-                                                            Bs {item.precio.toFixed(2)} x {item.cantidad} = <strong>Bs {(item.precio * item.cantidad).toFixed(2)}</strong>
+                                                    <div style={{ flex: 1, minWidth: 0 }}>
+                                                        <div style={{ fontWeight: 'bold', color: '#1e293b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                                            {item.nombre}
                                                         </div>
+                                                        <div style={{ fontSize: '0.8rem', color: '#64748b' }}>
+                                                            Bs {Number(item.precio).toFixed(2)} x {item.cantidad || 0} = <strong style={{ color: '#0f172a' }}>Bs {((Number(item.precio) || 0) * (Number(item.cantidad) || 0)).toFixed(2)}</strong>
+                                                        </div>
+                                                        {item.maximoDisponible !== null && item.maximoDisponible !== Infinity && (
+                                                            <div style={{ fontSize: '0.72rem', color: '#0369a1' }}>
+                                                                Máx. disponible: {item.maximoDisponible} u.
+                                                            </div>
+                                                        )}
                                                     </div>
-                                                    <div style={{ display: 'flex', gap: '0.35rem' }}>
-                                                        <button type="button" onClick={() => cambiarCantidad(item.productoId, -1)} style={btnMini}>-</button>
-                                                        <button type="button" onClick={() => cambiarCantidad(item.productoId, 1)} style={btnMini}>+</button>
+
+                                                    {/* Controles de cantidad: restar, escribir por teclado, sumar, borrar */}
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', flexShrink: 0 }}>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => cambiarCantidad(item.productoId, -1)}
+                                                            style={{
+                                                                ...btnMini,
+                                                                width: '28px',
+                                                                height: '28px',
+                                                                display: 'flex',
+                                                                alignItems: 'center',
+                                                                justifyContent: 'center',
+                                                                fontWeight: 'bold',
+                                                                cursor: 'pointer'
+                                                            }}
+                                                            title="Restar 1 unidad"
+                                                        >
+                                                            -
+                                                        </button>
+
+                                                        <input
+                                                            type="number"
+                                                            min="1"
+                                                            max={item.maximoDisponible !== Infinity ? item.maximoDisponible : undefined}
+                                                            value={item.cantidadTexto ?? item.cantidad ?? ''}
+                                                            onChange={(e) => handleInputCantidad(item.productoId, e.target.value)}
+                                                            onBlur={(e) => finalizarEdicionCantidad(item.productoId, e.target.value)}
+                                                            onKeyDown={(e) => {
+                                                                if (e.key === 'Enter') {
+                                                                    e.preventDefault();
+                                                                    finalizarEdicionCantidad(item.productoId, e.target.value);
+                                                                    e.target.blur();
+                                                                }
+                                                            }}
+                                                            onFocus={(e) => e.target.select()}
+                                                            style={{
+                                                                width: '54px',
+                                                                height: '28px',
+                                                                padding: '0 0.25rem',
+                                                                textAlign: 'center',
+                                                                fontWeight: 'bold',
+                                                                fontSize: '0.92rem',
+                                                                border: (!item.cantidad || item.cantidad <= 0 || item.cantidadTexto === '') ? '2px dashed #f59e0b' : '1px solid #cbd5e1',
+                                                                borderRadius: '6px',
+                                                                background: (!item.cantidad || item.cantidad <= 0 || item.cantidadTexto === '') ? '#fffbeb' : '#ffffff',
+                                                                outline: 'none'
+                                                            }}
+                                                            title="Escribe la cantidad deseada desde el teclado"
+                                                            placeholder="Cant"
+                                                        />
+
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => cambiarCantidad(item.productoId, 1)}
+                                                            style={{
+                                                                ...btnMini,
+                                                                width: '28px',
+                                                                height: '28px',
+                                                                display: 'flex',
+                                                                alignItems: 'center',
+                                                                justifyContent: 'center',
+                                                                fontWeight: 'bold',
+                                                                cursor: 'pointer'
+                                                            }}
+                                                            title="Sumar 1 unidad"
+                                                        >
+                                                            +
+                                                        </button>
+
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => eliminarDelCarrito(item.productoId)}
+                                                            style={{
+                                                                background: 'none',
+                                                                border: 'none',
+                                                                color: '#94a3b8',
+                                                                fontSize: '0.9rem',
+                                                                cursor: 'pointer',
+                                                                padding: '0.2rem 0.35rem',
+                                                                borderRadius: '4px',
+                                                                marginLeft: '0.15rem'
+                                                            }}
+                                                            title="Eliminar del pedido"
+                                                        >
+                                                            🗑️
+                                                        </button>
                                                     </div>
                                                 </div>
                                             ))}
@@ -774,7 +1126,45 @@ export default function CajaPage() {
                             </div>
                         )}
 
-                        {/* SECCIÓN 2: REGISTRAR EGRESOS */}
+                        {/* SECCIÓN 2: INGRESAR EFECTIVO / REPOSICIÓN PARA CAMBIO */}
+                        {seccionActiva === 'ingreso_efectivo' && (
+                            <section style={{ ...cardStyle, maxWidth: '540px' }}>
+                                <h2 style={{ marginTop: 0 }}>📥 Ingresar Efectivo / Sencillo para Cambio</h2>
+                                <p style={{ color: '#555', fontSize: '0.9rem' }}>
+                                    Usa esta opción cuando el dueño o administrador entregue billetes o monedas adicionales a la caja (ej. Bs 200, Bs 500) para tener cambio/sencillo disponible.
+                                    Este monto <strong>se suma al dinero físico que debe haber en el cajón</strong>, pero <strong>no cuenta como venta de productos</strong>.
+                                </p>
+                                <form onSubmit={handleRegistrarIngresoEfectivo} style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+                                    <label>
+                                        Monto en Efectivo que Entra al Cajón (Bs):
+                                        <input
+                                            type="number"
+                                            step="0.01"
+                                            min="0.1"
+                                            required
+                                            placeholder="Ej. 200.00"
+                                            value={montoIngresoEfectivo}
+                                            onChange={(e) => setMontoIngresoEfectivo(e.target.value)}
+                                            style={inputStyle}
+                                        />
+                                    </label>
+                                    <label>
+                                        Motivo Obligatorio (Justificación):
+                                        <input
+                                            type="text"
+                                            required
+                                            placeholder="Ej. Aporte del director para sencillo, cambio de billetes grandes..."
+                                            value={motivoIngresoEfectivo}
+                                            onChange={(e) => setMotivoIngresoEfectivo(e.target.value)}
+                                            style={inputStyle}
+                                        />
+                                    </label>
+                                    <button type="submit" style={btnPrimario}>Confirmar Entrada de Efectivo al Cajón</button>
+                                </form>
+                            </section>
+                        )}
+
+                        {/* SECCIÓN 3: REGISTRAR EGRESOS */}
                         {seccionActiva === 'egresos' && (
                             <section style={{ ...cardStyle, maxWidth: '540px' }}>
                                 <h2 style={{ marginTop: 0 }}>💸 Registrar Egreso / Gasto Menor de Caja</h2>

@@ -1,16 +1,12 @@
-{"timestamp":"00:00:01.367","source":"Server","level":"LOG","message":""}
-{"timestamp":"00:00:06.274","source":"Browser","level":"INFO","message":"Download the React DevTools for a better development experience: https://react.dev/link/react-devtools"}
-{"timestamp":"00:00:06.431","source":"Server","level":"LOG","message":"Conectado exitosamente a la base de datos SQLite local."}
-{"timestamp":"00:00:06.434","source":"Server","level":"LOG","message":"[Migraciones] Aplicando v1: Esquema base completo, auditoría de anulaciones, FK movimiento_id en insumos, usuario_id NOT NULL en movimientos e índices..."}
-{"timestamp":"00:00:06.453","source":"Server","level":"LOG","message":"[Migraciones] v1 completada exitosamente."}
-{"timestamp":"00:00:06.455","source":"Server","level":"LOG","message":"[Migraciones] Aplicando v2: Migración de rol developper -> developer en tabla usuarios y aseguramiento de cuentas base..."}
-{"timestamp":"00:00:06.467","source":"Server","level":"LOG","message":"[Migraciones] v2 completada exitosamente."}
-{"timestamp":"00:00:06.468","source":"Server","level":"LOG","message":"[Migraciones] Aplicando v3: Hasheo de contraseñas/PIN con bcryptjs y generación única de clave aleatoria o por entorno para developer..."}
-{"timestamp":"00:00:06.542","source":"Server","level":"LOG","message":"=================================================================="}
-{"timestamp":"00:00:06.542","source":"Server","level":"LOG","message":"[SEGURIDAD] Clave aleatoria generada por única vez para 'developer':"}
-{"timestamp":"00:00:06.542","source":"Server","level":"LOG","message":"  Usuario: developer"}
-{"timestamp":"00:00:06.542","source":"Server","level":"LOG","message":"  Clave:   lOZ2-s8qnp8k"}
-{"timestamp":"00:00:06.542","source":"Server","level":"LOG","message":"  (Guárdala ahora o configura DEVELOPER_PASSWORD en .env.local)"}
-{"timestamp":"00:00:06.542","source":"Server","level":"LOG","message":"=================================================================="}
-{"timestamp":"00:00:06.549","source":"Server","level":"LOG","message":"[Migraciones] v3 completada exitosamente."}
-{"timestamp":"00:00:33.065","source":"Browser","level":"INFO","message":"Download the React DevTools for a better development experience: https://react.dev/link/react-devtools"}
+{"timestamp":"00:00:00.924","source":"Server","level":"LOG","message":""}
+{"timestamp":"00:00:03.261","source":"Browser","level":"INFO","message":"Download the React DevTools for a better development experience: https://react.dev/link/react-devtools"}
+{"timestamp":"00:00:03.378","source":"Server","level":"LOG","message":"Conectado exitosamente a la base de datos SQLite local."}
+{"timestamp":"00:00:05.150","source":"Browser","level":"INFO","message":"Download the React DevTools for a better development experience: https://react.dev/link/react-devtools"}
+{"timestamp":"00:02:28.442","source":"Browser","level":"INFO","message":"Download the React DevTools for a better development experience: https://react.dev/link/react-devtools"}
+{"timestamp":"00:02:34.394","source":"Browser","level":"INFO","message":"Download the React DevTools for a better development experience: https://react.dev/link/react-devtools"}
+{"timestamp":"00:02:37.849","source":"Browser","level":"INFO","message":"Download the React DevTools for a better development experience: https://react.dev/link/react-devtools"}
+{"timestamp":"00:02:42.917","source":"Browser","level":"INFO","message":"Download the React DevTools for a better development experience: https://react.dev/link/react-devtools"}
+{"timestamp":"00:07:16.064","source":"Server","level":"LOG","message":"✓ Compiled in 76ms"}
+{"timestamp":"00:07:25.035","source":"Server","level":"LOG","message":"✓ Compiled in 45ms"}
+{"timestamp":"00:07:31.201","source":"Browser","level":"INFO","message":"Download the React DevTools for a better development experience: https://react.dev/link/react-devtools"}
+{"timestamp":"00:08:04.262","source":"Browser","level":"INFO","message":"Download the React DevTools for a better development experience: https://react.dev/link/react-devtools"}
