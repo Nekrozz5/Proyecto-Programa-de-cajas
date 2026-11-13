@@ -7,11 +7,19 @@
   - TTL diferenciado por rol: `developer` (15 min), `superadmin` / `admin` (30 min), `user` (8 horas).
   - `INSTANCE_BOOT_ID`: Identificador de arranque del proceso que invalida de inmediato tokens administrativos/técnicos al reiniciar el servidor (`npm run dev`), eliminando sesiones zombis.
   - Cookies de sesión estrictas (Session Cookies destruidas al cerrar ventana) para perfiles administrativos y cierre por inactividad en frontend (15 min).
+- **Infraestructura y Preparación para Producción:**
+  - Base de datos portable con ruta configurable por variable de entorno `DATABASE_PATH` y concurrencia gestionada con `PRAGMA busy_timeout = 5000` en `database/database.js`.
+  - Script de respaldo atómico en caliente (`scripts/backup.js`) ejecutado con `npm run backup` usando SQLite `VACUUM INTO`, purga local automática y soporte opcional para sincronización a AWS S3.
+  - Empaquetado optimizado en `next.config.js` con `serverExternalPackages: ['sqlite3', 'bcryptjs']`.
+  - Contenerización lista para despliegue con `Dockerfile` multi-stage y `docker-compose.yml`.
+  - Gestión de procesos para servidores Linux con PM2 (`ecosystem.config.js`).
+  - Guía completa de arquitectura y despliegue en la nube en `DEPLOY_AWS.md`.
 - **Estructura de Carpetas:**
-  - `database/database.js`: Inicialización de SQLite, activación de claves foráneas (`PRAGMA foreign_keys = ON`), modo WAL y ejecución automática de migraciones.
+  - `database/database.js`: Inicialización de SQLite, activación de claves foráneas (`PRAGMA foreign_keys = ON`), modo WAL, timeout y ejecución automática de migraciones.
   - `database/migraciones.js`: Sistema de migraciones versionado con `PRAGMA user_version`. Toda mutación al esquema se aplica de forma transaccional e idempotente (migraciones v1 a v5).
   - `server/queries.js`: Lógica de negocio y consultas con promesas nativas (`async/await`) usando `runQuery`, `getQuery`, `allQuery` y `transaccion()`.
   - `server/sesion.js`: Manejo de sesión JWT del servidor (crear, validar, renovar y destruir cookies HttpOnly `pos_session`).
+  - `scripts/backup.js`: Script de copia de seguridad atómica con retención configurable.
   - `app/api/caja/route.js` y `app/api/reportes/route.js`: Endpoints del backend en Next.js.
   - `app/caja/page.js` y `app/admin/page.js`: Vistas de operador y administrador.
 
@@ -73,13 +81,55 @@
   ```bash
   npm run start
   ```
+- **Ejecutar respaldo en caliente de la base de datos (SQLite VACUUM INTO + S3):**
+  ```bash
+  npm run backup
+  ```
+- **Despliegue con PM2 en servidor Linux:**
+  ```bash
+  pm2 start ecosystem.config.js
+  ```
+- **Despliegue con Docker Compose:**
+  ```bash
+  docker compose up -d --build
+  ```
 - **Ejecución de pruebas puntuales:**
   ```bash
   node test.js
   ```
 
-## 5. Estado del Proyecto
+## 5. Configuración del Entorno de Desarrollo (VS Code / Antigravity IDE)
+Para garantizar una experiencia consistente al trabajar en múltiples equipos (ej. PC y Laptop):
+
+### A. Extensiones de VS Code Configuradas (`.vscode/extensions.json`)
+- **SQLite Viewer (`qwtel.sqlite-viewer`):** Permite inspeccionar, consultar y filtrar tablas de `caja.db` directamente desde el explorador de VS Code sin instalar software adicional.
+- **Docker (`ms-azuretools.vscode-docker`):** Facilita la gestión de imágenes, contenedores y archivos `Dockerfile` / `docker-compose.yml`.
+- **ESLint (`dbaeumer.vscode-eslint`):** Asegura consistencia de sintaxis y detección temprana de errores en JavaScript/React.
+- **Prettier (`esbenp.prettier-vscode`):** Formateador uniforme de código según las reglas del proyecto.
+
+### B. Ajustes de Workspace (`.vscode/settings.json`)
+- Ocultación de archivos efímeros de base de datos (`caja.db-journal`, `caja.db-shm`).
+- Exclusión en el observador de archivos (*file watcher*) de las carpetas `backups/`, `.next/` y `node_modules/` para evitar ralentización en el editor.
+- Formateo automático al guardar (`editor.formatOnSave: true`) con tabulación de 4 espacios.
+
+### C. Trabajo con Antigravity IDE en Múltiples Equipos
+- **Catálogo de Modelos:** Para disponer de modelos avanzados (Gemini 4 Argon, Gemini 3.8 Flash, Claude 5.5 Sonnet/Opus), es necesario iniciar sesión en Antigravity con la misma cuenta de Google en la laptop.
+- **Memoria del Agente (Local-First):** Las conversaciones residen en el disco local (`~/.gemini/antigravity/brain`). Por tanto, este archivo `GEMINI.md` actúa como la **fuente única de verdad** compartida para que el agente en la laptop comprenda el estado del proyecto sin requerir el historial previo de chat.
+- **Variables de Entorno Locales:** Al clonar o abrir el proyecto en un equipo nuevo, verificar la existencia de `.env.local` con `DEVELOPER_PASSWORD=...` para permitir el acceso al perfil técnico de mantenimiento.
+
+## 6. Estado del Proyecto
 - **Hecho:**
+  - Preparación integral para producción y despliegue en AWS / VPS:
+    - Ruta de base de datos configurable mediante `DATABASE_PATH` en `database/database.js` y `PRAGMA busy_timeout = 5000` para alta concurrencia.
+    - Script atómico de respaldo en caliente (`scripts/backup.js`) con `VACUUM INTO`, purga automática local y subida opcional a Amazon S3 (`npm run backup`).
+    - Configuración de empaquetado de producción en `next.config.js` (`serverExternalPackages: ['sqlite3', 'bcryptjs']`).
+    - Empaquetado en contenedores con `Dockerfile` multi-stage y `docker-compose.yml`.
+    - Configuración de procesos resilientes para servidores Linux en `ecosystem.config.js` (PM2).
+    - Plantilla de variables de producción `.env.production.example` y guía completa `DEPLOY_AWS.md`.
+  - Configuración del workspace para VS Code y Antigravity IDE:
+    - Creación de `.vscode/extensions.json` con recomendaciones (SQLite Viewer, Docker, ESLint, Prettier).
+    - Creación de `.vscode/settings.json` optimizando observadores de archivos, exclusión de logs/backups y formateo.
+    - Documentación de pautas de sincronización entre PC y laptop.
   - Migración a arquitectura con esquema versionado (`database/migraciones.js`, PRAGMA `user_version` hasta v5).
   - Migraciones v4 y v5: Tabla `categorias` para catálogo interactivo por pestañas, normalización multicategoría y limpieza de categoría 'General'.
   - Sincronización automática y segura de la cuenta `developer` vinculada a `DEVELOPER_PASSWORD` en `.env.local` con hash bcrypt.

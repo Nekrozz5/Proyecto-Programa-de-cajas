@@ -1,0 +1,19 @@
+services:
+  pos-cajas:
+    build: .
+    container_name: pos-cajas
+    restart: unless-stopped
+    ports:
+      - "${PORT:-3000}:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - DATABASE_PATH=/app/data/caja.db
+      - SESSION_SECRET=${SESSION_SECRET}
+      - DEVELOPER_PASSWORD=${DEVELOPER_PASSWORD}
+      - S3_BUCKET=${S3_BUCKET:-}
+      - MAX_BACKUPS_LOCAL=${MAX_BACKUPS_LOCAL:-30}
+    volumes:
+      # Persistencia de la base de datos SQLite y respaldos en el host
+      - ./data:/app/data
+      - ./backups:/app/backups

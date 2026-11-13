@@ -1,0 +1,16 @@
+{
+  "files.exclude": {
+    "**/.git": true,
+    "**/.next": false,
+    "**/caja.db-journal": true,
+    "**/caja.db-shm": true,
+    "**/caja.db-wal": false
+  },
+  "files.watcherExclude": {
+    "**/.next/**": true,
+    "**/node_modules/**": true,
+    "**/backups/**": true
+  },
+  "editor.tabSize": 4,
+  "editor.formatOnSave": true
+}

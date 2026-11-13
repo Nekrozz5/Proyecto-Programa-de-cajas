@@ -3,7 +3,14 @@ const path = require('path');
 const fs = require('fs');
 const { ejecutarMigraciones } = require('./migraciones');
 
-const dbPath = path.resolve(process.cwd(), 'caja.db');
+const dbPath = process.env.DATABASE_PATH
+    ? path.resolve(process.env.DATABASE_PATH)
+    : path.resolve(process.cwd(), 'caja.db');
+
+const dbDir = path.dirname(dbPath);
+if (!fs.existsSync(dbDir)) {
+    fs.mkdirSync(dbDir, { recursive: true });
+}
 
 let dbInstance = null;
 let promesaMigracion = null;
@@ -14,7 +21,8 @@ function asegurarConexionYMigraciones() {
             if (err) {
                 console.error('Error al conectar con SQLite:', err.message);
             } else {
-                console.log('Conectado exitosamente a la base de datos SQLite local.');
+                console.log('Conectado exitosamente a la base de datos SQLite:', dbPath);
+                dbInstance.run('PRAGMA busy_timeout = 5000;');
             }
         });
         promesaMigracion = ejecutarMigraciones(dbInstance).catch((err) => {
