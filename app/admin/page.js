@@ -1,6 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import GraficosFinancieros from './GraficosFinancieros';
+import { exportarReportePDF } from './exportarPDF';
 
 export default function AdminPage() {
     const [cargando, setCargando] = useState(true);
@@ -825,8 +827,26 @@ export default function AdminPage() {
 
                 {/* Accesos Rápidos Inferiores */}
                 <div style={{ padding: '1rem', borderTop: '1px solid #334155', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                    <a href="/api/reportes?formato=xlsx" style={{ ...btnPrimario, background: '#16a34a', textAlign: 'center', fontSize: '0.84rem' }}>
+                        📊 Descargar Excel (.xlsx)
+                    </a>
+                    <button
+                        type="button"
+                        onClick={() =>
+                            exportarReportePDF({
+                                nombreNegocio: configActual.nombre_negocio,
+                                cajaAuditada: datos.cajaAuditada,
+                                estadisticas: est,
+                                movimientos: datos.movimientos,
+                                desglosePagos: datos.desglosePagos
+                            })
+                        }
+                        style={{ ...btnPrimario, background: '#dc2626', textAlign: 'center', fontSize: '0.84rem' }}
+                    >
+                        📄 Descargar PDF (Caja #{datos.cajaAuditada?.id || '—'})
+                    </button>
                     <a href="/api/reportes?formato=csv" style={{ ...btnPrimario, textAlign: 'center', fontSize: '0.84rem' }}>
-                        📥 Descargar CSV (Excel)
+                        📥 Descargar CSV
                     </a>
                     <a href="/caja" style={{ ...btnOscuro, background: '#334155', textAlign: 'center', fontSize: '0.84rem' }}>
                         Ir a Punto de Venta
@@ -1181,6 +1201,13 @@ export default function AdminPage() {
                                         <span>Ganancia Bruta - Egresos (Bs {(est?.totalEgresos || 0).toFixed(2)})</span>
                                     </div>
                                 </section>
+
+                                <GraficosFinancieros
+                                    estadisticas={est}
+                                    tendencias={tendencias}
+                                    desglosePagos={datos.desglosePagos}
+                                    cajaId={datos.cajaAuditada?.id}
+                                />
 
                                 <section style={cardStyle}>
                                     <h2 style={{ marginTop: 0 }}>

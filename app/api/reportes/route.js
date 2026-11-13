@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { generarReporteCSV, obtenerTendenciasVentas } from '../../../server/queries';
+import { generarReporteCSV, generarReporteExcel, obtenerTendenciasVentas } from '../../../server/queries';
 import { exigirUsuarioSesion } from '../../../server/sesion';
 
 const ROLES_ADMIN = ['admin', 'superadmin', 'developer'];
@@ -11,6 +11,18 @@ export async function GET(request) {
         const { searchParams } = new URL(request.url);
         const formato = searchParams.get('formato');
         const cajaId = searchParams.get('cajaId');
+
+        if (formato === 'xlsx') {
+            const buffer = await generarReporteExcel(cajaId ? Number(cajaId) : null);
+            const nombreArchivo = cajaId ? `reporte_caja_${Number(cajaId)}.xlsx` : 'reporte_cajas_completo.xlsx';
+            return new NextResponse(buffer, {
+                status: 200,
+                headers: {
+                    'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                    'Content-Disposition': `attachment; filename="${nombreArchivo}"`
+                }
+            });
+        }
 
         if (formato === 'csv') {
             const csv = await generarReporteCSV(cajaId ? Number(cajaId) : null);

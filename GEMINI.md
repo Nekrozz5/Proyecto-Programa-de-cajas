@@ -10,18 +10,26 @@
 - **Infraestructura y Preparación para Producción:**
   - Base de datos portable con ruta configurable por variable de entorno `DATABASE_PATH` y concurrencia gestionada con `PRAGMA busy_timeout = 5000` en `database/database.js`.
   - Script de respaldo atómico en caliente (`scripts/backup.js`) ejecutado con `npm run backup` usando SQLite `VACUUM INTO`, purga local automática y soporte opcional para sincronización a AWS S3.
-  - Empaquetado optimizado en `next.config.js` con `serverExternalPackages: ['sqlite3', 'bcryptjs']`.
+  - Empaquetado optimizado en `next.config.js` con `serverExternalPackages: ['sqlite3', 'bcryptjs', 'exceljs']`.
   - Contenerización lista para despliegue con `Dockerfile` multi-stage y `docker-compose.yml`.
   - Gestión de procesos para servidores Linux con PM2 (`ecosystem.config.js`).
-  - Guía completa de arquitectura y despliegue en la nube en `DEPLOY_AWS.md`.
+  - Documentación organizada en `README.md` y la carpeta `docs/` (`docs/ARQUITECTURA.md`, `docs/DEPLOY_AWS.md`, `docs/PRUEBAS.md`).
+- **APIs y Librerías de Reportes / Visualización:**
+  - `exceljs` (`^4.4.0`): Generación de libros Excel (`.xlsx`) en servidor con múltiples hojas (`Movimientos` y `Arqueos de Caja`).
+  - `jspdf` (`^4.2.1`) y `jspdf-autotable` (`^5.0.9`): Exportación de reportes PDF de caja auditada en el navegador (`app/admin/exportarPDF.js`).
+  - `recharts` (`^3.10.1`): Gráficos financieros interactivos en `/admin` (`app/admin/GraficosFinancieros.js`).
 - **Estructura de Carpetas:**
+  - `README.md`: Punto de entrada, estructura general y comandos rápidos.
+  - `docs/`: Documentación técnica (`ARQUITECTURA.md`), despliegue en nube (`DEPLOY_AWS.md`) y checklist de pruebas (`PRUEBAS.md`).
   - `database/database.js`: Inicialización de SQLite, activación de claves foráneas (`PRAGMA foreign_keys = ON`), modo WAL, timeout y ejecución automática de migraciones.
   - `database/migraciones.js`: Sistema de migraciones versionado con `PRAGMA user_version`. Toda mutación al esquema se aplica de forma transaccional e idempotente (migraciones v1 a v5).
   - `server/queries.js`: Lógica de negocio y consultas con promesas nativas (`async/await`) usando `runQuery`, `getQuery`, `allQuery` y `transaccion()`.
   - `server/sesion.js`: Manejo de sesión JWT del servidor (crear, validar, renovar y destruir cookies HttpOnly `pos_session`).
   - `scripts/backup.js`: Script de copia de seguridad atómica con retención configurable.
-  - `app/api/caja/route.js` y `app/api/reportes/route.js`: Endpoints del backend en Next.js.
+  - `app/api/caja/route.js`: Endpoint principal (`GET` de estado/sesión/catálogo/auditoría y `POST` por `accion`: `login`, `logout`, `instalacion_inicial`, `abrir`, `reabrir`, `vender`, `egreso`, `ingreso_efectivo`, `cerrar`, `anular`, `crear_usuario`, `borrar_usuario`, `cambiar_password`, `guardar_configuracion`, `crear_categoria`, `crear_producto`, `comprar_producto_directo`, `crear_insumo`, `comprar_insumo`, `merma_insumo`, `asignar_receta`).
+  - `app/api/reportes/route.js`: Endpoint administrativo (`GET`) para tendencias JSON, exportación CSV (`?formato=csv`) y exportación Excel (`?formato=xlsx`, con filtro opcional `?cajaId=`).
   - `app/caja/page.js` y `app/admin/page.js`: Vistas de operador y administrador.
+  - `app/admin/GraficosFinancieros.js` y `app/admin/exportarPDF.js`: Módulos de visualización financiera y exportación PDF del panel administrativo.
 
 ## 2. Reglas de Negocio Obligatorias
 - **Roles y Permisos:**
@@ -93,10 +101,6 @@
   ```bash
   docker compose up -d --build
   ```
-- **Ejecución de pruebas puntuales:**
-  ```bash
-  node test.js
-  ```
 
 ## 5. Configuración del Entorno de Desarrollo (VS Code / Antigravity IDE)
 Para garantizar una experiencia consistente al trabajar en múltiples equipos (ej. PC y Laptop):
@@ -117,15 +121,58 @@ Para garantizar una experiencia consistente al trabajar en múltiples equipos (e
 - **Memoria del Agente (Local-First):** Las conversaciones residen en el disco local (`~/.gemini/antigravity/brain`). Por tanto, este archivo `GEMINI.md` actúa como la **fuente única de verdad** compartida para que el agente en la laptop comprenda el estado del proyecto sin requerir el historial previo de chat.
 - **Variables de Entorno Locales:** Al clonar o abrir el proyecto en un equipo nuevo, verificar la existencia de `.env.local` con `DEVELOPER_PASSWORD=...` para permitir el acceso al perfil técnico de mantenimiento.
 
+### D. Configuración y Ejecución en una Computadora Nueva (Primer Clon)
+Cuando se clona o actualiza este repositorio en un equipo nuevo, el agente y el desarrollador deben verificar y completar los siguientes requisitos:
+1. **Prerrequisitos del Sistema:**
+   - **Node.js** (v20 LTS o superior; probado hasta v26) y **npm**.
+   - **Git** para clonar y sincronizar el repositorio.
+   - *(Solo en Linux/VPS si no existen binarios precompilados de `sqlite3`)*: `build-essential` y `python3`.
+2. **Dependencias y APIs Instaladas (`package.json`):**
+   - **Core / Backend / Auth:** `next` (`^16.4.3`), `react` (`^19.3.1`), `react-dom` (`^19.3.1`), `sqlite3` (`^6.0.1`), `bcryptjs` (`^3.0.3`), `jose` (`^6.2.17`).
+   - **Reportes y Gráficos:** `exceljs` (`^4.4.0`), `jspdf` (`^4.2.1`), `jspdf-autotable` (`^5.0.9`), `recharts` (`^3.10.1`).
+3. **Política de Ejecución en Windows (PowerShell):**
+   - Si PowerShell bloquea `npm.ps1` con `PSSecurityException` (`UnauthorizedAccess`), habilitar scripts locales una sola vez para el usuario actual:
+     ```powershell
+     Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+     ```
+   - Como alternativa inmediata sin cambiar políticas, usar `npm.cmd run dev`.
+4. **Instalación de Dependencias y `sqlite3` en npm 11+:**
+   - Ejecutar `npm install` (o `npm.cmd install`) cada vez que se clona el repo o se agregan nuevas librerías en `package.json`.
+   - En **npm 11+**, puede aparecer la advertencia `allowScripts` para `sqlite3@6.0.1`. Verificar con `node -e "require('sqlite3')"` que el módulo nativo cargue correctamente; si falla o se desea silenciar el aviso, aprobarlo con `npm install-scripts approve sqlite3`.
+5. **Archivo `.env.local` (Obligatorio, ignorado por Git):**
+   - Crear `.env.local` en la raíz con:
+     ```env
+     NODE_ENV=development
+     PORT=3000
+     DATABASE_PATH=./caja.db
+     SESSION_SECRET=<cadena_hex_aleatoria_de_64_caracteres>
+     DEVELOPER_PASSWORD=<tu_contraseña_developer>
+     ```
+6. **Comprobación Rápida del Entorno:**
+   - Verificar en PowerShell que todo esté listo antes de iniciar:
+     ```powershell
+     node -v; npm -v; Test-Path node_modules\next; Test-Path node_modules\sqlite3; Test-Path node_modules\exceljs; Test-Path node_modules\recharts; Test-Path node_modules\jspdf; Test-Path .env.local
+     ```
+7. **Ejecución en la Computadora:**
+   - **Modo desarrollo:** `npm run dev` (o `npm.cmd run dev`). Al iniciar, `caja.db` se crea y migra automáticamente si aún no existe. Abrir `http://localhost:3000` en el navegador.
+   - **Modo producción local:** `npm run build` seguido de `npm run start` (compila con `--webpack` y externaliza `sqlite3`, `bcryptjs` y `exceljs`).
+
 ## 6. Estado del Proyecto
 - **Hecho:**
+  - **Reportes exportables en Excel (`.xlsx`), PDF y CSV:**
+    - Exportación Excel en servidor (`generarReporteExcel` en `server/queries.js` con `exceljs`) servida desde `GET /api/reportes?formato=xlsx`, generando hojas *Movimientos* y *Arqueos de Caja*.
+    - Exportación PDF en cliente (`exportarReportePDF` en `app/admin/exportarPDF.js` con `jspdf` y `jspdf-autotable`) con resumen financiero, desglose por método de pago y tabla de movimientos de la caja auditada.
+    - Integración de botones de descarga `.xlsx`, `.pdf` y `.csv` en el panel lateral de `app/admin/page.js`.
+  - **Panel visual de estadísticas financieras (`app/admin/GraficosFinancieros.js`):**
+    - Gráficos interactivos con `recharts` integrados en `/admin`: comparativa semanal Ingresos vs Egresos (7 días), flujo de ventas por hora, top productos por ingresos/ganancia y distribución por método de pago.
   - Preparación integral para producción y despliegue en AWS / VPS:
     - Ruta de base de datos configurable mediante `DATABASE_PATH` en `database/database.js` y `PRAGMA busy_timeout = 5000` para alta concurrencia.
     - Script atómico de respaldo en caliente (`scripts/backup.js`) con `VACUUM INTO`, purga automática local y subida opcional a Amazon S3 (`npm run backup`).
-    - Configuración de empaquetado de producción en `next.config.js` (`serverExternalPackages: ['sqlite3', 'bcryptjs']`).
+    - Configuración de empaquetado de producción en `next.config.js` (`serverExternalPackages: ['sqlite3', 'bcryptjs', 'exceljs']`).
     - Empaquetado en contenedores con `Dockerfile` multi-stage y `docker-compose.yml`.
     - Configuración de procesos resilientes para servidores Linux en `ecosystem.config.js` (PM2).
-    - Plantilla de variables de producción `.env.production.example` y guía completa `DEPLOY_AWS.md`.
+    - Plantilla de variables de producción `.env.production.example` y guía completa `docs/DEPLOY_AWS.md`.
+    - Documentación ordenada en `README.md` y `docs/` (`ARQUITECTURA.md`, `DEPLOY_AWS.md`, `PRUEBAS.md`), con limpieza de archivos obsoletos (`index.js`, `seed.js`, `test.js`, `schema.sql`).
   - Configuración del workspace para VS Code y Antigravity IDE:
     - Creación de `.vscode/extensions.json` con recomendaciones (SQLite Viewer, Docker, ESLint, Prettier).
     - Creación de `.vscode/settings.json` optimizando observadores de archivos, exclusión de logs/backups y formateo.
@@ -141,11 +188,10 @@ Para garantizar una experiencia consistente al trabajar en múltiples equipos (e
   - Implementación de transacciones atómicas seguras en `server/queries.js`.
   - Lógica de arqueo ciego, control de apertura única por usuario y trazabilidad de reaperturas auditadas.
   - Soporte de inventario híbrido (`libre`, `directo`, `receta`) con costeo ponderado y rollback garantizado en anulaciones.
-  - Elaboración de batería de 7 escenarios de prueba integral documentados en `pruebas.txt`.
+  - Elaboración de batería de 7 escenarios de prueba integral documentados en `docs/PRUEBAS.md`.
 - **En Progreso:**
-  - Validación y ejecución de la suite de pruebas funcionales y de concurrencia (`pruebas.txt`).
+  - Validación y ejecución de la suite de pruebas funcionales y de concurrencia (`docs/PRUEBAS.md`).
   - Alineación de estilos y ergonomía responsiva para pantallas táctiles de POS y tablets.
 - **Pendiente:**
-  - Reportes exportables (PDF / Excel) de arqueos históricos, tickets de venta y movimientos de insumos.
-  - Panel visual de estadísticas financieras y análisis de rentabilidad avanzada (Ganancia Bruta, Costo de Ventas, Flujo Neto Operativo).
+  - Impresión/exportación de tickets individuales de venta y movimientos de insumos.
   - Panel de auditoría dedicada de reaperturas de caja y anulaciones de movimientos con filtrado por fecha y responsable.

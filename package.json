@@ -1,8 +1,7 @@
 {
   "name": "programa-cajas",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "Sistema POS y Control de Cajas Híbrido con Next.js y SQLite3",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "dev": "next dev",
@@ -15,10 +14,17 @@
   "license": "ISC",
   "dependencies": {
     "bcryptjs": "^3.0.3",
+    "exceljs": "^4.4.0",
     "jose": "^6.2.17",
+    "jspdf": "^4.2.1",
+    "jspdf-autotable": "^5.0.9",
     "next": "^16.4.3",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
+    "recharts": "^3.10.1",
     "sqlite3": "^6.0.1"
+  },
+  "allowScripts": {
+    "sqlite3@6.0.1": true
   }
 }

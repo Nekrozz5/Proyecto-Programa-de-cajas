@@ -1687,6 +1687,109 @@ async function generarReporteCSV(cajaId = null) {
     return [cabeceras, ...lineas].join('\n');
 }
 
+async function generarReporteExcel(cajaId = null) {
+    const ExcelJS = require('exceljs');
+    const filtroCaja = cajaId ? `WHERE m.caja_id = ?` : ``;
+    const params = cajaId ? [cajaId] : [];
+
+    const movimientos = await allQuery(
+        `SELECT m.id, m.caja_id, datetime(m.fecha_hora, 'localtime') as fecha_hora,
+                COALESCE(u.nombre, '—') as operador, m.tipo, m.metodo_pago,
+                m.monto, m.monto_recibido, m.cambio, m.estado, m.descripcion
+         FROM movimientos m
+         LEFT JOIN cajas c ON m.caja_id = c.id
+         LEFT JOIN usuarios u ON c.usuario_id = u.id
+         ${filtroCaja}
+         ORDER BY m.fecha_hora DESC`,
+        params
+    );
+
+    const cajas = await allQuery(
+        `SELECT c.id, COALESCE(u.nombre, '—') as cajero,
+                datetime(c.fecha_apertura, 'localtime') as fecha_apertura,
+                datetime(c.fecha_cierre, 'localtime') as fecha_cierre,
+                c.estado, c.monto_inicial, c.efectivo_esperado, c.efectivo_real,
+                c.diferencia_efectivo, c.qr_esperado, c.veces_reabierta
+         FROM cajas c
+         LEFT JOIN usuarios u ON c.usuario_id = u.id
+         ${cajaId ? 'WHERE c.id = ?' : ''}
+         ORDER BY c.id DESC`,
+        params
+    );
+
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = 'Sistema POS Híbrido';
+    workbook.created = new Date();
+
+    const hojaMov = workbook.addWorksheet('Movimientos');
+    hojaMov.columns = [
+        { header: 'ID', key: 'id', width: 10 },
+        { header: 'Caja #', key: 'caja_id', width: 10 },
+        { header: 'Fecha y Hora', key: 'fecha_hora', width: 20 },
+        { header: 'Operador', key: 'operador', width: 18 },
+        { header: 'Tipo', key: 'tipo', width: 12 },
+        { header: 'Método Pago', key: 'metodo_pago', width: 14 },
+        { header: 'Monto (Bs)', key: 'monto', width: 14 },
+        { header: 'Recibido (Bs)', key: 'monto_recibido', width: 14 },
+        { header: 'Cambio (Bs)', key: 'cambio', width: 14 },
+        { header: 'Estado', key: 'estado', width: 13 },
+        { header: 'Descripción', key: 'descripcion', width: 34 }
+    ];
+
+    const estiloCabecera = (fila) => {
+        fila.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+        fila.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0F172A' } };
+        fila.alignment = { vertical: 'middle', horizontal: 'center' };
+    };
+    estiloCabecera(hojaMov.getRow(1));
+
+    for (const m of movimientos) {
+        hojaMov.addRow({
+            ...m,
+            monto: Number(m.monto || 0),
+            monto_recibido: Number(m.monto_recibido || 0),
+            cambio: Number(m.cambio || 0)
+        });
+    }
+    ['G', 'H', 'I'].forEach((col) => {
+        hojaMov.getColumn(col).numFmt = '#,##0.00';
+    });
+
+    const hojaCajas = workbook.addWorksheet('Arqueos de Caja');
+    hojaCajas.columns = [
+        { header: 'Caja #', key: 'id', width: 10 },
+        { header: 'Cajero', key: 'cajero', width: 18 },
+        { header: 'Apertura', key: 'fecha_apertura', width: 20 },
+        { header: 'Cierre', key: 'fecha_cierre', width: 20 },
+        { header: 'Estado', key: 'estado', width: 12 },
+        { header: 'Monto Inicial (Bs)', key: 'monto_inicial', width: 18 },
+        { header: 'Efectivo Esperado (Bs)', key: 'efectivo_esperado', width: 22 },
+        { header: 'Efectivo Real (Bs)', key: 'efectivo_real', width: 18 },
+        { header: 'Diferencia (Bs)', key: 'diferencia_efectivo', width: 16 },
+        { header: 'QR Esperado (Bs)', key: 'qr_esperado', width: 17 },
+        { header: 'Reaperturas', key: 'veces_reabierta', width: 13 }
+    ];
+    estiloCabecera(hojaCajas.getRow(1));
+
+    for (const c of cajas) {
+        hojaCajas.addRow({
+            ...c,
+            fecha_cierre: c.fecha_cierre || 'En curso',
+            monto_inicial: Number(c.monto_inicial || 0),
+            efectivo_esperado: c.efectivo_esperado !== null ? Number(c.efectivo_esperado) : null,
+            efectivo_real: c.efectivo_real !== null ? Number(c.efectivo_real) : null,
+            diferencia_efectivo: c.diferencia_efectivo !== null ? Number(c.diferencia_efectivo) : null,
+            qr_esperado: Number(c.qr_esperado || 0),
+            veces_reabierta: Number(c.veces_reabierta || 0)
+        });
+    }
+    ['F', 'G', 'H', 'I', 'J'].forEach((col) => {
+        hojaCajas.getColumn(col).numFmt = '#,##0.00';
+    });
+
+    return await workbook.xlsx.writeBuffer();
+}
+
 module.exports = {
     redondear2,
     numeroPositivo,
@@ -1730,5 +1833,6 @@ module.exports = {
     obtenerDesgloseMetodosPago,
     obtenerTendenciasVentas,
     generarReporteCSV,
+    generarReporteExcel,
     sanitizarTextoCSV
 };
