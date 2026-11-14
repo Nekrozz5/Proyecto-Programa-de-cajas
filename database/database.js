@@ -22,7 +22,11 @@ function asegurarConexionYMigraciones() {
                 console.error('Error al conectar con SQLite:', err.message);
             } else {
                 console.log('Conectado exitosamente a la base de datos SQLite:', dbPath);
-                dbInstance.run('PRAGMA busy_timeout = 5000;');
+                dbInstance.serialize(() => {
+                    dbInstance.run('PRAGMA busy_timeout = 5000;');
+                    dbInstance.run('PRAGMA journal_mode = WAL;');
+                    dbInstance.run('PRAGMA foreign_keys = ON;');
+                });
             }
         });
         promesaMigracion = ejecutarMigraciones(dbInstance).catch((err) => {
