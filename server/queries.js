@@ -1,6 +1,7 @@
 const db = require('../database/database');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
+const { obtenerSetupTokenValido } = require('./secretos');
 
 const BCRYPT_ROUNDS = 10;
 const MAX_INTENTOS_LOGIN = 5;
@@ -502,11 +503,12 @@ async function guardarConfiguracionNegocio(adminId, config) {
 // - Producción: SETUP_TOKEN es obligatorio; si no está definido, la instalación se rechaza.
 // - Desarrollo: si SETUP_TOKEN está definido se exige; si no, se permite con aviso en consola.
 function validarTokenInstalacion(tokenRecibido) {
-    const esperado = String(process.env.SETUP_TOKEN || '').trim();
+    // Un SETUP_TOKEN con el valor de ejemplo de .env.production.example se trata como no definido
+    const esperado = obtenerSetupTokenValido();
 
     if (!esperado) {
         if (process.env.NODE_ENV === 'production') {
-            const err = new Error('Instalación deshabilitada: el servidor no tiene definida la variable SETUP_TOKEN. Configúrala en el archivo .env de producción y reinicia el servicio.');
+            const err = new Error('Instalación deshabilitada: el servidor no tiene definida la variable SETUP_TOKEN (o conserva el valor de ejemplo). Configúrala en el archivo .env de producción y reinicia el servicio.');
             err.status = 403;
             throw err;
         }

@@ -33,8 +33,9 @@ function asegurarConexionYMigraciones() {
     return promesaMigracion;
 }
 
-// Ejecutar conexión y migraciones una sola vez al arrancar
-asegurarConexionYMigraciones();
+// La conexión y las migraciones se ejecutan de forma perezosa en la primera consulta real
+// (ver dbProxy). No se abren al importar el módulo para que `next build` no toque la base de datos
+// ni ejecute validaciones de secretos de producción durante la compilación.
 
 const dbProxy = {
     run(sql, params, callback) {

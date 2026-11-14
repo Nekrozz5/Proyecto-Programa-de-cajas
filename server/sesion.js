@@ -3,6 +3,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { obtenerUsuarioPorId } = require('./queries');
+const { esProduccion, exigirSecretoSesionProduccion } = require('./secretos');
 
 const NOMBRE_COOKIE_SESION = 'pos_session';
 
@@ -24,8 +25,16 @@ const DURACION_SESION_SEGUNDOS = TTL_POR_ROL.user;
 
 let secretoCache = null;
 
+// Validación perezosa: se ejecuta en el primer uso real (crear/verificar token), nunca al importar
+// el módulo, para no romper `next build` (que también corre con NODE_ENV=production).
 function obtenerSecretoSesion() {
     if (secretoCache) return secretoCache;
+
+    // Producción: el secreto debe venir del entorno y ser apto. Nunca se genera ni se escribe .env.local.
+    if (esProduccion()) {
+        secretoCache = new TextEncoder().encode(exigirSecretoSesionProduccion());
+        return secretoCache;
+    }
 
     if (process.env.SESSION_SECRET && String(process.env.SESSION_SECRET).trim().length >= 32) {
         secretoCache = new TextEncoder().encode(String(process.env.SESSION_SECRET).trim());
@@ -94,8 +103,9 @@ async function crearTokenSesion(usuario) {
 
 async function verificarTokenSesion(token) {
     if (!token || typeof token !== 'string') return null;
+    // Fuera del try: un error de configuración del secreto debe propagarse, no confundirse con un token inválido
+    const secreto = obtenerSecretoSesion();
     try {
-        const secreto = obtenerSecretoSesion();
         const { payload } = await jwtVerify(token, secreto, {
             algorithms: ['HS256']
         });
