@@ -71,6 +71,9 @@
 - **Evolución del esquema:** Los cambios de esquema se realizan única y exclusivamente mediante migraciones en `database/migraciones.js`, administrando la versión con `PRAGMA user_version`.
 - **Confirmación en cambios críticos:** Antes de modificar el esquema de base de datos o la lógica de cálculo financiero, se debe explicar el impacto detalladamente al usuario y esperar su confirmación explícita.
 - **SQL nativo sin ORMs:** Mantener consultas SQL nativas y parametrizadas (`?`) en `server/queries.js`, evitando constructores de consulta u ORMs externos.
+- **Control de Versiones y Operaciones en Git / GitHub:**
+  - **Permitido al Agente de IA (Operaciones Locales):** La IA tiene autorización total para realizar todas las operaciones locales necesarias en Git: inspeccionar el árbol (`git status`, `git diff`, `git log`), crear y cambiar de ramas (`git branch`, `git checkout`, `git switch`), preparar archivos (`git add`) y redactar/crear commits descriptivos y atómicos (`git commit`).
+  - **Exclusivo del Usuario Humano (Operaciones con Autenticación / Remotas):** Cualquier operación que involucre interactuar con GitHub requiriendo inicio de sesión, credenciales o autenticación (como `git push`, subida de tags o ramas al repositorio remoto) debe ser ejecutada obligatoriamente por el usuario humano. El agente debe preparar y verificar todos los cambios y commits localmente, indicándole al usuario el comando exacto para que este realice el `push` en su terminal.
 
 ## 4. Comandos
 - **Instalación de dependencias:**
@@ -101,6 +104,18 @@
   ```bash
   docker compose up -d --build
   ```
+- **Flujo de Trabajo Git / GitHub:**
+  - *Comandos locales (ejecutables por la IA):*
+    ```bash
+    git status
+    git diff
+    git add .
+    git commit -m "feat/fix: descripción del cambio"
+    ```
+  - *Comando de sincronización remota (exclusivo para el usuario con inicio de sesión):*
+    ```bash
+    git push origin <rama>
+    ```
 
 ## 5. Configuración del Entorno de Desarrollo (VS Code / Antigravity IDE)
 Para garantizar una experiencia consistente al trabajar en múltiples equipos (ej. PC y Laptop):
@@ -120,6 +135,7 @@ Para garantizar una experiencia consistente al trabajar en múltiples equipos (e
 - **Catálogo de Modelos:** Para disponer de modelos avanzados (Gemini 4 Argon, Gemini 3.8 Flash, Claude 5.5 Sonnet/Opus), es necesario iniciar sesión en Antigravity con la misma cuenta de Google en la laptop.
 - **Memoria del Agente (Local-First):** Las conversaciones residen en el disco local (`~/.gemini/antigravity/brain`). Por tanto, este archivo `GEMINI.md` actúa como la **fuente única de verdad** compartida para que el agente en la laptop comprenda el estado del proyecto sin requerir el historial previo de chat.
 - **Variables de Entorno Locales:** Al clonar o abrir el proyecto en un equipo nuevo, verificar la existencia de `.env.local` con `DEVELOPER_PASSWORD=...` para permitir el acceso al perfil técnico de mantenimiento.
+- **Sincronización con GitHub:** La IA realiza todo el trabajo preparatorio y los commits en local; para subir los cambios a GitHub entre máquinas, el usuario humano ejecuta el `git push` correspondiente con su autenticación.
 
 ### D. Configuración y Ejecución en una Computadora Nueva (Primer Clon)
 Cuando se clona o actualiza este repositorio en un equipo nuevo, el agente y el desarrollador deben verificar y completar los siguientes requisitos:
