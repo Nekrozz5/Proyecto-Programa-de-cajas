@@ -65,6 +65,7 @@ async function ejecutarBackup() {
             console.error(`[Backup Error] Error abriendo base de datos:`, err.message);
             process.exit(1);
         }
+        db.run('PRAGMA busy_timeout = 5000;');
     });
 
     db.run(`VACUUM INTO ?`, [rutaDestino], (err) => {

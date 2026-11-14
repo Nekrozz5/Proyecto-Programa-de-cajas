@@ -24,10 +24,11 @@ Esta guía detalla paso a paso cómo poner en producción este sistema en **AWS 
    - **Plan:** $3.50/mes (512 MB) o $5.00/mes (1 GB RAM - Recomendado).
 4. En la pestaña **Networking** de la instancia:
    - Asigna una **Static IP** (IP fija gratuita mientras esté vinculada a la instancia).
-   - En el Firewall, asegúrate de tener abiertos los puertos:
+   - En el Firewall, asegúrate de tener abiertos únicamente los puertos:
      - `22` (SSH)
      - `80` (HTTP)
      - `443` (HTTPS)
+   > **Seguridad de Red:** El puerto `3000` **NO debe estar abierto en el firewall de Lightsail** (ni en ningún grupo de seguridad). La aplicación escucha exclusivamente en loopback local (`127.0.0.1:3000`), obligando a que todo el tráfico pase cifrado a través de Nginx por los puertos 80 y 443.
 
 ---
 
@@ -88,9 +89,22 @@ Configura tus valores:
 NODE_ENV=production
 PORT=3000
 DATABASE_PATH=/var/www/negocio1/data/caja.db
+
+# Clave secreta generada aleatoriamente (mínimo 32 caracteres)
 SESSION_SECRET=$(openssl rand -hex 32)
+
+# Contraseña maestra del perfil developer técnico (mínimo 8 caracteres)
 DEVELOPER_PASSWORD=TuPasswordSuperSegura2026!
+
+# Token de seguridad para habilitar la instalación inicial (obligatorio en producción)
+# Genera uno aleatorio con: openssl rand -hex 16
+SETUP_TOKEN=REEMPLAZAR_setup_token_aleatorio
+
+# Activa la lectura confiable de la IP real detrás de Nginx
+TRUST_PROXY=true
 ```
+
+> **Advertencia sobre SQLite y Modo WAL:** La base de datos opera en modo `WAL` (`Write-Ahead Logging`) para máxima concurrencia y velocidad. El archivo de base de datos (`caja.db`) **debe residir en un disco local persistente (SSD/EBS)**. No montes el directorio `data/` en sistemas de archivos en red como AWS EFS o NFS, ya que carecen de compatibilidad con bloqueos POSIX compartidos requeridos por SQLite WAL.
 
 Crea el directorio de datos para la base de datos persistente:
 ```bash
@@ -132,7 +146,7 @@ server {
         proxy_set_header Connection 'upgrade';
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_cache_bypass $http_upgrade;
     }
@@ -152,7 +166,15 @@ Apunta el registro DNS `A` de tu subdominio (`pos.tunegocio.com`) a la Static IP
 ```bash
 sudo certbot --nginx -d pos.tunegocio.com
 ```
-*Certbot configurará automáticamente la renovación de certificados cada 90 días.*
+*Certbot configurará automáticamente la renovación de certificados cada 90 días y forzará la redirección a HTTPS.*
+
+### Paso 3: Instalación y Configuración Inicial (Vía HTTPS Seguro)
+**IMPORTANTE:** Realiza este paso inmediatamente después de configurar Nginx y certbot, antes de compartir la URL o entregar el sistema al cliente o cajeros:
+1. Accede por primera vez desde el navegador exclusivamente mediante HTTPS a tu dominio oficial (ej. `https://pos.tunegocio.com` o `https://tu-dominio`).
+2. Verás el asistente de instalación inicial en 3 pasos.
+3. Elige la modalidad de inventario, el nombre de la empresa y crea la cuenta del **Super Admin**.
+4. En el campo **"Token de instalación"**, introduce el valor exacto que definiste en `SETUP_TOKEN` dentro de tu `.env`.
+5. Una vez guardado, el sistema queda sellado e inicializado de forma permanente y segura con comunicación cifrada de extremo a extremo. Ya puedes compartir la URL oficial con el personal del negocio.
 
 ---
 

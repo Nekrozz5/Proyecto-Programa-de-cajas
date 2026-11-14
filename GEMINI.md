@@ -76,9 +76,13 @@
 - **Evolución del esquema:** Los cambios de esquema se realizan única y exclusivamente mediante migraciones en `database/migraciones.js`, administrando la versión con `PRAGMA user_version`.
 - **Confirmación en cambios críticos:** Antes de modificar el esquema de base de datos o la lógica de cálculo financiero, se debe explicar el impacto detalladamente al usuario y esperar su confirmación explícita.
 - **SQL nativo sin ORMs:** Mantener consultas SQL nativas y parametrizadas (`?`) en `server/queries.js`, evitando constructores de consulta u ORMs externos.
-- **Control de Versiones y Operaciones en Git / GitHub:**
-  - **Permitido al Agente de IA (Operaciones Locales):** La IA tiene autorización total para realizar todas las operaciones locales necesarias en Git: inspeccionar el árbol (`git status`, `git diff`, `git log`), crear y cambiar de ramas (`git branch`, `git checkout`, `git switch`), preparar archivos (`git add`) y redactar/crear commits descriptivos y atómicos (`git commit`).
-  - **Exclusivo del Usuario Humano (Operaciones con Autenticación / Remotas):** Cualquier operación que involucre interactuar con GitHub requiriendo inicio de sesión, credenciales o autenticación (como `git push`, subida de tags o ramas al repositorio remoto) debe ser ejecutada obligatoriamente por el usuario humano. El agente debe preparar y verificar todos los cambios y commits localmente, indicándole al usuario el comando exacto para que este realice el `push` en su terminal.
+- **Control de Versiones y Operaciones en Git (Estrictamente Bajo Demanda):**
+  - **Ejecución Bajo Demanda (Ahorro de Tokens):** La IA conoce perfectamente todos los comandos y procedimientos de Git local, pero **NO** debe ejecutar `git add`, `git commit` ni operaciones de repositorio automáticamente tras cada cambio de código. Solo ejecutará acciones en Git cuando el usuario lo solicite expresamente (ej. *"haz commit"*, *"guarda los cambios en el repositorio"*, *"prepara el commit"*).
+  - **Operaciones Locales Permitidas a la IA:** Cuando el usuario lo solicite: inspeccionar el árbol (`git status`, `git diff`, `git log`), crear y cambiar de ramas (`git branch`, `git checkout`, `git switch`), preparar archivos (`git add`) y redactar commits atómicos y descriptivos (`git commit`).
+  - **Exclusivo del Usuario Humano (Operaciones Remotas con Autenticación):** Cualquier operación que involucre interactuar con GitHub requiriendo inicio de sesión o credenciales (`git push`, subida de tags o ramas) debe ser ejecutada obligatoriamente por el usuario humano. La IA solo proporcionará el comando exacto.
+- **Testing y Búsqueda de Bugs (Estrictamente Bajo Demanda):**
+  - La IA está capacitada para ejecutar diagnósticos de estrés, suites de prueba automatizadas (`scratch/test_*.js`) y compilaciones de verificación (`npm run build`), pero **NO** debe ejecutarlos proactivamente ni de forma automática tras cada ajuste menor para evitar consumo innecesario de tokens y tiempo.
+  - La suite de pruebas y diagnóstico de errores solo se ejecutará cuando el usuario lo ordene explícitamente (ej. *"haz una prueba"*, *"busca fallos o bugs"*, *"ejecuta el testeo"*).
 
 ## 4. Comandos
 - **Instalación de dependencias:**
@@ -186,6 +190,14 @@ Cuando se clona o actualiza este repositorio en un equipo nuevo, el agente y el 
     - Integración de botones de descarga `.xlsx`, `.pdf` y `.csv` en el panel lateral de `app/admin/page.js`.
   - **Panel visual de estadísticas financieras (`app/admin/GraficosFinancieros.js`):**
     - Gráficos interactivos con `recharts` integrados en `/admin`: comparativa semanal Ingresos vs Egresos (7 días), flujo de ventas por hora, top productos por ingresos/ganancia y distribución por método de pago.
+  - **Endurecimiento de Seguridad Pre-Despliegue AWS (7 Puntos de Protección):**
+    - Protección estricta de `instalacion_inicial`: exigencia de `SETUP_TOKEN` validado con `crypto.timingSafeEqual` y transacción atómica unificada para configuración y alta del Super Admin.
+    - Rate limiting avanzado de autenticación: soporte de `TRUST_PROXY` (uso confiable de `x-real-ip` con Nginx) y contador secundario independiente por cuenta de usuario (20 intentos en 15 min con caducidad autónoma).
+    - Política de fortaleza de claves/PIN: mínimo 8 caracteres para administradores/developers y 4 para cajeros en creación y cambio de contraseñas.
+    - Validación segura y perezosa de secretos: `server/secretos.js` e `instrumentation.js` para abortar arranques en producción con secretos por defecto o débiles sin romper `next build`.
+    - Ocultamiento de directorio administrativo: `GET /api/caja` sin sesión solo entrega cajeros (sin rol) y estado booleano de instalación; login administrativo en `/admin` siempre manual.
+    - SQLite de alto rendimiento: activación de `PRAGMA journal_mode = WAL` y `PRAGMA foreign_keys = ON` en la conexión, y verificación de backups en caliente con `VACUUM INTO`.
+    - Documentación de infraestructura actualizada en `docs/DEPLOY_AWS.md`, `docs/ARQUITECTURA.md`, `README.md` y `.env.production.example`.
   - Preparación integral para producción y despliegue en AWS / VPS:
     - Ruta de base de datos configurable mediante `DATABASE_PATH` en `database/database.js` y `PRAGMA busy_timeout = 5000` para alta concurrencia.
     - Script atómico de respaldo en caliente (`scripts/backup.js`) con `VACUUM INTO`, purga automática local y subida opcional a Amazon S3 (`npm run backup`).

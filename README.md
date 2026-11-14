@@ -31,7 +31,8 @@ Aplicación web de Punto de Venta (POS), control de turnos/arqueo ciego e invent
 │   └── migraciones.js           # Esquema versionado transaccional (PRAGMA user_version)
 ├── server/
 │   ├── queries.js               # Lógica de negocio y consultas SQL parametrizadas
-│   └── sesion.js                # Gestión de sesiones JWT HttpOnly (jose) y TTL por rol
+│   ├── sesion.js                # Gestión de sesiones JWT HttpOnly (jose) y TTL por rol
+│   └── secretos.js              # Validación de variables de entorno y secretos en producción
 ├── scripts/
 │   └── backup.js                # Respaldo atómico en caliente (VACUUM INTO) + retención + S3
 ├── docs/                        # Documentación técnica, despliegue y pruebas
@@ -39,6 +40,7 @@ Aplicación web de Punto de Venta (POS), control de turnos/arqueo ciego e invent
 ├── Dockerfile                   # Imagen Docker multi-stage
 ├── docker-compose.yml           # Orquestación con volúmenes persistentes (data/ y backups/)
 ├── ecosystem.config.js          # Configuración de PM2 para Linux
+├── instrumentation.js           # Validación temprana de seguridad en arranque de Next.js
 └── next.config.js               # Configuración de Next.js (serverExternalPackages)
 ```
 

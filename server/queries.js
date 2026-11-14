@@ -1,10 +1,33 @@
 const db = require('../database/database');
 const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
+const { obtenerSetupTokenValido } = require('./secretos');
 
 const BCRYPT_ROUNDS = 10;
 const MAX_INTENTOS_LOGIN = 5;
 const TIEMPO_BLOQUEO_LOGIN_MS = 15 * 60 * 1000; // 15 minutos
 const intentosFallidosLogin = new Map();
+
+// Segundo contador por cuenta (sin IP): evita que rotar la IP permita fuerza bruta ilimitada.
+// 20 intentos fallidos dentro de una ventana de 15 minutos bloquean la cuenta 15 minutos.
+// El bloqueo expira solo (no se reinicia con un login correcto mientras dure la ventana).
+const MAX_INTENTOS_CUENTA = 20;
+const VENTANA_INTENTOS_CUENTA_MS = 15 * 60 * 1000;
+const TIEMPO_BLOQUEO_CUENTA_MS = 15 * 60 * 1000;
+const intentosFallidosCuenta = new Map();
+
+// Límite de entradas en memoria para que nombres de usuario aleatorios no hagan crecer los mapas sin control
+const MAX_ENTRADAS_RATE_LIMIT = 10000;
+
+function purgarEntradasExpiradas(mapa, ventanaMs) {
+    if (mapa.size < MAX_ENTRADAS_RATE_LIMIT) return;
+    const ahora = Date.now();
+    for (const [clave, reg] of mapa) {
+        const bloqueoVencido = !reg.bloqueadoHasta || reg.bloqueadoHasta <= ahora;
+        const ventanaVencida = !reg.primerIntento || ahora - reg.primerIntento > ventanaMs;
+        if (bloqueoVencido && ventanaVencida) mapa.delete(clave);
+    }
+}
 
 function esHashBcrypt(valor) {
     return typeof valor === 'string' && /^\$2[aby]\$\d{2}\$/.test(valor);
@@ -42,7 +65,8 @@ function verificarBloqueoLogin(clave) {
 
 function registrarIntentoFallidoLogin(clave) {
     const ahora = Date.now();
-    const actual = intentosFallidosLogin.get(clave) || { intentos: 0, bloqueadoHasta: null };
+    purgarEntradasExpiradas(intentosFallidosLogin, TIEMPO_BLOQUEO_LOGIN_MS);
+    const actual = intentosFallidosLogin.get(clave) || { intentos: 0, bloqueadoHasta: null, primerIntento: ahora };
     actual.intentos += 1;
 
     if (actual.intentos >= MAX_INTENTOS_LOGIN) {
@@ -60,6 +84,54 @@ function registrarIntentoFallidoLogin(clave) {
 
 function limpiarIntentosLogin(clave) {
     intentosFallidosLogin.delete(clave);
+}
+
+// Clave del contador por cuenta: la cuenta real si existe (unifica login por id y por nombre);
+// si no existe, el identificador intentado normalizado.
+function obtenerClaveCuenta(candidato, identificadorIntentado) {
+    if (candidato && candidato.id) return `cuenta:${Number(candidato.id)}`;
+    return `intento:${String(identificadorIntentado || 'desconocido').trim().toLowerCase()}`;
+}
+
+function verificarBloqueoCuenta(claveCuenta) {
+    const registro = intentosFallidosCuenta.get(claveCuenta);
+    if (!registro) return;
+    const ahora = Date.now();
+
+    if (registro.bloqueadoHasta && registro.bloqueadoHasta > ahora) {
+        const reloj = formatearMinutosYSegundos(Math.ceil((registro.bloqueadoHasta - ahora) / 1000));
+        throw new Error(
+            `Cuenta bloqueada temporalmente por exceso de intentos fallidos (${MAX_INTENTOS_CUENTA}) desde distintos orígenes. Intenta nuevamente en ${reloj} (min:seg).`
+        );
+    }
+
+    // Bloqueo vencido o ventana de conteo vencida: el registro expira solo
+    const bloqueoVencido = registro.bloqueadoHasta && registro.bloqueadoHasta <= ahora;
+    const ventanaVencida = !registro.bloqueadoHasta && ahora - registro.primerIntento > VENTANA_INTENTOS_CUENTA_MS;
+    if (bloqueoVencido || ventanaVencida) {
+        intentosFallidosCuenta.delete(claveCuenta);
+    }
+}
+
+function registrarIntentoFallidoCuenta(claveCuenta) {
+    const ahora = Date.now();
+    purgarEntradasExpiradas(intentosFallidosCuenta, VENTANA_INTENTOS_CUENTA_MS);
+    let actual = intentosFallidosCuenta.get(claveCuenta);
+    if (!actual || (!actual.bloqueadoHasta && ahora - actual.primerIntento > VENTANA_INTENTOS_CUENTA_MS)) {
+        actual = { intentos: 0, primerIntento: ahora, bloqueadoHasta: null };
+    }
+    actual.intentos += 1;
+    if (actual.intentos >= MAX_INTENTOS_CUENTA && !actual.bloqueadoHasta) {
+        actual.bloqueadoHasta = ahora + TIEMPO_BLOQUEO_CUENTA_MS;
+    }
+    intentosFallidosCuenta.set(claveCuenta, actual);
+}
+
+// Registra el fallo en ambos contadores. El contador por cuenta se actualiza primero
+// porque el de IP lanza la excepción de bloqueo al alcanzar su límite.
+function registrarFalloLogin(claveIp, claveCuenta) {
+    registrarIntentoFallidoCuenta(claveCuenta);
+    registrarIntentoFallidoLogin(claveIp);
 }
 
 async function compararYActualizarPassword(pinPlano, passwordGuardado, usuarioId = null) {
@@ -188,14 +260,17 @@ async function verificarUsuario(nombre, pin, ip = 'local') {
         [nombreLimpio]
     );
 
+    const claveCuenta = obtenerClaveCuenta(candidato, `nombre:${nombreLimpio}`);
+    verificarBloqueoCuenta(claveCuenta);
+
     if (!candidato) {
-        registrarIntentoFallidoLogin(claveRL);
+        registrarFalloLogin(claveRL, claveCuenta);
         return undefined;
     }
 
     const coincide = await compararYActualizarPassword(pin, candidato.pin_o_password, candidato.id);
     if (!coincide) {
-        registrarIntentoFallidoLogin(claveRL);
+        registrarFalloLogin(claveRL, claveCuenta);
         return undefined;
     }
 
@@ -222,14 +297,17 @@ async function autenticarUsuarioPorId(usuarioId, pin, nombreUsuario = null, ip =
         );
     }
 
+    const claveCuenta = obtenerClaveCuenta(candidato, identificadorRL);
+    verificarBloqueoCuenta(claveCuenta);
+
     if (!candidato) {
-        registrarIntentoFallidoLogin(claveRL);
+        registrarFalloLogin(claveRL, claveCuenta);
         throw new Error('Credenciales incorrectas o usuario inactivo.');
     }
 
     const coincide = await compararYActualizarPassword(pin, candidato.pin_o_password, candidato.id);
     if (!coincide) {
-        registrarIntentoFallidoLogin(claveRL);
+        registrarFalloLogin(claveRL, claveCuenta);
         throw new Error('Credenciales incorrectas o usuario inactivo.');
     }
 
@@ -249,6 +327,43 @@ async function obtenerUsuarios() {
     );
 }
 
+// Lista pública mínima para el selector de login de /caja: solo cajeros activos, sin rol.
+// Las cuentas privilegiadas (admin/superadmin/developer) nunca se exponen sin sesión.
+async function obtenerCajerosParaLogin() {
+    return await allQuery(
+        `SELECT id, nombre FROM usuarios WHERE activo = 1 AND rol = 'user' ORDER BY nombre COLLATE NOCASE ASC, id ASC`
+    );
+}
+
+// El sistema está instalado cuando la configuración está marcada y existe al menos un usuario de negocio activo
+async function sistemaEstaInstalado(configuracion = null) {
+    const config = configuracion || await obtenerConfiguracionNegocio();
+    if (!config || Number(config.configurado) !== 1) return false;
+    const fila = await getQuery(`SELECT COUNT(*) AS total FROM usuarios WHERE activo = 1 AND rol != 'developer'`);
+    return Number(fila?.total || 0) > 0;
+}
+
+// Política mínima de contraseña / PIN según rol.
+// Solo se aplica al crear usuarios o cambiar claves; no afecta hashes existentes ni el login.
+const LONGITUD_MINIMA_PIN_POR_ROL = {
+    user: 4,
+    admin: 8,
+    superadmin: 8,
+    developer: 8
+};
+
+function validarPoliticaPin(pin, rol) {
+    const pinStr = String(pin ?? '').trim();
+    const minimo = LONGITUD_MINIMA_PIN_POR_ROL[rol] || 8;
+    if (pinStr.length < minimo) {
+        const etiqueta = rol === 'user'
+            ? 'el PIN de un Cajero'
+            : `la contraseña de un perfil ${rol === 'superadmin' ? 'Super Admin' : rol === 'developer' ? 'Developer' : 'Administrador'}`;
+        throw new Error(`Contraseña / PIN demasiado corto: ${etiqueta} debe tener al menos ${minimo} caracteres.`);
+    }
+    return pinStr;
+}
+
 async function crearUsuario(nombre, pin, rol) {
     const nombreLimpio = String(nombre || '').trim();
     if (!nombreLimpio) {
@@ -257,8 +372,9 @@ async function crearUsuario(nombre, pin, rol) {
     if (pin === null || pin === undefined || String(pin).trim() === '') {
         throw new Error('La contraseña / PIN no puede estar vacía.');
     }
-    const pinStr = String(pin).trim();
-    const hashPin = esHashBcrypt(pinStr) ? pinStr : await bcrypt.hash(pinStr, BCRYPT_ROUNDS);
+    const pinStr = validarPoliticaPin(pin, rol);
+    // Siempre se hashea el valor recibido: no se aceptan hashes bcrypt pre-armados como PIN
+    const hashPin = await bcrypt.hash(pinStr, BCRYPT_ROUNDS);
 
     try {
         const res = await runQuery(
@@ -328,7 +444,9 @@ async function cambiarPasswordConPermiso(ejecutorId, usuarioObjetivoId, nuevoPin
         throw new Error('Usuario objetivo no encontrado.');
     }
 
-    const nuevoHash = await bcrypt.hash(String(nuevoPin).trim(), BCRYPT_ROUNDS);
+    // La política se evalúa según el rol del usuario cuya clave se cambia
+    const nuevoPinValido = validarPoliticaPin(nuevoPin, objetivo.rol);
+    const nuevoHash = await bcrypt.hash(nuevoPinValido, BCRYPT_ROUNDS);
 
     // Caso 1: El usuario cambia su propia contraseña/PIN (pinActual es OBLIGATORIO)
     if (Number(ejecutorId) === Number(usuarioObjetivoId)) {
@@ -397,45 +515,81 @@ async function guardarConfiguracionNegocio(adminId, config) {
     return await obtenerConfiguracionNegocio();
 }
 
-async function inicializarSistemaPrimeraVez(datos) {
-    const configActual = await obtenerConfiguracionNegocio();
-    const usuariosExistentes = await obtenerUsuarios();
+// Valida el token de instalación (SETUP_TOKEN) con comparación en tiempo constante.
+// - Producción: SETUP_TOKEN es obligatorio; si no está definido, la instalación se rechaza.
+// - Desarrollo: si SETUP_TOKEN está definido se exige; si no, se permite con aviso en consola.
+function validarTokenInstalacion(tokenRecibido) {
+    // Un SETUP_TOKEN con el valor de ejemplo de .env.production.example se trata como no definido
+    const esperado = obtenerSetupTokenValido();
 
-    if (Number(configActual.configurado) === 1 && usuariosExistentes.length > 0) {
-        throw new Error('El sistema ya fue inicializado previamente.');
+    if (!esperado) {
+        if (process.env.NODE_ENV === 'production') {
+            const err = new Error('Instalación deshabilitada: el servidor no tiene definida la variable SETUP_TOKEN (o conserva el valor de ejemplo). Configúrala en el archivo .env de producción y reinicia el servicio.');
+            err.status = 403;
+            throw err;
+        }
+        console.warn('[Seguridad] SETUP_TOKEN no está definido: instalación inicial permitida sin token (solo en desarrollo).');
+        return;
     }
 
-    if (!datos.nombreNegocio || !datos.nombreNegocio.trim()) {
+    const recibido = String(tokenRecibido || '').trim();
+    // Se comparan los resúmenes SHA-256 para que ambos buffers tengan la misma longitud
+    // (timingSafeEqual exige longitudes iguales) sin filtrar el largo del token real.
+    const hashEsperado = crypto.createHash('sha256').update(esperado, 'utf8').digest();
+    const hashRecibido = crypto.createHash('sha256').update(recibido, 'utf8').digest();
+    if (!recibido || !crypto.timingSafeEqual(hashEsperado, hashRecibido)) {
+        const err = new Error('Token de instalación inválido o ausente.');
+        err.status = 403;
+        throw err;
+    }
+}
+
+async function inicializarSistemaPrimeraVez(datos = {}) {
+    validarTokenInstalacion(datos.setupToken);
+
+    if (!datos.nombreNegocio || !String(datos.nombreNegocio).trim()) {
         throw new Error('Debes ingresar el nombre de la empresa o negocio.');
     }
 
-    await runQuery(
-        `UPDATE configuracion_negocio
-         SET nombre_negocio = ?,
-             modalidad_nombre = ?,
-             usa_stock_directo = ?,
-             usa_vencimiento = ?,
-             usa_recetas_ensamblaje = ?,
-             configurado = 1
-         WHERE id = 1`,
-        [
-            datos.nombreNegocio.trim(),
-            datos.modalidadNombre || 'Venta Directa No Perecedera',
-            datos.usaStockDirecto ? 1 : 0,
-            datos.usaVencimiento ? 1 : 0,
-            datos.usaRecetasEnsamblaje ? 1 : 0
-        ]
-    );
+    // Asegura que exista la fila singleton antes de abrir la transacción
+    await obtenerConfiguracionNegocio();
 
-    let superAdminId = null;
-    if (usuariosExistentes.length === 0) {
-        if (!datos.adminNombre || !datos.adminNombre.trim() || !datos.adminPin || !String(datos.adminPin).trim()) {
+    // Comprobación de estado, marcado como configurado y creación del Super Admin en una sola transacción
+    const superAdminId = await enTransaccion(async () => {
+        const configActual = await getQuery(`SELECT configurado FROM configuracion_negocio WHERE id = 1`);
+        const usuariosExistentes = await obtenerUsuarios();
+
+        if (Number(configActual.configurado) === 1 && usuariosExistentes.length > 0) {
+            throw new Error('El sistema ya fue inicializado previamente.');
+        }
+
+        await runQuery(
+            `UPDATE configuracion_negocio
+             SET nombre_negocio = ?,
+                 modalidad_nombre = ?,
+                 usa_stock_directo = ?,
+                 usa_vencimiento = ?,
+                 usa_recetas_ensamblaje = ?,
+                 configurado = 1
+             WHERE id = 1`,
+            [
+                String(datos.nombreNegocio).trim(),
+                datos.modalidadNombre || 'Venta Directa No Perecedera',
+                datos.usaStockDirecto ? 1 : 0,
+                datos.usaVencimiento ? 1 : 0,
+                datos.usaRecetasEnsamblaje ? 1 : 0
+            ]
+        );
+
+        if (usuariosExistentes.length > 0) {
+            return usuariosExistentes[0].id;
+        }
+
+        if (!datos.adminNombre || !String(datos.adminNombre).trim() || !datos.adminPin || !String(datos.adminPin).trim()) {
             throw new Error('Debes ingresar el nombre y PIN/contraseña para crear el primer Super Admin.');
         }
-        superAdminId = await crearUsuario(datos.adminNombre.trim(), String(datos.adminPin).trim(), 'superadmin');
-    } else {
-        superAdminId = usuariosExistentes[0].id;
-    }
+        return await crearUsuario(String(datos.adminNombre).trim(), String(datos.adminPin).trim(), 'superadmin');
+    });
 
     return {
         configuracionNegocio: await obtenerConfiguracionNegocio(),
@@ -1960,6 +2114,8 @@ module.exports = {
     autenticarUsuarioPorId,
     obtenerUsuarioPorId,
     obtenerUsuarios,
+    obtenerCajerosParaLogin,
+    sistemaEstaInstalado,
     crearUsuario,
     crearUsuarioConPermiso,
     borrarUsuarioConPermiso,

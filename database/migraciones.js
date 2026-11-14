@@ -5,6 +5,11 @@ const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
+const {
+    esProduccion,
+    exigirPasswordDeveloperProduccion,
+    motivoPasswordDeveloperInvalida
+} = require('../server/secretos');
 
 const BCRYPT_ROUNDS = 10;
 
@@ -522,22 +527,31 @@ const MIGRACIONES = [
 ];
 
 async function sincronizarCuentaDeveloper(conn) {
-    let claveEnv = obtenerPasswordDeveloperDesdeEnv();
-    const envLocalPath = path.resolve(process.cwd(), '.env.local');
+    const claveEnv = obtenerPasswordDeveloperDesdeEnv();
 
+    // Sin DEVELOPER_PASSWORD no se crea la cuenta developer (no hay clave por defecto ni se escribe .env.local).
+    // Si existiera una cuenta developer previa (p. ej. creada por migraciones antiguas con clave aleatoria),
+    // se desactiva para que no quede utilizable; se reactiva sola al definir DEVELOPER_PASSWORD.
     if (!claveEnv) {
-        claveEnv = 'developer123';
+        console.warn("[Seguridad] DEVELOPER_PASSWORD no está definida: la cuenta técnica 'developer' no se crea ni queda habilitada. Defínela en .env.local (desarrollo) o .env (producción) si necesitas el perfil de mantenimiento.");
         try {
-            const linea = `\nDEVELOPER_PASSWORD=${claveEnv}\n`;
-            if (fs.existsSync(envLocalPath)) {
-                fs.appendFileSync(envLocalPath, linea, 'utf8');
-            } else {
-                fs.writeFileSync(envLocalPath, `DEVELOPER_PASSWORD=${claveEnv}\n`, 'utf8');
+            const res = await runRaw(conn, `UPDATE usuarios SET activo = 0 WHERE rol = 'developer' AND activo = 1`);
+            if (res.changes > 0) {
+                console.warn("[Seguridad] Cuenta 'developer' existente desactivada hasta que se configure DEVELOPER_PASSWORD.");
             }
-            console.log("[Seguridad] Se ha configurado automáticamente DEVELOPER_PASSWORD en .env.local.");
         } catch (err) {
-            console.error('[Seguridad] No se pudo guardar DEVELOPER_PASSWORD en .env.local:', err.message);
+            console.error('[Seguridad] Error al desactivar la cuenta developer:', err.message);
         }
+        return;
+    }
+
+    // Producción: rechazar valores de ejemplo o demasiado cortos (error bloqueante y claro).
+    // Se lanza fuera del try/catch para que la inicialización de la base de datos falle de forma visible.
+    if (esProduccion()) {
+        exigirPasswordDeveloperProduccion(claveEnv);
+    } else {
+        const motivo = motivoPasswordDeveloperInvalida(claveEnv);
+        if (motivo) console.warn(`[Seguridad] Aviso (desarrollo): ${motivo} En producción esto impediría arrancar.`);
     }
 
     try {

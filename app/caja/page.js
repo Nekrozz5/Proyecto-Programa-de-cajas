@@ -61,7 +61,7 @@ export default function CajaPage() {
             const data = await res.json();
             if (!res.ok) throw new Error(data.error || 'Error al cargar datos');
 
-            if (!data.configuracionNegocio || Number(data.configuracionNegocio.configurado) === 0 || (data.usuarios || []).length === 0) {
+            if (!data.configuracionNegocio || Number(data.configuracionNegocio.configurado) === 0 || !data.sistemaInstalado) {
                 window.location.href = '/';
                 return;
             }
@@ -80,6 +80,10 @@ export default function CajaPage() {
 
             if (data.usuarios?.length > 0 && !loginUsuarioId) {
                 setLoginUsuarioId(String(data.usuarios[0].id));
+            }
+            // Sin cajeros en la lista pública (p. ej. solo hay administradores): login escribiendo el nombre
+            if (!data.usuarioSesion && (data.usuarios || []).length === 0) {
+                setModoLoginManualCaja(true);
             }
         } catch (err) {
             setError(err.message);
@@ -579,7 +583,7 @@ export default function CajaPage() {
                                 >
                                     {usuarios.map((u) => (
                                         <option key={u.id} value={u.id}>
-                                            {u.nombre} ({u.rol === 'superadmin' ? 'Super Admin' : u.rol === 'admin' ? 'Administrador' : 'Cajero'})
+                                            {u.nombre}
                                         </option>
                                     ))}
                                 </select>
@@ -595,6 +599,9 @@ export default function CajaPage() {
                                     required
                                     style={inputStyle}
                                 />
+                                <small style={{ display: 'block', color: '#64748b', marginTop: '0.3rem' }}>
+                                    Administradores: escriban su nombre de usuario (no aparecen en la lista).
+                                </small>
                             </label>
                         )}
                         <label>

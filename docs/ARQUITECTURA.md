@@ -9,7 +9,7 @@ Este documento resume la arquitectura del sistema POS, su modelo de seguridad, l
 - **Frontend / Fullstack:** Next.js 16 (App Router) con React 19.
 - **Base de Datos:** SQLite3 local (`sqlite3`) con SQL nativo parametrizado (sin ORM).
 - **Autenticación:** JWT firmado con `jose` en cookies `HttpOnly` (`pos_session`) y hash de contraseñas con `bcryptjs` (10 rondas).
-- **Despliegue y Respaldos:** PM2 (`ecosystem.config.js`), Docker (`Dockerfile` / `docker-compose.yml`) y respaldo en caliente con `VACUUM INTO` (`scripts/backup.js`).
+- **Despliegue y Respaldos:** PM2 (`ecosystem.config.js`), Docker (`Dockerfile` / `docker-compose.yml` con publicación exclusiva en loopback `127.0.0.1`) y respaldo en caliente con `VACUUM INTO` (`scripts/backup.js`).
 
 ---
 
@@ -31,9 +31,9 @@ Este documento resume la arquitectura del sistema POS, su modelo de seguridad, l
 
 - **`database/database.js`:**
   - Ruta configurable mediante `DATABASE_PATH` (por defecto `./caja.db`).
-  - Activa `PRAGMA foreign_keys = ON`, modo WAL y `PRAGMA busy_timeout = 5000` para manejar concurrencia sin bloqueos prematuros.
+  - Activa `PRAGMA foreign_keys = ON`, modo WAL (`PRAGMA journal_mode = WAL`) y `PRAGMA busy_timeout = 5000` para manejar concurrencia sin bloqueos prematuros.
 - **`database/migraciones.js`:**
-  - Controla la versión del esquema con `PRAGMA user_version` (actualmente v1 a v5).
+  - Controla la versión del esquema con `PRAGMA user_version` (actualmente v1 a v6).
   - Todas las migraciones se ejecutan de forma transaccional e idempotente al iniciar el servidor.
 - **Transacciones atómicas:** Toda escritura de negocio (ventas, egresos, compras, cierres, anulaciones) corre dentro de `transaccion(async (dbTx) => { ... })` en `server/queries.js`.
 - **Fechas:** Almacenadas en UTC (`CURRENT_TIMESTAMP`) y convertidas con `'localtime'` en consultas y filtros `WHERE`.

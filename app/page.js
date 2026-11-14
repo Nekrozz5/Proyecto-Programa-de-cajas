@@ -5,7 +5,7 @@ import { useState, useEffect } from 'react';
 export default function HomePage() {
     const [cargando, setCargando] = useState(true);
     const [config, setConfig] = useState(null);
-    const [usuariosCount, setUsuariosCount] = useState(0);
+    const [sistemaInstalado, setSistemaInstalado] = useState(false);
 
     // Estado del Asistente de Primera Ejecución (3 pasos)
     const [paso, setPaso] = useState(1); // 1: Modalidad | 2: Nombre Empresa | 3: Crear Super Admin
@@ -17,6 +17,7 @@ export default function HomePage() {
     const [nombreNegocio, setNombreNegocio] = useState('');
     const [adminNombre, setAdminNombre] = useState('');
     const [adminPin, setAdminPin] = useState('');
+    const [setupToken, setSetupToken] = useState('');
 
     const [error, setError] = useState(null);
     const [guardando, setGuardando] = useState(false);
@@ -28,7 +29,7 @@ export default function HomePage() {
             const data = await res.json();
             if (res.ok) {
                 setConfig(data.configuracionNegocio || null);
-                setUsuariosCount((data.usuarios || []).length);
+                setSistemaInstalado(Boolean(data.sistemaInstalado));
             }
         } catch (err) {
             setError(err.message);
@@ -81,7 +82,8 @@ export default function HomePage() {
                     usaVencimiento,
                     usaRecetasEnsamblaje: usaRecetas,
                     adminNombre,
-                    adminPin
+                    adminPin,
+                    setupToken
                 })
             });
             const data = await res.json();
@@ -102,7 +104,7 @@ export default function HomePage() {
         );
     }
 
-    const requierePrimeraEjecucion = !config || Number(config.configurado) === 0 || usuariosCount === 0;
+    const requierePrimeraEjecucion = !config || Number(config.configurado) === 0 || !sistemaInstalado;
 
     // ASISTENTE PASO A PASO EN LA PRIMERA EJECUCIÓN DEL PROGRAMA
     if (requierePrimeraEjecucion) {
@@ -308,6 +310,21 @@ export default function HomePage() {
                                         onChange={(e) => setAdminPin(e.target.value)}
                                         style={inputStyle}
                                     />
+                                </label>
+
+                                <label style={{ fontWeight: 'bold' }}>
+                                    Token de instalación:
+                                    <input
+                                        type="password"
+                                        autoComplete="off"
+                                        placeholder="Valor de SETUP_TOKEN configurado en el servidor"
+                                        value={setupToken}
+                                        onChange={(e) => setSetupToken(e.target.value)}
+                                        style={inputStyle}
+                                    />
+                                    <small style={{ display: 'block', fontWeight: 'normal', color: '#64748b', marginTop: '0.3rem' }}>
+                                        Lo entrega el responsable técnico del despliegue. Es obligatorio en producción.
+                                    </small>
                                 </label>
                             </div>
 

@@ -22,7 +22,11 @@ function asegurarConexionYMigraciones() {
                 console.error('Error al conectar con SQLite:', err.message);
             } else {
                 console.log('Conectado exitosamente a la base de datos SQLite:', dbPath);
-                dbInstance.run('PRAGMA busy_timeout = 5000;');
+                dbInstance.serialize(() => {
+                    dbInstance.run('PRAGMA busy_timeout = 5000;');
+                    dbInstance.run('PRAGMA journal_mode = WAL;');
+                    dbInstance.run('PRAGMA foreign_keys = ON;');
+                });
             }
         });
         promesaMigracion = ejecutarMigraciones(dbInstance).catch((err) => {
@@ -33,8 +37,9 @@ function asegurarConexionYMigraciones() {
     return promesaMigracion;
 }
 
-// Ejecutar conexión y migraciones una sola vez al arrancar
-asegurarConexionYMigraciones();
+// La conexión y las migraciones se ejecutan de forma perezosa en la primera consulta real
+// (ver dbProxy). No se abren al importar el módulo para que `next build` no toque la base de datos
+// ni ejecute validaciones de secretos de producción durante la compilación.
 
 const dbProxy = {
     run(sql, params, callback) {
