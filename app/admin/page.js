@@ -106,6 +106,50 @@ export default function AdminPage() {
     const [pinActualInput, setPinActualInput] = useState('');
     const [nuevoPinInput, setNuevoPinInput] = useState('');
 
+    // Estados para notificaciones de cierre por correo
+    const [enviandoPruebaEmail, setEnviandoPruebaEmail] = useState(false);
+    const [enviandoEmailCajaId, setEnviandoEmailCajaId] = useState(null);
+
+    async function handleProbarEmail() {
+        try {
+            setEnviandoPruebaEmail(true);
+            setError(null);
+            setMensaje(null);
+            const res = await fetch('/api/caja', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ accion: 'probar_email' })
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Error al enviar correo de prueba.');
+            setMensaje(`✅ ${data.mensaje}`);
+        } catch (err) {
+            setError(err.message);
+        } finally {
+            setEnviandoPruebaEmail(false);
+        }
+    }
+
+    async function handleReenviarEmailCierre(cajaId) {
+        try {
+            setEnviandoEmailCajaId(cajaId);
+            setError(null);
+            setMensaje(null);
+            const res = await fetch('/api/caja', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ accion: 'reenviar_cierre_email', cajaId })
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Error al enviar el reporte por correo.');
+            setMensaje(`✅ ${data.mensaje}`);
+        } catch (err) {
+            setError(err.message);
+        } finally {
+            setEnviandoEmailCajaId(null);
+        }
+    }
+
     async function cargarTodo() {
         try {
             setCargando(true);
@@ -1084,6 +1128,60 @@ export default function AdminPage() {
                                         </div>
                                     </div>
 
+                                    {/* BANNER INFORMATIVO Y DE PRUEBA DE CORREO ELECTRÓNICO */}
+                                    <div style={{
+                                        background: datos.estadoEmail?.configurado ? '#f0fdf4' : '#f8fafc',
+                                        border: `1px solid ${datos.estadoEmail?.configurado ? '#bbf7d0' : '#e2e8f0'}`,
+                                        borderRadius: '8px',
+                                        padding: '0.75rem 1rem',
+                                        marginBottom: '1.25rem',
+                                        display: 'flex',
+                                        justifyContent: 'space-between',
+                                        alignItems: 'center',
+                                        flexWrap: 'wrap',
+                                        gap: '0.75rem'
+                                    }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.86rem' }}>
+                                            <span style={{ fontSize: '1.25rem' }}>{datos.estadoEmail?.configurado ? '🟢' : '✉️'}</span>
+                                            <div>
+                                                {datos.estadoEmail?.configurado ? (
+                                                    <>
+                                                        <strong style={{ color: '#166534' }}>Notificaciones automáticas por correo activadas:</strong>{' '}
+                                                        <span style={{ color: '#334155' }}>
+                                                            Al cerrar cada turno se envía el resumen ejecutivo y el Excel a: <strong>{datos.estadoEmail.destinatarios}</strong>
+                                                        </span>
+                                                    </>
+                                                ) : (
+                                                    <>
+                                                        <strong style={{ color: '#475569' }}>Notificaciones automáticas por correo desactivadas:</strong>{' '}
+                                                        <span style={{ color: '#64748b' }}>
+                                                            Configura <code>SMTP_USER</code>, <code>SMTP_PASS</code> y <code>EMAIL_DESTINATARIO_CIERRE</code> en <code>.env.local</code> para recibir el arqueo y Excel automáticamente.
+                                                        </span>
+                                                    </>
+                                                )}
+                                            </div>
+                                        </div>
+                                        {datos.estadoEmail?.configurado && (
+                                            <button
+                                                type="button"
+                                                disabled={enviandoPruebaEmail}
+                                                onClick={handleProbarEmail}
+                                                style={{
+                                                    padding: '0.4rem 0.8rem',
+                                                    background: '#16a34a',
+                                                    color: '#fff',
+                                                    border: 'none',
+                                                    borderRadius: '6px',
+                                                    fontSize: '0.8rem',
+                                                    fontWeight: '600',
+                                                    cursor: enviandoPruebaEmail ? 'not-allowed' : 'pointer'
+                                                }}
+                                            >
+                                                {enviandoPruebaEmail ? '⏳ Enviando prueba...' : '🧪 Enviar Correo de Prueba'}
+                                            </button>
+                                        )}
+                                    </div>
+
                                     {mostrarPanelCajasFisicas && (
                                         <div style={{ background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '8px', padding: '1rem', marginBottom: '1.25rem' }}>
                                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem', marginBottom: '0.75rem' }}>
@@ -1290,46 +1388,67 @@ export default function AdminPage() {
                                                             </td>
                                                             <td style={thTd}>Bs {Number(c.qr_esperado || 0).toFixed(2)}</td>
                                                         <td style={thTd}>
-                                                            {c.estado === 'cerrada' && !datos.cajaAbierta && (
-                                                                cajaAReabrirId === c.id ? (
-                                                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', minWidth: '200px' }}>
-                                                                        <input
-                                                                            type="text"
-                                                                            placeholder="Motivo de reapertura..."
-                                                                            value={motivoReapertura}
-                                                                            onChange={(e) => setMotivoReapertura(e.target.value)}
-                                                                            style={{ padding: '0.35rem', borderRadius: '4px', border: '1px solid #94a3b8', fontSize: '0.8rem' }}
-                                                                        />
-                                                                        <div style={{ display: 'flex', gap: '0.35rem' }}>
-                                                                            <button
-                                                                                type="button"
-                                                                                onClick={() => confirmarReabrirCaja(c.id)}
-                                                                                style={{ padding: '0.3rem 0.6rem', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '0.78rem' }}
-                                                                            >
-                                                                                Confirmar
-                                                                            </button>
-                                                                            <button
-                                                                                type="button"
-                                                                                onClick={() => setCajaAReabrirId(null)}
-                                                                                style={{ padding: '0.3rem 0.6rem', background: '#64748b', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.78rem' }}
-                                                                            >
-                                                                                Cancelar
-                                                                            </button>
+                                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', minWidth: '160px' }}>
+                                                                {c.estado === 'cerrada' && !datos.cajaAbierta && (
+                                                                    cajaAReabrirId === c.id ? (
+                                                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', minWidth: '200px' }}>
+                                                                            <input
+                                                                                type="text"
+                                                                                placeholder="Motivo de reapertura..."
+                                                                                value={motivoReapertura}
+                                                                                onChange={(e) => setMotivoReapertura(e.target.value)}
+                                                                                style={{ padding: '0.35rem', borderRadius: '4px', border: '1px solid #94a3b8', fontSize: '0.8rem' }}
+                                                                            />
+                                                                            <div style={{ display: 'flex', gap: '0.35rem' }}>
+                                                                                <button
+                                                                                    type="button"
+                                                                                    onClick={() => confirmarReabrirCaja(c.id)}
+                                                                                    style={{ padding: '0.3rem 0.6rem', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '0.78rem' }}
+                                                                                >
+                                                                                    Confirmar
+                                                                                </button>
+                                                                                <button
+                                                                                    type="button"
+                                                                                    onClick={() => setCajaAReabrirId(null)}
+                                                                                    style={{ padding: '0.3rem 0.6rem', background: '#64748b', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.78rem' }}
+                                                                                >
+                                                                                    Cancelar
+                                                                                </button>
+                                                                            </div>
                                                                         </div>
-                                                                    </div>
-                                                                ) : (
+                                                                    ) : (
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => {
+                                                                                setCajaAReabrirId(c.id);
+                                                                                setMotivoReapertura('Reconteo / Corrección de cierre');
+                                                                            }}
+                                                                            style={{ padding: '0.35rem 0.7rem', background: '#0070f3', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '0.8rem' }}
+                                                                        >
+                                                                            Reabrir este Turno
+                                                                        </button>
+                                                                    )
+                                                                )}
+                                                                {c.estado === 'cerrada' && (
                                                                     <button
                                                                         type="button"
-                                                                        onClick={() => {
-                                                                            setCajaAReabrirId(c.id);
-                                                                            setMotivoReapertura('Reconteo / Corrección de cierre');
+                                                                        disabled={enviandoEmailCajaId === c.id}
+                                                                        onClick={() => handleReenviarEmailCierre(c.id)}
+                                                                        style={{
+                                                                            padding: '0.35rem 0.65rem',
+                                                                            background: '#047857',
+                                                                            color: '#fff',
+                                                                            border: 'none',
+                                                                            borderRadius: '4px',
+                                                                            cursor: enviandoEmailCajaId === c.id ? 'not-allowed' : 'pointer',
+                                                                            fontSize: '0.78rem',
+                                                                            fontWeight: '600'
                                                                         }}
-                                                                        style={{ padding: '0.35rem 0.7rem', background: '#0070f3', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}
                                                                     >
-                                                                        Reabrir este Turno
+                                                                        {enviandoEmailCajaId === c.id ? '⏳ Enviando...' : '✉️ Enviar por Correo'}
                                                                     </button>
-                                                                )
-                                                            )}
+                                                                )}
+                                                            </div>
                                                         </td>
                                                     </tr>
                                                 );

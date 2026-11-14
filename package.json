@@ -7,6 +7,7 @@
     "dev": "next dev",
     "build": "next build --webpack",
     "start": "next start",
+    "seed": "node scripts/seed_cafeteria.js",
     "backup": "node scripts/backup.js"
   },
   "keywords": [],
@@ -19,6 +20,7 @@
     "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.9",
     "next": "^16.4.3",
+    "nodemailer": "^10.5.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "recharts": "^3.10.1",
