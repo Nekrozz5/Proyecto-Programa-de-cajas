@@ -17,6 +17,7 @@ export default function HomePage() {
     const [nombreNegocio, setNombreNegocio] = useState('');
     const [adminNombre, setAdminNombre] = useState('');
     const [adminPin, setAdminPin] = useState('');
+    const [setupToken, setSetupToken] = useState('');
 
     const [error, setError] = useState(null);
     const [guardando, setGuardando] = useState(false);
@@ -81,7 +82,8 @@ export default function HomePage() {
                     usaVencimiento,
                     usaRecetasEnsamblaje: usaRecetas,
                     adminNombre,
-                    adminPin
+                    adminPin,
+                    setupToken
                 })
             });
             const data = await res.json();
@@ -308,6 +310,21 @@ export default function HomePage() {
                                         onChange={(e) => setAdminPin(e.target.value)}
                                         style={inputStyle}
                                     />
+                                </label>
+
+                                <label style={{ fontWeight: 'bold' }}>
+                                    Token de instalación:
+                                    <input
+                                        type="password"
+                                        autoComplete="off"
+                                        placeholder="Valor de SETUP_TOKEN configurado en el servidor"
+                                        value={setupToken}
+                                        onChange={(e) => setSetupToken(e.target.value)}
+                                        style={inputStyle}
+                                    />
+                                    <small style={{ display: 'block', fontWeight: 'normal', color: '#64748b', marginTop: '0.3rem' }}>
+                                        Lo entrega el responsable técnico del despliegue. Es obligatorio en producción.
+                                    </small>
                                 </label>
                             </div>
 

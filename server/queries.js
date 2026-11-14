@@ -1,5 +1,6 @@
 const db = require('../database/database');
 const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
 
 const BCRYPT_ROUNDS = 10;
 const MAX_INTENTOS_LOGIN = 5;
@@ -397,45 +398,80 @@ async function guardarConfiguracionNegocio(adminId, config) {
     return await obtenerConfiguracionNegocio();
 }
 
-async function inicializarSistemaPrimeraVez(datos) {
-    const configActual = await obtenerConfiguracionNegocio();
-    const usuariosExistentes = await obtenerUsuarios();
+// Valida el token de instalación (SETUP_TOKEN) con comparación en tiempo constante.
+// - Producción: SETUP_TOKEN es obligatorio; si no está definido, la instalación se rechaza.
+// - Desarrollo: si SETUP_TOKEN está definido se exige; si no, se permite con aviso en consola.
+function validarTokenInstalacion(tokenRecibido) {
+    const esperado = String(process.env.SETUP_TOKEN || '').trim();
 
-    if (Number(configActual.configurado) === 1 && usuariosExistentes.length > 0) {
-        throw new Error('El sistema ya fue inicializado previamente.');
+    if (!esperado) {
+        if (process.env.NODE_ENV === 'production') {
+            const err = new Error('Instalación deshabilitada: el servidor no tiene definida la variable SETUP_TOKEN. Configúrala en el archivo .env de producción y reinicia el servicio.');
+            err.status = 403;
+            throw err;
+        }
+        console.warn('[Seguridad] SETUP_TOKEN no está definido: instalación inicial permitida sin token (solo en desarrollo).');
+        return;
     }
 
-    if (!datos.nombreNegocio || !datos.nombreNegocio.trim()) {
+    const recibido = String(tokenRecibido || '').trim();
+    // Se comparan los resúmenes SHA-256 para que ambos buffers tengan la misma longitud
+    // (timingSafeEqual exige longitudes iguales) sin filtrar el largo del token real.
+    const hashEsperado = crypto.createHash('sha256').update(esperado, 'utf8').digest();
+    const hashRecibido = crypto.createHash('sha256').update(recibido, 'utf8').digest();
+    if (!recibido || !crypto.timingSafeEqual(hashEsperado, hashRecibido)) {
+        const err = new Error('Token de instalación inválido o ausente.');
+        err.status = 403;
+        throw err;
+    }
+}
+
+async function inicializarSistemaPrimeraVez(datos = {}) {
+    validarTokenInstalacion(datos.setupToken);
+
+    if (!datos.nombreNegocio || !String(datos.nombreNegocio).trim()) {
         throw new Error('Debes ingresar el nombre de la empresa o negocio.');
     }
 
-    await runQuery(
-        `UPDATE configuracion_negocio
-         SET nombre_negocio = ?,
-             modalidad_nombre = ?,
-             usa_stock_directo = ?,
-             usa_vencimiento = ?,
-             usa_recetas_ensamblaje = ?,
-             configurado = 1
-         WHERE id = 1`,
-        [
-            datos.nombreNegocio.trim(),
-            datos.modalidadNombre || 'Venta Directa No Perecedera',
-            datos.usaStockDirecto ? 1 : 0,
-            datos.usaVencimiento ? 1 : 0,
-            datos.usaRecetasEnsamblaje ? 1 : 0
-        ]
-    );
+    // Asegura que exista la fila singleton antes de abrir la transacción
+    await obtenerConfiguracionNegocio();
 
-    let superAdminId = null;
-    if (usuariosExistentes.length === 0) {
-        if (!datos.adminNombre || !datos.adminNombre.trim() || !datos.adminPin || !String(datos.adminPin).trim()) {
+    // Comprobación de estado, marcado como configurado y creación del Super Admin en una sola transacción
+    const superAdminId = await enTransaccion(async () => {
+        const configActual = await getQuery(`SELECT configurado FROM configuracion_negocio WHERE id = 1`);
+        const usuariosExistentes = await obtenerUsuarios();
+
+        if (Number(configActual.configurado) === 1 && usuariosExistentes.length > 0) {
+            throw new Error('El sistema ya fue inicializado previamente.');
+        }
+
+        await runQuery(
+            `UPDATE configuracion_negocio
+             SET nombre_negocio = ?,
+                 modalidad_nombre = ?,
+                 usa_stock_directo = ?,
+                 usa_vencimiento = ?,
+                 usa_recetas_ensamblaje = ?,
+                 configurado = 1
+             WHERE id = 1`,
+            [
+                String(datos.nombreNegocio).trim(),
+                datos.modalidadNombre || 'Venta Directa No Perecedera',
+                datos.usaStockDirecto ? 1 : 0,
+                datos.usaVencimiento ? 1 : 0,
+                datos.usaRecetasEnsamblaje ? 1 : 0
+            ]
+        );
+
+        if (usuariosExistentes.length > 0) {
+            return usuariosExistentes[0].id;
+        }
+
+        if (!datos.adminNombre || !String(datos.adminNombre).trim() || !datos.adminPin || !String(datos.adminPin).trim()) {
             throw new Error('Debes ingresar el nombre y PIN/contraseña para crear el primer Super Admin.');
         }
-        superAdminId = await crearUsuario(datos.adminNombre.trim(), String(datos.adminPin).trim(), 'superadmin');
-    } else {
-        superAdminId = usuariosExistentes[0].id;
-    }
+        return await crearUsuario(String(datos.adminNombre).trim(), String(datos.adminPin).trim(), 'superadmin');
+    });
 
     return {
         configuracionNegocio: await obtenerConfiguracionNegocio(),

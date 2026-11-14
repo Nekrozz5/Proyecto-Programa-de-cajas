@@ -183,7 +183,10 @@ export async function POST(request) {
         }
 
         if (accion === 'instalacion_inicial') {
-            const resultado = await inicializarSistemaPrimeraVez(body);
+            const resultado = await inicializarSistemaPrimeraVez({
+                ...body,
+                setupToken: typeof body.setupToken === 'string' ? body.setupToken : ''
+            });
             return NextResponse.json({ ok: true, ...resultado });
         }
 
