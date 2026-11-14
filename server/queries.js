@@ -963,28 +963,133 @@ async function obtenerProductos() {
 }
 
 // ==========================================
-// 4. APERTURA DE CAJA, VENTAS Y ANULACIONES
+// 4. GESTIÓN DE CAJAS FÍSICAS (TERMINALES / ESTACIONES)
 // ==========================================
-async function obtenerCajaAbierta() {
-    return await getQuery(
-        `SELECT c.*, u.nombre as usuario_nombre, u.rol as usuario_rol
+async function obtenerCajasFisicas(soloActivas = false) {
+    return await allQuery(
+        `SELECT cf.*,
+                (SELECT c.id FROM cajas c WHERE c.caja_fisica_id = cf.id AND c.estado = 'abierta' LIMIT 1) as turno_abierto_id,
+                (SELECT u.nombre FROM cajas c LEFT JOIN usuarios u ON c.usuario_id = u.id WHERE c.caja_fisica_id = cf.id AND c.estado = 'abierta' LIMIT 1) as operador_abierto
+         FROM cajas_fisicas cf
+         ${soloActivas ? 'WHERE cf.activa = 1' : ''}
+         ORDER BY cf.id ASC`
+    );
+}
+
+async function crearCajaFisica(nombre, adminId) {
+    const ejecutor = await obtenerUsuarioPorId(adminId);
+    if (!ejecutor || !esRolAdministrativo(ejecutor.rol)) {
+        throw new Error('Permiso denegado: solo un Administrador puede registrar estaciones de caja.');
+    }
+    const nombreLimpio = String(nombre || '').trim();
+    if (!nombreLimpio || nombreLimpio.length < 2) {
+        throw new Error('Debes ingresar un nombre válido para la caja física (mínimo 2 caracteres).');
+    }
+    const existente = await getQuery(`SELECT id FROM cajas_fisicas WHERE LOWER(nombre) = LOWER(?)`, [nombreLimpio]);
+    if (existente) {
+        throw new Error(`Ya existe una caja física registrada con el nombre "${nombreLimpio}".`);
+    }
+    const res = await runQuery(`INSERT INTO cajas_fisicas (nombre, activa) VALUES (?, 1)`, [nombreLimpio]);
+    return res.lastID;
+}
+
+async function desactivarCajaFisica(cajaFisicaId, adminId) {
+    const ejecutor = await obtenerUsuarioPorId(adminId);
+    if (!ejecutor || !esRolAdministrativo(ejecutor.rol)) {
+        throw new Error('Permiso denegado: solo un Administrador puede desactivar estaciones de caja.');
+    }
+    const idNum = Number(cajaFisicaId);
+    if (!Number.isFinite(idNum) || idNum <= 0) {
+        throw new Error('ID de caja física inválido.');
+    }
+    const caja = await getQuery(`SELECT * FROM cajas_fisicas WHERE id = ?`, [idNum]);
+    if (!caja) {
+        throw new Error('La caja física indicada no existe.');
+    }
+    if (Number(caja.activa) === 0) {
+        throw new Error('Esta caja física ya se encuentra inactiva.');
+    }
+
+    // Regla obligatoria: Mínimo 1 caja física activa en el sistema
+    const conteoActivas = await getQuery(`SELECT COUNT(*) as total FROM cajas_fisicas WHERE activa = 1`);
+    if (!conteoActivas || Number(conteoActivas.total) <= 1) {
+        throw new Error('Operación denegada: El sistema debe mantener al menos una caja física activa disponible.');
+    }
+
+    // Validar que no tenga turno abierto en curso
+    const turnoAbierto = await getQuery(
+        `SELECT id FROM cajas WHERE caja_fisica_id = ? AND estado = 'abierta'`,
+        [idNum]
+    );
+    if (turnoAbierto) {
+        throw new Error(`No puedes desactivar "${caja.nombre}" porque tiene el Turno #${turnoAbierto.id} actualmente abierto. Debes cerrarlo primero.`);
+    }
+
+    await runQuery(`UPDATE cajas_fisicas SET activa = 0 WHERE id = ?`, [idNum]);
+    return true;
+}
+
+async function reactivarCajaFisica(cajaFisicaId, adminId) {
+    const ejecutor = await obtenerUsuarioPorId(adminId);
+    if (!ejecutor || !esRolAdministrativo(ejecutor.rol)) {
+        throw new Error('Permiso denegado: solo un Administrador puede reactivar estaciones de caja.');
+    }
+    const idNum = Number(cajaFisicaId);
+    await runQuery(`UPDATE cajas_fisicas SET activa = 1 WHERE id = ?`, [idNum]);
+    return true;
+}
+
+// ==========================================
+// 5. APERTURA DE TURNOS, MULTICAJA Y ARQUEOS
+// ==========================================
+async function obtenerCajasAbiertas() {
+    return await allQuery(
+        `SELECT c.*, cf.nombre as caja_fisica_nombre, u.nombre as usuario_nombre, u.rol as usuario_rol
          FROM cajas c
+         LEFT JOIN cajas_fisicas cf ON c.caja_fisica_id = cf.id
          LEFT JOIN usuarios u ON c.usuario_id = u.id
          WHERE c.estado = 'abierta'
-         LIMIT 1`
+         ORDER BY c.id ASC`
     );
 }
 
-async function obtenerHistorialCajas() {
-    return await allQuery(
-        `SELECT c.*, u.nombre as usuario_nombre, u.rol as usuario_rol
-         FROM cajas c
-         LEFT JOIN usuarios u ON c.usuario_id = u.id
-         ORDER BY c.id DESC`
-    );
+async function obtenerCajaAbierta(usuarioId = null, cajaFisicaId = null) {
+    let sql = `
+        SELECT c.*, cf.nombre as caja_fisica_nombre, u.nombre as usuario_nombre, u.rol as usuario_rol
+        FROM cajas c
+        LEFT JOIN cajas_fisicas cf ON c.caja_fisica_id = cf.id
+        LEFT JOIN usuarios u ON c.usuario_id = u.id
+        WHERE c.estado = 'abierta'
+    `;
+    const params = [];
+    if (cajaFisicaId) {
+        sql += ` AND c.caja_fisica_id = ?`;
+        params.push(cajaFisicaId);
+    } else if (usuarioId) {
+        sql += ` AND c.usuario_id = ?`;
+        params.push(usuarioId);
+    }
+    sql += ` ORDER BY c.id DESC LIMIT 1`;
+    return await getQuery(sql, params);
 }
 
-async function abrirCaja(usuarioId, montoInicial) {
+async function obtenerHistorialCajas(cajaFisicaId = null) {
+    let sql = `
+        SELECT c.*, cf.nombre as caja_fisica_nombre, u.nombre as usuario_nombre, u.rol as usuario_rol
+        FROM cajas c
+        LEFT JOIN cajas_fisicas cf ON c.caja_fisica_id = cf.id
+        LEFT JOIN usuarios u ON c.usuario_id = u.id
+    `;
+    const params = [];
+    if (cajaFisicaId) {
+        sql += ` WHERE c.caja_fisica_id = ?`;
+        params.push(cajaFisicaId);
+    }
+    sql += ` ORDER BY c.id DESC`;
+    return await allQuery(sql, params);
+}
+
+async function abrirCaja(usuarioId, montoInicial, cajaFisicaId = null) {
     const montoInicialValidado = redondear2(numeroNoNegativo(montoInicial, 'El monto inicial'));
 
     if (usuarioId === null || usuarioId === undefined || usuarioId === '') {
@@ -996,14 +1101,51 @@ async function abrirCaja(usuarioId, montoInicial) {
         throw new Error('Usuario no válido o inactivo.');
     }
 
-    const cajaAbierta = await obtenerCajaAbierta();
-    if (cajaAbierta) {
-        throw new Error('Ya existe una caja abierta. Ciérrala antes de abrir un nuevo turno.');
+    // Resolver caja física asignada
+    let cajaFisica = null;
+    if (cajaFisicaId) {
+        cajaFisica = await getQuery(`SELECT * FROM cajas_fisicas WHERE id = ? AND activa = 1`, [cajaFisicaId]);
+        if (!cajaFisica) {
+            throw new Error('La caja física seleccionada no existe o está inactiva.');
+        }
+    } else {
+        cajaFisica = await getQuery(`SELECT * FROM cajas_fisicas WHERE activa = 1 ORDER BY id ASC LIMIT 1`);
+        if (!cajaFisica) {
+            throw new Error('No hay ninguna caja física activa en el sistema para abrir turno.');
+        }
+    }
+
+    // Validar que la estación física no tenga ya un turno abierto
+    const turnoAbiertoEstacion = await getQuery(
+        `SELECT c.id, u.nombre as operador
+         FROM cajas c
+         LEFT JOIN usuarios u ON c.usuario_id = u.id
+         WHERE c.caja_fisica_id = ? AND c.estado = 'abierta'`,
+        [cajaFisica.id]
+    );
+    if (turnoAbiertoEstacion) {
+        throw new Error(
+            `La ${cajaFisica.nombre} ya tiene un turno abierto (Turno #${turnoAbiertoEstacion.id} a cargo de ${turnoAbiertoEstacion.operador || 'otro cajero'}). Debe cerrarse antes de iniciar uno nuevo en esta misma estación.`
+        );
+    }
+
+    // Validar que el usuario no tenga otro turno abierto en otra caja simultáneamente
+    const turnoAbiertoUsuario = await getQuery(
+        `SELECT c.id, cf.nombre as caja_nombre
+         FROM cajas c
+         LEFT JOIN cajas_fisicas cf ON c.caja_fisica_id = cf.id
+         WHERE c.usuario_id = ? AND c.estado = 'abierta'`,
+        [usuario.id]
+    );
+    if (turnoAbiertoUsuario) {
+        throw new Error(
+            `El usuario ${usuario.nombre} ya tiene activo el Turno #${turnoAbiertoUsuario.id} en ${turnoAbiertoUsuario.caja_nombre || 'otra caja'}. Debe cerrar su turno anterior antes de abrir uno nuevo.`
+        );
     }
 
     const res = await runQuery(
-        `INSERT INTO cajas (usuario_id, monto_inicial, estado) VALUES (?, ?, 'abierta')`,
-        [usuario.id, montoInicialValidado]
+        `INSERT INTO cajas (caja_fisica_id, usuario_id, monto_inicial, estado) VALUES (?, ?, ?, 'abierta')`,
+        [cajaFisica.id, usuario.id, montoInicialValidado]
     );
     return res.lastID;
 }
@@ -1011,16 +1153,25 @@ async function abrirCaja(usuarioId, montoInicial) {
 async function reabrirCajaConPermiso(adminId, cajaId, motivo = 'Revisión administrativa') {
     const ejecutor = await obtenerUsuarioPorId(adminId);
     if (!ejecutor || !esRolAdministrativo(ejecutor.rol)) {
-        throw new Error('Permiso denegado: solo el Administrador puede reabrir una caja cerrada.');
-    }
-
-    const cajaAbierta = await obtenerCajaAbierta();
-    if (cajaAbierta) {
-        throw new Error(`Ya está abierta la Caja #${cajaAbierta.id}. Ciérrala primero antes de reabrir otra.`);
+        throw new Error('Permiso denegado: solo el Administrador puede reabrir un turno cerrado.');
     }
 
     const caja = await getQuery(`SELECT * FROM cajas WHERE id = ?`, [cajaId]);
-    if (!caja) throw new Error('Caja no encontrada.');
+    if (!caja) throw new Error('Turno de caja no encontrado.');
+
+    // Verificar si la caja física correspondiente ya tiene otro turno abierto
+    const turnoAbierto = await getQuery(
+        `SELECT c.id, cf.nombre as caja_nombre
+         FROM cajas c
+         LEFT JOIN cajas_fisicas cf ON c.caja_fisica_id = cf.id
+         WHERE c.caja_fisica_id = ? AND c.estado = 'abierta'`,
+        [caja.caja_fisica_id]
+    );
+    if (turnoAbierto) {
+        throw new Error(
+            `No se puede reabrir el Turno #${cajaId}: la estación "${turnoAbierto.caja_nombre || 'Caja'}" ya tiene el Turno #${turnoAbierto.id} abierto actualmente.`
+        );
+    }
 
     const numReapertura = (Number(caja.veces_reabierta) || 0) + 1;
     const notaPrevia = `Reapertura #${numReapertura} por ${ejecutor.nombre} (${motivo || 'Sin motivo'}) — Arqueo previo: Esperado Bs ${Number(caja.efectivo_esperado || 0).toFixed(2)}, Real Bs ${Number(caja.efectivo_real || 0).toFixed(2)}, Dif: Bs ${Number(caja.diferencia_efectivo || 0).toFixed(2)}`;
@@ -1658,22 +1809,25 @@ async function generarReporteCSV(cajaId = null) {
     const params = cajaId ? [cajaId] : [];
 
     const filas = await allQuery(
-        `SELECT m.id, m.caja_id, m.fecha_hora, m.tipo, m.metodo_pago,
+        `SELECT m.id, m.caja_id, cf.nombre as caja_nombre, m.fecha_hora, m.tipo, m.metodo_pago,
                 m.monto, m.monto_recibido, m.cambio, m.estado, m.descripcion
          FROM movimientos m
+         LEFT JOIN cajas c ON m.caja_id = c.id
+         LEFT JOIN cajas_fisicas cf ON c.caja_fisica_id = cf.id
          ${filtroCaja}
          ORDER BY m.fecha_hora DESC`,
         params
     );
 
     const cabeceras = [
-        'ID_Movimiento', 'ID_Caja', 'Fecha_Hora', 'Tipo', 'Metodo_Pago',
+        'ID_Movimiento', 'Nro_Turno', 'Caja_Estacion', 'Fecha_Hora', 'Tipo', 'Metodo_Pago',
         'Monto_Bs', 'Recibido_Bs', 'Cambio_Bs', 'Estado', 'Descripcion'
     ].join(';');
 
     const lineas = filas.map(r => [
         r.id,
         r.caja_id,
+        sanitizarTextoCSV(r.caja_nombre || 'Caja Principal'),
         r.fecha_hora,
         r.tipo,
         r.metodo_pago,
@@ -1693,24 +1847,26 @@ async function generarReporteExcel(cajaId = null) {
     const params = cajaId ? [cajaId] : [];
 
     const movimientos = await allQuery(
-        `SELECT m.id, m.caja_id, datetime(m.fecha_hora, 'localtime') as fecha_hora,
+        `SELECT m.id, m.caja_id, cf.nombre as caja_nombre, datetime(m.fecha_hora, 'localtime') as fecha_hora,
                 COALESCE(u.nombre, '—') as operador, m.tipo, m.metodo_pago,
                 m.monto, m.monto_recibido, m.cambio, m.estado, m.descripcion
          FROM movimientos m
          LEFT JOIN cajas c ON m.caja_id = c.id
-         LEFT JOIN usuarios u ON c.usuario_id = u.id
+         LEFT JOIN cajas_fisicas cf ON c.caja_fisica_id = cf.id
+         LEFT JOIN usuarios u ON m.usuario_id = u.id
          ${filtroCaja}
          ORDER BY m.fecha_hora DESC`,
         params
     );
 
     const cajas = await allQuery(
-        `SELECT c.id, COALESCE(u.nombre, '—') as cajero,
+        `SELECT c.id, cf.nombre as caja_nombre, COALESCE(u.nombre, '—') as cajero,
                 datetime(c.fecha_apertura, 'localtime') as fecha_apertura,
                 datetime(c.fecha_cierre, 'localtime') as fecha_cierre,
                 c.estado, c.monto_inicial, c.efectivo_esperado, c.efectivo_real,
                 c.diferencia_efectivo, c.qr_esperado, c.veces_reabierta
          FROM cajas c
+         LEFT JOIN cajas_fisicas cf ON c.caja_fisica_id = cf.id
          LEFT JOIN usuarios u ON c.usuario_id = u.id
          ${cajaId ? 'WHERE c.id = ?' : ''}
          ORDER BY c.id DESC`,
@@ -1724,7 +1880,8 @@ async function generarReporteExcel(cajaId = null) {
     const hojaMov = workbook.addWorksheet('Movimientos');
     hojaMov.columns = [
         { header: 'ID', key: 'id', width: 10 },
-        { header: 'Caja #', key: 'caja_id', width: 10 },
+        { header: 'N° Turno', key: 'caja_id', width: 12 },
+        { header: 'Estación / Caja', key: 'caja_nombre', width: 20 },
         { header: 'Fecha y Hora', key: 'fecha_hora', width: 20 },
         { header: 'Operador', key: 'operador', width: 18 },
         { header: 'Tipo', key: 'tipo', width: 12 },
@@ -1751,13 +1908,14 @@ async function generarReporteExcel(cajaId = null) {
             cambio: Number(m.cambio || 0)
         });
     }
-    ['G', 'H', 'I'].forEach((col) => {
+    ['H', 'I', 'J'].forEach((col) => {
         hojaMov.getColumn(col).numFmt = '#,##0.00';
     });
 
     const hojaCajas = workbook.addWorksheet('Arqueos de Caja');
     hojaCajas.columns = [
-        { header: 'Caja #', key: 'id', width: 10 },
+        { header: 'N° Turno', key: 'id', width: 12 },
+        { header: 'Estación / Caja', key: 'caja_nombre', width: 20 },
         { header: 'Cajero', key: 'cajero', width: 18 },
         { header: 'Apertura', key: 'fecha_apertura', width: 20 },
         { header: 'Cierre', key: 'fecha_cierre', width: 20 },
@@ -1783,7 +1941,7 @@ async function generarReporteExcel(cajaId = null) {
             veces_reabierta: Number(c.veces_reabierta || 0)
         });
     }
-    ['F', 'G', 'H', 'I', 'J'].forEach((col) => {
+    ['G', 'H', 'I', 'J', 'K'].forEach((col) => {
         hojaCajas.getColumn(col).numFmt = '#,##0.00';
     });
 
@@ -1818,6 +1976,11 @@ module.exports = {
     crearProducto,
     registrarCompraProductoDirecto,
     obtenerProductos,
+    obtenerCajasFisicas,
+    crearCajaFisica,
+    desactivarCajaFisica,
+    reactivarCajaFisica,
+    obtenerCajasAbiertas,
     obtenerCajaAbierta,
     obtenerHistorialCajas,
     abrirCaja,

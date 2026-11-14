@@ -488,6 +488,36 @@ const MIGRACIONES = [
                   )
             `);
         }
+    },
+    {
+        version: 6,
+        descripcion: 'Creación de tabla cajas_fisicas para gestión de múltiples terminales/estaciones y vinculación de caja_fisica_id en tabla cajas',
+        up: async (conn) => {
+            await runRaw(conn, `
+                CREATE TABLE IF NOT EXISTS cajas_fisicas (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    nombre TEXT NOT NULL UNIQUE,
+                    activa INTEGER NOT NULL DEFAULT 1,
+                    creada_en DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            `);
+
+            await runRaw(conn, `
+                INSERT OR IGNORE INTO cajas_fisicas (id, nombre, activa)
+                VALUES (1, 'Caja 1 - Principal', 1)
+            `);
+
+            await agregarColumnaSiNoExiste(
+                conn,
+                'cajas',
+                'caja_fisica_id',
+                'INTEGER DEFAULT 1 REFERENCES cajas_fisicas(id)'
+            );
+
+            await runRaw(conn, `
+                UPDATE cajas SET caja_fisica_id = 1 WHERE caja_fisica_id IS NULL
+            `);
+        }
     }
 ];
 

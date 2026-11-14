@@ -22,11 +22,11 @@
   - `README.md`: Punto de entrada, estructura general y comandos rápidos.
   - `docs/`: Documentación técnica (`ARQUITECTURA.md`), despliegue en nube (`DEPLOY_AWS.md`) y checklist de pruebas (`PRUEBAS.md`).
   - `database/database.js`: Inicialización de SQLite, activación de claves foráneas (`PRAGMA foreign_keys = ON`), modo WAL, timeout y ejecución automática de migraciones.
-  - `database/migraciones.js`: Sistema de migraciones versionado con `PRAGMA user_version`. Toda mutación al esquema se aplica de forma transaccional e idempotente (migraciones v1 a v5).
+  - `database/migraciones.js`: Sistema de migraciones versionado con `PRAGMA user_version`. Toda mutación al esquema se aplica de forma transaccional e idempotente (migraciones v1 a v6).
   - `server/queries.js`: Lógica de negocio y consultas con promesas nativas (`async/await`) usando `runQuery`, `getQuery`, `allQuery` y `transaccion()`.
   - `server/sesion.js`: Manejo de sesión JWT del servidor (crear, validar, renovar y destruir cookies HttpOnly `pos_session`).
   - `scripts/backup.js`: Script de copia de seguridad atómica con retención configurable.
-  - `app/api/caja/route.js`: Endpoint principal (`GET` de estado/sesión/catálogo/auditoría y `POST` por `accion`: `login`, `logout`, `instalacion_inicial`, `abrir`, `reabrir`, `vender`, `egreso`, `ingreso_efectivo`, `cerrar`, `anular`, `crear_usuario`, `borrar_usuario`, `cambiar_password`, `guardar_configuracion`, `crear_categoria`, `crear_producto`, `comprar_producto_directo`, `crear_insumo`, `comprar_insumo`, `merma_insumo`, `asignar_receta`).
+  - `app/api/caja/route.js`: Endpoint principal (`GET` de estado/sesión/catálogo/auditoría y `POST` por `accion`: `login`, `logout`, `instalacion_inicial`, `abrir`, `reabrir`, `vender`, `egreso`, `ingreso_efectivo`, `cerrar`, `anular`, `crear_usuario`, `borrar_usuario`, `cambiar_password`, `guardar_configuracion`, `crear_categoria`, `crear_producto`, `comprar_producto_directo`, `crear_insumo`, `comprar_insumo`, `merma_insumo`, `asignar_receta`, `crear_caja_fisica`, `desactivar_caja_fisica`, `reactivar_caja_fisica`).
   - `app/api/reportes/route.js`: Endpoint administrativo (`GET`) para tendencias JSON, exportación CSV (`?formato=csv`) y exportación Excel (`?formato=xlsx`, con filtro opcional `?cajaId=`).
   - `app/caja/page.js` y `app/admin/page.js`: Vistas de operador y administrador.
   - `app/admin/GraficosFinancieros.js` y `app/admin/exportarPDF.js`: Módulos de visualización financiera y exportación PDF del panel administrativo.
@@ -39,6 +39,11 @@
   - `developer` (Oculto): Rol técnico especial reservado para tareas de diagnóstico, migraciones de datos y mantenimiento profundo. No se expone en listados estándar de creación de usuarios de caja.
 - **Configuración del Negocio (`configuracion_negocio`):**
   - Tabla singleton (`id = 1`) que define el nombre del establecimiento, la modalidad operativa y las banderas funcionales activas: `usa_stock_directo`, `usa_vencimiento` y `usa_recetas_ensamblaje`.
+- **Múltiples Estaciones Físicas de Caja y N° de Turno:**
+  - Separación entre **Estación de Caja Física** (`cajas_fisicas`: terminal de cobro) y **Turno de Operación / Arqueo** (`cajas`: sesión de trabajo correlativa).
+  - Regla de mínimo: El negocio debe contar con al menos 1 caja física activa. No se puede desactivar la última caja física.
+  - Desactivación protegida: No se puede desactivar una caja física con un turno abierto en curso. Baja lógica (`activa = 0`) para preservar históricos de ventas y arqueos.
+  - Multicaja simultánea: Permite operar múltiples cajas físicas abiertas al mismo tiempo por distintos cajeros.
 - **Arqueo Ciego e Inyecciones de Efectivo:**
   - Al cerrar caja, el cajero debe contar físicamente su efectivo e ingresar el `efectivo_real` sin ver de antemano el cálculo de `efectivo_esperado`.
   - El sistema calcula internamente:
@@ -193,7 +198,9 @@ Cuando se clona o actualiza este repositorio en un equipo nuevo, el agente y el 
     - Creación de `.vscode/extensions.json` con recomendaciones (SQLite Viewer, Docker, ESLint, Prettier).
     - Creación de `.vscode/settings.json` optimizando observadores de archivos, exclusión de logs/backups y formateo.
     - Documentación de pautas de sincronización entre PC y laptop.
-  - Migración a arquitectura con esquema versionado (`database/migraciones.js`, PRAGMA `user_version` hasta v5).
+  - Migración a arquitectura con esquema versionado (`database/migraciones.js`, PRAGMA `user_version` hasta v6).
+  - Migración v6: Tabla `cajas_fisicas` para gestión multicaixa de terminales/estaciones con "Caja 1 - Principal" por defecto, vinculación `caja_fisica_id` en `cajas`, soporte de múltiples cajas abiertas en simultáneo y reformulación de terminología de `Caja #` a `N° Turno` en UI, Excel (.xlsx) y PDF.
+  - Gestión administrativa de estaciones físicas en `/admin` con regla de negocio de mínimo 1 caja física activa requerida y baja lógica protegida sin turnos abiertos en curso.
   - Migraciones v4 y v5: Tabla `categorias` para catálogo interactivo por pestañas, normalización multicategoría y limpieza de categoría 'General'.
   - Sincronización automática y segura de la cuenta `developer` vinculada a `DEVELOPER_PASSWORD` en `.env.local` con hash bcrypt.
   - Módulo de sesiones seguras (`server/sesion.js`) con `INSTANCE_BOOT_ID` (invalidación automática al reiniciar servidor), TTL por rol (15 min dev, 30 min admin, 8 h cajero) y session cookies para roles administrativos.

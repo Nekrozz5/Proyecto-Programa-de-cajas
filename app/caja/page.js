@@ -9,6 +9,8 @@ export default function CajaPage() {
     const typingTimers = useRef({});
 
     const [cajaAbierta, setCajaAbierta] = useState(null);
+    const [cajasFisicas, setCajasFisicas] = useState([]);
+    const [cajaFisicaSeleccionada, setCajaFisicaSeleccionada] = useState('');
     const [historialCajas, setHistorialCajas] = useState([]);
     const [productos, setProductos] = useState([]);
     const [usuarios, setUsuarios] = useState([]);
@@ -65,6 +67,7 @@ export default function CajaPage() {
             }
 
             setCajaAbierta(data.cajaAbierta);
+            setCajasFisicas(data.cajasFisicas || []);
             setHistorialCajas(data.historialCajas || []);
             setProductos(data.productos || []);
             setUsuarios(data.usuarios || []);
@@ -405,12 +408,14 @@ export default function CajaPage() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     accion: 'abrir',
-                    montoInicial: Number(montoInicial)
+                    montoInicial: Number(montoInicial),
+                    cajaFisicaId: cajaFisicaSeleccionada ? Number(cajaFisicaSeleccionada) : null
                 })
             });
             const data = await res.json();
             if (!res.ok) throw new Error(data.error);
-            setMensaje(`Turno de caja #${data.cajaId} abierto por ${usuarioActual.nombre}.`);
+            setMensaje(`Turno #${data.cajaId} abierto exitosamente por ${usuarioActual.nombre}.`);
+            setCajaFisicaSeleccionada('');
             await cargarDatos();
         } catch (err) {
             setError(err.message);
@@ -636,7 +641,7 @@ export default function CajaPage() {
                 <div style={{ padding: '1.25rem', borderBottom: '1px solid #334155' }}>
                     <h2 style={{ margin: 0, fontSize: '1.15rem', color: '#fff' }}>Módulo de Caja</h2>
                     <div style={{ fontSize: '0.82rem', color: '#94a3b8', marginTop: '0.35rem' }}>
-                        {cajaAbierta ? `🟢 Caja #${cajaAbierta.id} Abierta` : '🔴 Caja Cerrada'}
+                        {cajaAbierta ? `🟢 [${cajaAbierta.caja_fisica_nombre || 'Caja Principal'}] Turno #${cajaAbierta.id} Abierto` : '🔴 Sin Turno Abierto'}
                     </div>
                 </div>
 
@@ -743,7 +748,7 @@ export default function CajaPage() {
 
                 {confirmacionCierreCiego && (
                     <section style={{ ...cardStyle, border: '2px solid #0070f3', marginBottom: '1.5rem', background: '#f8fafc' }}>
-                        <h3 style={{ marginTop: 0 }}>Comprobante de Cierre Ciego (Caja #{confirmacionCierreCiego.cajaId})</h3>
+                        <h3 style={{ marginTop: 0 }}>Comprobante de Cierre Ciego (Turno #{confirmacionCierreCiego.cajaId})</h3>
                         <p style={{ margin: '0.35rem 0' }}>
                             Cerrado por: <strong>{confirmacionCierreCiego.cerradoPor}</strong> | Efectivo físico declarado: <strong>Bs {confirmacionCierreCiego.efectivoDeclarado.toFixed(2)}</strong>
                         </p>
@@ -755,7 +760,7 @@ export default function CajaPage() {
 
                 {!cajaAbierta ? (
                     <section style={{ ...cardStyle, maxWidth: '520px', margin: '2rem auto' }}>
-                        <h2 style={{ marginTop: 0 }}>Estado: Caja Cerrada</h2>
+                        <h2 style={{ marginTop: 0 }}>Estado: Sin Turno Abierto</h2>
                         {!puedeAbrirCaja ? (
                             <div style={{ background: '#fffbeb', border: '1px solid #f59e0b', color: '#92400e', padding: '1rem', borderRadius: '8px' }}>
                                 <strong>🔒 Reapertura Restringida al Administrador</strong>
@@ -769,6 +774,27 @@ export default function CajaPage() {
                                 <p style={{ margin: 0, color: '#555', fontSize: '0.9rem' }}>
                                     Abriendo turno con: <strong>{usuarioActual.nombre} ({usuarioActual.rol})</strong>.
                                 </p>
+                                {cajasFisicas.filter((cf) => Number(cf.activa) === 1).length > 1 ? (
+                                    <label>
+                                        Estación de Caja Física:
+                                        <select
+                                            value={cajaFisicaSeleccionada}
+                                            onChange={(e) => setCajaFisicaSeleccionada(e.target.value)}
+                                            style={inputStyle}
+                                        >
+                                            <option value="">-- Seleccionar Estación --</option>
+                                            {cajasFisicas.filter((cf) => Number(cf.activa) === 1).map((cf) => (
+                                                <option key={cf.id} value={cf.id} disabled={!!cf.turno_abierto_id}>
+                                                    {cf.nombre} {cf.turno_abierto_id ? `(Ocupada: Turno #${cf.turno_abierto_id})` : '(Disponible)'}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </label>
+                                ) : (
+                                    <div style={{ fontSize: '0.88rem', color: '#0369a1', background: '#e0f2fe', padding: '0.6rem 0.8rem', borderRadius: '6px' }}>
+                                        Estación asignada: <strong>{cajasFisicas[0]?.nombre || 'Caja 1 - Principal'}</strong>
+                                    </div>
+                                )}
                                 <label>
                                     Fondo Inicial en Efectivo (Bs):
                                     <input

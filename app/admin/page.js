@@ -10,6 +10,8 @@ export default function AdminPage() {
 
     const [datos, setDatos] = useState({
         configuracionNegocio: null,
+        cajasFisicas: [],
+        cajasAbiertas: [],
         cajaAbierta: null,
         cajaAuditada: null,
         historialCajas: [],
@@ -39,6 +41,11 @@ export default function AdminPage() {
 
     // Apertura de nuevo turno desde Admin
     const [nuevoFondoInicial, setNuevoFondoInicial] = useState('100');
+    const [cajaFisicaParaAbrir, setCajaFisicaParaAbrir] = useState('');
+
+    // Gestión de Estaciones Físicas de Caja
+    const [nuevaCajaFisicaNombre, setNuevaCajaFisicaNombre] = useState('');
+    const [mostrarPanelCajasFisicas, setMostrarPanelCajasFisicas] = useState(false);
 
     const [mensaje, setMensaje] = useState(null);
     const [error, setError] = useState(null);
@@ -328,12 +335,55 @@ export default function AdminPage() {
 
     async function handleAbrirNuevoTurnoAdmin(e) {
         e.preventDefault();
-        await ejecutarAccion(
+        const ok = await ejecutarAccion(
             {
                 accion: 'abrir',
-                montoInicial: Number(nuevoFondoInicial)
+                montoInicial: Number(nuevoFondoInicial),
+                cajaFisicaId: cajaFisicaParaAbrir ? Number(cajaFisicaParaAbrir) : null
             },
             'Nuevo turno de caja habilitado por el Administrador.'
+        );
+        if (ok) {
+            setCajaFisicaParaAbrir('');
+        }
+    }
+
+    async function handleCrearCajaFisica(e) {
+        e.preventDefault();
+        const nom = nuevaCajaFisicaNombre.trim();
+        if (!nom) return;
+        const ok = await ejecutarAccion(
+            {
+                accion: 'crear_caja_fisica',
+                nombre: nom
+            },
+            `Estación de caja "${nom}" creada exitosamente.`
+        );
+        if (ok) {
+            setNuevaCajaFisicaNombre('');
+        }
+    }
+
+    async function handleDesactivarCajaFisica(cajaFisicaId, nombre) {
+        if (!confirm(`¿Estás seguro de desactivar la estación "${nombre}"? Sus turnos y arqueos históricos se conservarán.`)) {
+            return;
+        }
+        await ejecutarAccion(
+            {
+                accion: 'desactivar_caja_fisica',
+                cajaFisicaId
+            },
+            `Estación "${nombre}" desactivada.`
+        );
+    }
+
+    async function handleReactivarCajaFisica(cajaFisicaId, nombre) {
+        await ejecutarAccion(
+            {
+                accion: 'reactivar_caja_fisica',
+                cajaFisicaId
+            },
+            `Estación "${nombre}" reactivada exitosamente.`
         );
     }
 
@@ -750,7 +800,15 @@ export default function AdminPage() {
                         {configActual.modalidad_nombre}
                     </div>
                     <div style={{ fontSize: '0.78rem', color: '#94a3b8', marginTop: '0.3rem' }}>
-                        {datos.cajaAbierta ? `🟢 Caja #${datos.cajaAbierta.id} en curso` : '🔴 Sin turno abierto'}
+                        {(datos.cajasAbiertas || []).length > 0 ? (
+                            <span style={{ color: '#4ade80' }}>
+                                🟢 {(datos.cajasAbiertas || []).length === 1
+                                    ? `Turno #${datos.cajasAbiertas[0].id} (${datos.cajasAbiertas[0].caja_fisica_nombre || 'Caja'})`
+                                    : `${(datos.cajasAbiertas || []).length} turnos abiertos en simultáneo`}
+                            </span>
+                        ) : (
+                            <span style={{ color: '#f87171' }}>🔴 Sin turnos abiertos</span>
+                        )}
                     </div>
                 </div>
 
@@ -843,7 +901,7 @@ export default function AdminPage() {
                         }
                         style={{ ...btnPrimario, background: '#dc2626', textAlign: 'center', fontSize: '0.84rem' }}
                     >
-                        📄 Descargar PDF (Caja #{datos.cajaAuditada?.id || '—'})
+                        📄 Descargar PDF (Turno #{datos.cajaAuditada?.id || '—'})
                     </button>
                     <a href="/api/reportes?formato=csv" style={{ ...btnPrimario, textAlign: 'center', fontSize: '0.84rem' }}>
                         📥 Descargar CSV
@@ -1005,124 +1063,265 @@ export default function AdminPage() {
                         {/* ==========================================
                             MÓDULO 1: ARQUEOS Y CIERRES DE CAJA
                            ========================================== */}
-                        {seccionActiva === 'arqueos' && (
-                            <section style={cardStyle}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', marginBottom: '1.25rem' }}>
-                                    <div>
-                                        <h2 style={{ margin: 0 }}>🏦 Auditoría de Cierres y Arqueos de Caja</h2>
-                                        <p style={{ margin: '0.25rem 0 0', color: '#555', fontSize: '0.9rem' }}>
-                                            Revisa si hubo dinero faltante o sobrante en cada turno cerrado y habilita o reabre turnos cuando sea necesario.
-                                        </p>
-                                    </div>
-                                    {!datos.cajaAbierta && (
-                                        <form onSubmit={handleAbrirNuevoTurnoAdmin} style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                                            <input
-                                                type="number"
-                                                step="0.01"
-                                                min="0"
-                                                value={nuevoFondoInicial}
-                                                onChange={(e) => setNuevoFondoInicial(e.target.value)}
-                                                placeholder="Fondo inicial Bs"
-                                                style={{ padding: '0.5rem', borderRadius: '6px', border: '1px solid #ccc', width: '130px' }}
-                                            />
-                                            <button type="submit" style={btnPrimario}>
-                                                + Abrir Nuevo Turno
+                        {seccionActiva === 'arqueos' && (() => {
+                            const cajasFisicasDisponibles = (datos.cajasFisicas || []).filter(
+                                (cf) => Number(cf.activa) === 1 && !cf.turno_abierto_id
+                            );
+
+                            return (
+                                <section style={cardStyle}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', marginBottom: '1.25rem' }}>
+                                        <div>
+                                            <h2 style={{ margin: 0 }}>🏦 Auditoría de Cierres y Arqueos por Turno</h2>
+                                            <p style={{ margin: '0.25rem 0 0', color: '#555', fontSize: '0.9rem' }}>
+                                                Revisa si hubo dinero faltante o sobrante en cada turno cerrado y habilita o reabre turnos cuando sea necesario.
+                                            </p>
+                                        </div>
+                                        <div style={{ display: 'flex', gap: '0.6rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                                            <button
+                                                type="button"
+                                                onClick={() => setMostrarPanelCajasFisicas(!mostrarPanelCajasFisicas)}
+                                                style={{ ...btnSecundario, fontSize: '0.84rem', padding: '0.45rem 0.8rem' }}
+                                            >
+                                                🏢 {mostrarPanelCajasFisicas ? 'Ocultar Estaciones' : 'Gestionar Estaciones de Caja'} ({(datos.cajasFisicas || []).length})
                                             </button>
-                                        </form>
-                                    )}
-                                </div>
 
-                                {(datos.historialCajas || []).length === 0 ? (
-                                    <p style={{ color: '#666' }}>Aún no se ha abierto ni cerrado ninguna caja.</p>
-                                ) : (
-                                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' }}>
-                                        <thead>
-                                            <tr style={{ borderBottom: '2px solid #cbd5e1', textAlign: 'left', background: '#f8fafc' }}>
-                                                <th style={thTd}>Caja</th>
-                                                <th style={thTd}>Abierta por</th>
-                                                <th style={thTd}>Estado</th>
-                                                <th style={thTd}>Fondo Inicial</th>
-                                                <th style={thTd}>Efectivo Esperado</th>
-                                                <th style={thTd}>Efectivo Real Contado</th>
-                                                <th style={thTd}>Resultado / Diferencia</th>
-                                                <th style={thTd}>Total QR</th>
-                                                <th style={thTd}>Acción Admin</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {datos.historialCajas.map((c) => {
-                                                const dif = c.diferencia_efectivo !== null && c.diferencia_efectivo !== undefined ? Number(c.diferencia_efectivo) : null;
-                                                let badgeColor = '#166534';
-                                                let badgeBg = '#dcfce7';
-                                                let textoDif = 'En curso (Abierta)';
+                                            {cajasFisicasDisponibles.length > 0 && (
+                                                <form onSubmit={handleAbrirNuevoTurnoAdmin} style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                                                    {cajasFisicasDisponibles.length > 1 && (
+                                                        <select
+                                                            value={cajaFisicaParaAbrir}
+                                                            onChange={(e) => setCajaFisicaParaAbrir(e.target.value)}
+                                                            style={{ padding: '0.45rem 0.6rem', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.84rem', background: '#fff' }}
+                                                        >
+                                                            <option value="">-- Estación --</option>
+                                                            {cajasFisicasDisponibles.map((cf) => (
+                                                                <option key={cf.id} value={cf.id}>{cf.nombre}</option>
+                                                            ))}
+                                                        </select>
+                                                    )}
+                                                    <input
+                                                        type="number"
+                                                        step="0.01"
+                                                        min="0"
+                                                        value={nuevoFondoInicial}
+                                                        onChange={(e) => setNuevoFondoInicial(e.target.value)}
+                                                        placeholder="Fondo inicial Bs"
+                                                        style={{ padding: '0.45rem', borderRadius: '6px', border: '1px solid #cbd5e1', width: '120px', fontSize: '0.85rem' }}
+                                                    />
+                                                    <button type="submit" style={{ ...btnPrimario, fontSize: '0.85rem', padding: '0.45rem 0.8rem' }}>
+                                                        + Abrir Turno
+                                                    </button>
+                                                </form>
+                                            )}
+                                        </div>
+                                    </div>
 
-                                                if (c.estado === 'cerrada' && dif !== null) {
-                                                    if (dif < 0) {
-                                                        badgeColor = '#991b1b';
-                                                        badgeBg = '#fee2e2';
-                                                        textoDif = `⚠️ FALTANTE: Bs ${dif.toFixed(2)}`;
-                                                    } else if (dif > 0) {
-                                                        badgeColor = '#1e40af';
-                                                        badgeBg = '#dbeafe';
-                                                        textoDif = `SOBRANTE: +Bs ${dif.toFixed(2)}`;
-                                                    } else {
-                                                        badgeColor = '#166534';
-                                                        badgeBg = '#dcfce7';
-                                                        textoDif = '✅ CUADRE EXACTO (Bs 0.00)';
-                                                    }
-                                                }
+                                    {mostrarPanelCajasFisicas && (
+                                        <div style={{ background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '8px', padding: '1rem', marginBottom: '1.25rem' }}>
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem', marginBottom: '0.75rem' }}>
+                                                <div>
+                                                    <h4 style={{ margin: 0, color: '#0f172a' }}>🏢 Estaciones Físicas de Caja (Puntos de Venta)</h4>
+                                                    <p style={{ margin: '0.2rem 0 0', color: '#64748b', fontSize: '0.82rem' }}>
+                                                        Define las terminales físicas del negocio. Puedes agregar nuevas o desactivar las que no uses (mínimo 1 activa requerida).
+                                                    </p>
+                                                </div>
+                                                <form onSubmit={handleCrearCajaFisica} style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                                                    <input
+                                                        type="text"
+                                                        value={nuevaCajaFisicaNombre}
+                                                        onChange={(e) => setNuevaCajaFisicaNombre(e.target.value)}
+                                                        placeholder="ej. Caja 2 - Barra"
+                                                        style={{ padding: '0.45rem 0.6rem', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.85rem', minWidth: '170px' }}
+                                                    />
+                                                    <button type="submit" style={{ ...btnPrimario, fontSize: '0.82rem', padding: '0.45rem 0.8rem' }}>
+                                                        + Crear Caja
+                                                    </button>
+                                                </form>
+                                            </div>
+                                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '0.75rem' }}>
+                                                {(datos.cajasFisicas || []).map((cf) => {
+                                                    const esActiva = Number(cf.activa) === 1;
+                                                    const totalActivas = (datos.cajasFisicas || []).filter((c) => Number(c.activa) === 1).length;
+                                                    const tieneTurno = Boolean(cf.turno_abierto_id);
 
-                                                return (
-                                                    <tr key={c.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
-                                                        <td style={thTd}><strong>#{c.id}</strong></td>
-                                                        <td style={thTd}>{c.usuario_nombre || `Usuario #${c.usuario_id}`}</td>
-                                                        <td style={thTd}>
-                                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', alignItems: 'flex-start' }}>
-                                                                <span style={{
-                                                                    padding: '0.2rem 0.55rem',
-                                                                    borderRadius: '4px',
-                                                                    fontWeight: 'bold',
-                                                                    fontSize: '0.8rem',
-                                                                    background: c.estado === 'abierta' ? '#dcfce7' : '#e2e8f0',
-                                                                    color: c.estado === 'abierta' ? '#166534' : '#334155'
-                                                                }}>
-                                                                    {c.estado.toUpperCase()}
+                                                    return (
+                                                        <div
+                                                            key={cf.id}
+                                                            style={{
+                                                                background: esActiva ? '#fff' : '#f1f5f9',
+                                                                border: `1px solid ${esActiva ? '#e2e8f0' : '#cbd5e1'}`,
+                                                                borderRadius: '6px',
+                                                                padding: '0.75rem',
+                                                                display: 'flex',
+                                                                flexDirection: 'column',
+                                                                gap: '0.4rem',
+                                                                opacity: esActiva ? 1 : 0.65
+                                                            }}
+                                                        >
+                                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                                                <strong style={{ fontSize: '0.92rem', color: '#0f172a' }}>{cf.nombre}</strong>
+                                                                <span
+                                                                    style={{
+                                                                        fontSize: '0.72rem',
+                                                                        fontWeight: 'bold',
+                                                                        padding: '0.15rem 0.45rem',
+                                                                        borderRadius: '4px',
+                                                                        background: esActiva ? '#dcfce7' : '#e2e8f0',
+                                                                        color: esActiva ? '#166534' : '#64748b'
+                                                                    }}
+                                                                >
+                                                                    {esActiva ? 'ACTIVA' : 'INACTIVA'}
                                                                 </span>
-                                                                {Number(c.veces_reabierta) > 0 && (
+                                                            </div>
+                                                            <div style={{ fontSize: '0.8rem', color: '#64748b' }}>
+                                                                {tieneTurno ? (
+                                                                    <span style={{ color: '#16a34a', fontWeight: '600' }}>
+                                                                        🟢 Turno #{cf.turno_abierto_id} en curso ({cf.operador_abierto || 'Cajero'})
+                                                                    </span>
+                                                                ) : (
+                                                                    <span>⚪ Sin turno abierto actualmente</span>
+                                                                )}
+                                                            </div>
+                                                            <div style={{ marginTop: '0.3rem', display: 'flex', gap: '0.4rem' }}>
+                                                                {esActiva ? (
+                                                                    <button
+                                                                        type="button"
+                                                                        disabled={totalActivas <= 1 || tieneTurno}
+                                                                        onClick={() => handleDesactivarCajaFisica(cf.id, cf.nombre)}
+                                                                        title={totalActivas <= 1 ? 'El sistema debe mantener al menos 1 caja activa' : tieneTurno ? 'Cierra el turno antes de desactivarla' : 'Desactivar esta caja'}
+                                                                        style={{
+                                                                            fontSize: '0.75rem',
+                                                                            padding: '0.25rem 0.55rem',
+                                                                            borderRadius: '4px',
+                                                                            border: '1px solid #f87171',
+                                                                            background: totalActivas <= 1 || tieneTurno ? '#f1f5f9' : '#fee2e2',
+                                                                            color: totalActivas <= 1 || tieneTurno ? '#94a3b8' : '#991b1b',
+                                                                            cursor: totalActivas <= 1 || tieneTurno ? 'not-allowed' : 'pointer',
+                                                                            fontWeight: '600'
+                                                                        }}
+                                                                    >
+                                                                        {totalActivas <= 1 ? 'Mínimo 1 requerida' : tieneTurno ? 'Turno en curso' : 'Desactivar'}
+                                                                    </button>
+                                                                ) : (
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => handleReactivarCajaFisica(cf.id, cf.nombre)}
+                                                                        style={{
+                                                                            fontSize: '0.75rem',
+                                                                            padding: '0.25rem 0.55rem',
+                                                                            borderRadius: '4px',
+                                                                            border: '1px solid #86efac',
+                                                                            background: '#dcfce7',
+                                                                            color: '#166534',
+                                                                            cursor: 'pointer',
+                                                                            fontWeight: '600'
+                                                                        }}
+                                                                    >
+                                                                        Reactivar
+                                                                    </button>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {(datos.historialCajas || []).length === 0 ? (
+                                        <p style={{ color: '#666' }}>Aún no se ha abierto ni cerrado ningún turno de caja.</p>
+                                    ) : (
+                                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' }}>
+                                            <thead>
+                                                <tr style={{ borderBottom: '2px solid #cbd5e1', textAlign: 'left', background: '#f8fafc' }}>
+                                                    <th style={thTd}>N° Turno</th>
+                                                    <th style={thTd}>Estación / Caja</th>
+                                                    <th style={thTd}>Abierta por</th>
+                                                    <th style={thTd}>Estado</th>
+                                                    <th style={thTd}>Fondo Inicial</th>
+                                                    <th style={thTd}>Efectivo Esperado</th>
+                                                    <th style={thTd}>Efectivo Real Contado</th>
+                                                    <th style={thTd}>Resultado / Diferencia</th>
+                                                    <th style={thTd}>Total QR</th>
+                                                    <th style={thTd}>Acción Admin</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {datos.historialCajas.map((c) => {
+                                                    const dif = c.diferencia_efectivo !== null && c.diferencia_efectivo !== undefined ? Number(c.diferencia_efectivo) : null;
+                                                    let badgeColor = '#166534';
+                                                    let badgeBg = '#dcfce7';
+                                                    let textoDif = 'En curso (Abierto)';
+
+                                                    if (c.estado === 'cerrada' && dif !== null) {
+                                                        if (dif < 0) {
+                                                            badgeColor = '#991b1b';
+                                                            badgeBg = '#fee2e2';
+                                                            textoDif = `⚠️ FALTANTE: Bs ${dif.toFixed(2)}`;
+                                                        } else if (dif > 0) {
+                                                            badgeColor = '#1e40af';
+                                                            badgeBg = '#dbeafe';
+                                                            textoDif = `SOBRANTE: +Bs ${dif.toFixed(2)}`;
+                                                        } else {
+                                                            badgeColor = '#166534';
+                                                            badgeBg = '#dcfce7';
+                                                            textoDif = '✅ CUADRE EXACTO (Bs 0.00)';
+                                                        }
+                                                    }
+
+                                                    return (
+                                                        <tr key={c.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
+                                                            <td style={thTd}><strong>Turno #{c.id}</strong></td>
+                                                            <td style={thTd}><span style={{ fontWeight: '600', color: '#0369a1' }}>{c.caja_fisica_nombre || 'Caja Principal'}</span></td>
+                                                            <td style={thTd}>{c.usuario_nombre || `Usuario #${c.usuario_id}`}</td>
+                                                            <td style={thTd}>
+                                                                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', alignItems: 'flex-start' }}>
                                                                     <span style={{
-                                                                        padding: '0.18rem 0.5rem',
+                                                                        padding: '0.2rem 0.55rem',
                                                                         borderRadius: '4px',
                                                                         fontWeight: 'bold',
-                                                                        fontSize: '0.75rem',
-                                                                        background: '#fef3c7',
-                                                                        color: '#92400e',
-                                                                        border: '1px solid #f59e0b'
+                                                                        fontSize: '0.8rem',
+                                                                        background: c.estado === 'abierta' ? '#dcfce7' : '#e2e8f0',
+                                                                        color: c.estado === 'abierta' ? '#166534' : '#334155'
                                                                     }}>
-                                                                        🔄 REABIERTA ({c.veces_reabierta} {Number(c.veces_reabierta) === 1 ? 'vez' : 'veces'})
+                                                                        {c.estado.toUpperCase()}
                                                                     </span>
-                                                                )}
-                                                            </div>
-                                                        </td>
-                                                        <td style={thTd}>Bs {Number(c.monto_inicial).toFixed(2)}</td>
-                                                        <td style={thTd}>
-                                                            {c.efectivo_esperado !== null ? `Bs ${Number(c.efectivo_esperado).toFixed(2)}` : '—'}
-                                                        </td>
-                                                        <td style={thTd}>
-                                                            {c.efectivo_real !== null ? <strong>Bs {Number(c.efectivo_real).toFixed(2)}</strong> : '—'}
-                                                        </td>
-                                                        <td style={thTd}>
-                                                            <div>
-                                                                <span style={{ padding: '0.25rem 0.6rem', borderRadius: '6px', fontWeight: 'bold', background: badgeBg, color: badgeColor, display: 'inline-block' }}>
-                                                                    {textoDif}
-                                                                </span>
-                                                                {c.historial_reaperturas && (
-                                                                    <div style={{ marginTop: '0.35rem', fontSize: '0.78rem', color: '#78350f', background: '#fffbeb', padding: '0.35rem 0.5rem', borderRadius: '4px', borderLeft: '3px solid #f59e0b' }}>
-                                                                        <strong>Historial previo:</strong> {c.historial_reaperturas}
-                                                                    </div>
-                                                                )}
-                                                            </div>
-                                                        </td>
-                                                        <td style={thTd}>Bs {Number(c.qr_esperado || 0).toFixed(2)}</td>
+                                                                    {Number(c.veces_reabierta) > 0 && (
+                                                                        <span style={{
+                                                                            padding: '0.18rem 0.5rem',
+                                                                            borderRadius: '4px',
+                                                                            fontWeight: 'bold',
+                                                                            fontSize: '0.75rem',
+                                                                            background: '#fef3c7',
+                                                                            color: '#92400e',
+                                                                            border: '1px solid #f59e0b'
+                                                                        }}>
+                                                                            🔄 REABIERTO ({c.veces_reabierta} {Number(c.veces_reabierta) === 1 ? 'vez' : 'veces'})
+                                                                        </span>
+                                                                    )}
+                                                                </div>
+                                                            </td>
+                                                            <td style={thTd}>Bs {Number(c.monto_inicial).toFixed(2)}</td>
+                                                            <td style={thTd}>
+                                                                {c.efectivo_esperado !== null ? `Bs ${Number(c.efectivo_esperado).toFixed(2)}` : '—'}
+                                                            </td>
+                                                            <td style={thTd}>
+                                                                {c.efectivo_real !== null ? <strong>Bs {Number(c.efectivo_real).toFixed(2)}</strong> : '—'}
+                                                            </td>
+                                                            <td style={thTd}>
+                                                                <div>
+                                                                    <span style={{ padding: '0.25rem 0.6rem', borderRadius: '6px', fontWeight: 'bold', background: badgeBg, color: badgeColor, display: 'inline-block' }}>
+                                                                        {textoDif}
+                                                                    </span>
+                                                                    {c.historial_reaperturas && (
+                                                                        <div style={{ marginTop: '0.35rem', fontSize: '0.78rem', color: '#78350f', background: '#fffbeb', padding: '0.35rem 0.5rem', borderRadius: '4px', borderLeft: '3px solid #f59e0b' }}>
+                                                                            <strong>Historial previo:</strong> {c.historial_reaperturas}
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                            </td>
+                                                            <td style={thTd}>Bs {Number(c.qr_esperado || 0).toFixed(2)}</td>
                                                         <td style={thTd}>
                                                             {c.estado === 'cerrada' && !datos.cajaAbierta && (
                                                                 cajaAReabrirId === c.id ? (
@@ -1160,7 +1359,7 @@ export default function AdminPage() {
                                                                         }}
                                                                         style={{ padding: '0.35rem 0.7rem', background: '#0070f3', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}
                                                                     >
-                                                                        Reabrir esta Caja
+                                                                        Reabrir este Turno
                                                                     </button>
                                                                 )
                                                             )}
@@ -1172,7 +1371,8 @@ export default function AdminPage() {
                                     </table>
                                 )}
                             </section>
-                        )}
+                            );
+                        })()}
 
                         {/* ==========================================
                             MÓDULO 2: VENTAS, KPIs Y ANULACIONES
@@ -1181,7 +1381,7 @@ export default function AdminPage() {
                             <>
                                 <section style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: '1rem', marginBottom: '1.5rem' }}>
                                     <div style={kpiCard}>
-                                        <small>Ventas (Caja #{datos.cajaAuditada?.id || '—'})</small>
+                                        <small>Ventas (Turno #{datos.cajaAuditada?.id || '—'})</small>
                                         <strong>Bs {(est?.ventasTotales || 0).toFixed(2)}</strong>
                                         <span>Ticket Promedio: Bs {(est?.ticketPromedio || 0).toFixed(2)}</span>
                                     </div>
@@ -1211,7 +1411,7 @@ export default function AdminPage() {
 
                                 <section style={cardStyle}>
                                     <h2 style={{ marginTop: 0 }}>
-                                        📊 Movimientos de Caja #{datos.cajaAuditada?.id || '—'} (Auditoría y Anulación)
+                                        📊 Movimientos del Turno #{datos.cajaAuditada?.id || '—'} ({datos.cajaAuditada?.caja_fisica_nombre || 'Caja Principal'}) — Auditoría y Anulación
                                     </h2>
                                     {!(datos.movimientos || []).length ? (
                                         <p style={{ color: '#666' }}>No hay movimientos registrados en esta caja.</p>

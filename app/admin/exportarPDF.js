@@ -15,14 +15,15 @@ export function exportarReportePDF({ nombreNegocio, cajaAuditada, estadisticas, 
     // Encabezado principal
     doc.setFontSize(16);
     doc.setTextColor(15, 23, 42);
-    doc.text(`${tituloNegocio} — Reporte de Caja #${cajaId}`, 14, 18);
+    const nombreEstacion = cajaAuditada?.caja_fisica_nombre || 'Caja Principal';
+    doc.text(`${tituloNegocio} — Arqueo Turno #${cajaId} (${nombreEstacion})`, 14, 18);
 
     doc.setFontSize(9.5);
     doc.setTextColor(71, 85, 105);
     doc.text(`Generado: ${fechaGen}`, 14, 24);
     if (cajaAuditada) {
         doc.text(
-            `Cajero: ${cajaAuditada.usuario_nombre || '—'} | Estado: ${String(cajaAuditada.estado || '').toUpperCase()} | Apertura: ${cajaAuditada.fecha_apertura || '—'}`,
+            `Estación: ${nombreEstacion} | Cajero: ${cajaAuditada.usuario_nombre || '—'} | Estado: ${String(cajaAuditada.estado || '').toUpperCase()} | Apertura: ${cajaAuditada.fecha_apertura || '—'}`,
             14,
             29
         );
@@ -86,5 +87,5 @@ export function exportarReportePDF({ nombreNegocio, cajaAuditada, estadisticas, 
         columnStyles: { 6: { cellWidth: 52 } }
     });
 
-    doc.save(`reporte_caja_${cajaId}.pdf`);
+    doc.save(`reporte_turno_${cajaId}.pdf`);
 }

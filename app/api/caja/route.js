@@ -5,6 +5,11 @@ import {
     guardarConfiguracionNegocio,
     inicializarSistemaPrimeraVez,
     autenticarUsuarioPorId,
+    obtenerCajasFisicas,
+    crearCajaFisica,
+    desactivarCajaFisica,
+    reactivarCajaFisica,
+    obtenerCajasAbiertas,
     obtenerCajaAbierta,
     obtenerHistorialCajas,
     abrirCaja,
@@ -62,6 +67,8 @@ export async function GET(request) {
                 configuracionNegocio,
                 usuarios,
                 categorias,
+                cajasFisicas: [],
+                cajasAbiertas: [],
                 cajaAbierta: null,
                 cajaAuditada: null,
                 historialCajas: [],
@@ -86,21 +93,25 @@ export async function GET(request) {
 
         const esAdmin = esRolAdministrativo(usuarioSesion.rol);
 
-        const [caja, historialCajas, productos, insumos, prediccionInsumos] = await Promise.all([
-            obtenerCajaAbierta(),
+        const [cajaUsuario, cajasAbiertas, cajasFisicas, historialCajas, productos, insumos, prediccionInsumos] = await Promise.all([
+            obtenerCajaAbierta(usuarioSesion.id),
+            obtenerCajasAbiertas(),
+            obtenerCajasFisicas(!esAdmin),
             obtenerHistorialCajas(),
             obtenerProductos(),
             esAdmin ? obtenerInsumos() : Promise.resolve([]),
             esAdmin ? obtenerPrediccionComprasInsumos() : Promise.resolve([])
         ]);
 
-        // Si no hay caja abierta, usamos la última caja cerrada para que el Admin pueda auditarla
-        const cajaReferencia = caja || (historialCajas.length > 0 ? historialCajas[0] : null);
+        const cajaActiva = cajaUsuario || (cajasAbiertas.length > 0 ? cajasAbiertas[0] : null);
+        const cajaReferencia = cajaActiva || (historialCajas.length > 0 ? historialCajas[0] : null);
 
         if (!cajaReferencia) {
             return NextResponse.json({
                 usuarioSesion,
                 configuracionNegocio,
+                cajasFisicas,
+                cajasAbiertas,
                 cajaAbierta: null,
                 cajaAuditada: null,
                 historialCajas,
@@ -124,7 +135,9 @@ export async function GET(request) {
         return NextResponse.json({
             usuarioSesion,
             configuracionNegocio,
-            cajaAbierta: caja,
+            cajasFisicas,
+            cajasAbiertas,
+            cajaAbierta: cajaActiva,
             cajaAuditada: cajaReferencia,
             historialCajas,
             estadisticas,
@@ -178,8 +191,30 @@ export async function POST(request) {
         const usuarioSesion = await exigirUsuarioSesion(request);
 
         if (accion === 'abrir') {
-            const id = await abrirCaja(usuarioSesion.id, body.montoInicial);
+            const id = await abrirCaja(
+                usuarioSesion.id,
+                body.montoInicial,
+                body.cajaFisicaId ? Number(body.cajaFisicaId) : null
+            );
             return NextResponse.json({ ok: true, cajaId: id });
+        }
+
+        if (accion === 'crear_caja_fisica') {
+            await exigirUsuarioSesion(request, ROLES_ADMIN);
+            const id = await crearCajaFisica(body.nombre, usuarioSesion.id);
+            return NextResponse.json({ ok: true, cajaFisicaId: id });
+        }
+
+        if (accion === 'desactivar_caja_fisica') {
+            await exigirUsuarioSesion(request, ROLES_ADMIN);
+            await desactivarCajaFisica(Number(body.cajaFisicaId), usuarioSesion.id);
+            return NextResponse.json({ ok: true });
+        }
+
+        if (accion === 'reactivar_caja_fisica') {
+            await exigirUsuarioSesion(request, ROLES_ADMIN);
+            await reactivarCajaFisica(Number(body.cajaFisicaId), usuarioSesion.id);
+            return NextResponse.json({ ok: true });
         }
 
         if (accion === 'reabrir') {
