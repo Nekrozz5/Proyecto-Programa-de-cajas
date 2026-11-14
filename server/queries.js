@@ -327,6 +327,22 @@ async function obtenerUsuarios() {
     );
 }
 
+// Lista pública mínima para el selector de login de /caja: solo cajeros activos, sin rol.
+// Las cuentas privilegiadas (admin/superadmin/developer) nunca se exponen sin sesión.
+async function obtenerCajerosParaLogin() {
+    return await allQuery(
+        `SELECT id, nombre FROM usuarios WHERE activo = 1 AND rol = 'user' ORDER BY nombre COLLATE NOCASE ASC, id ASC`
+    );
+}
+
+// El sistema está instalado cuando la configuración está marcada y existe al menos un usuario de negocio activo
+async function sistemaEstaInstalado(configuracion = null) {
+    const config = configuracion || await obtenerConfiguracionNegocio();
+    if (!config || Number(config.configurado) !== 1) return false;
+    const fila = await getQuery(`SELECT COUNT(*) AS total FROM usuarios WHERE activo = 1 AND rol != 'developer'`);
+    return Number(fila?.total || 0) > 0;
+}
+
 // Política mínima de contraseña / PIN según rol.
 // Solo se aplica al crear usuarios o cambiar claves; no afecta hashes existentes ni el login.
 const LONGITUD_MINIMA_PIN_POR_ROL = {
@@ -2098,6 +2114,8 @@ module.exports = {
     autenticarUsuarioPorId,
     obtenerUsuarioPorId,
     obtenerUsuarios,
+    obtenerCajerosParaLogin,
+    sistemaEstaInstalado,
     crearUsuario,
     crearUsuarioConPermiso,
     borrarUsuarioConPermiso,

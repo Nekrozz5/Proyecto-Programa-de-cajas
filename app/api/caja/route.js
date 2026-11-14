@@ -24,6 +24,8 @@ import {
     obtenerProductos,
     obtenerInsumos,
     obtenerUsuarios,
+    obtenerCajerosParaLogin,
+    sistemaEstaInstalado,
     obtenerPrediccionComprasInsumos,
     anularMovimientoConPermiso,
     crearUsuarioConPermiso,
@@ -65,17 +67,20 @@ function obtenerIpCliente(request) {
 // GET /api/caja -> Devuelve configuración, sesión activa y datos según el estado de autenticación
 export async function GET(request) {
     try {
-        const [usuarioSesion, configuracionNegocio, usuarios, categorias] = await Promise.all([
+        const [usuarioSesion, configuracionNegocio, categorias] = await Promise.all([
             obtenerUsuarioSesion(request),
             obtenerConfiguracionNegocio(),
-            obtenerUsuarios(),
             obtenerCategorias()
         ]);
+        const sistemaInstalado = await sistemaEstaInstalado(configuracionNegocio);
 
-        // Si no hay sesión autenticada, devolver únicamente lo necesario para el arranque / selector de login
+        // Si no hay sesión autenticada, devolver únicamente lo necesario para el arranque / selector de login:
+        // estado de instalación y solo cajeros (id y nombre, sin rol). Las cuentas privilegiadas no se exponen.
         if (!usuarioSesion) {
+            const usuarios = await obtenerCajerosParaLogin();
             const respuestaSinSesion = NextResponse.json({
                 usuarioSesion: null,
+                sistemaInstalado,
                 configuracionNegocio,
                 usuarios,
                 categorias,
@@ -104,6 +109,8 @@ export async function GET(request) {
         }
 
         const esAdmin = esRolAdministrativo(usuarioSesion.rol);
+        // Listado completo de usuarios solo para roles administrativos; un cajero recibe la misma lista mínima pública
+        const usuarios = esAdmin ? await obtenerUsuarios() : await obtenerCajerosParaLogin();
 
         const [cajaUsuario, cajasAbiertas, cajasFisicas, historialCajas, productos, insumos, prediccionInsumos] = await Promise.all([
             obtenerCajaAbierta(usuarioSesion.id),
@@ -121,6 +128,7 @@ export async function GET(request) {
         if (!cajaReferencia) {
             return NextResponse.json({
                 usuarioSesion,
+                sistemaInstalado,
                 configuracionNegocio,
                 cajasFisicas,
                 cajasAbiertas,
@@ -146,6 +154,7 @@ export async function GET(request) {
 
         return NextResponse.json({
             usuarioSesion,
+            sistemaInstalado,
             configuracionNegocio,
             cajasFisicas,
             cajasAbiertas,

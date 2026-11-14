@@ -5,7 +5,7 @@ import { useState, useEffect } from 'react';
 export default function HomePage() {
     const [cargando, setCargando] = useState(true);
     const [config, setConfig] = useState(null);
-    const [usuariosCount, setUsuariosCount] = useState(0);
+    const [sistemaInstalado, setSistemaInstalado] = useState(false);
 
     // Estado del Asistente de Primera Ejecución (3 pasos)
     const [paso, setPaso] = useState(1); // 1: Modalidad | 2: Nombre Empresa | 3: Crear Super Admin
@@ -29,7 +29,7 @@ export default function HomePage() {
             const data = await res.json();
             if (res.ok) {
                 setConfig(data.configuracionNegocio || null);
-                setUsuariosCount((data.usuarios || []).length);
+                setSistemaInstalado(Boolean(data.sistemaInstalado));
             }
         } catch (err) {
             setError(err.message);
@@ -104,7 +104,7 @@ export default function HomePage() {
         );
     }
 
-    const requierePrimeraEjecucion = !config || Number(config.configurado) === 0 || usuariosCount === 0;
+    const requierePrimeraEjecucion = !config || Number(config.configurado) === 0 || !sistemaInstalado;
 
     // ASISTENTE PASO A PASO EN LA PRIMERA EJECUCIÓN DEL PROGRAMA
     if (requierePrimeraEjecucion) {

@@ -114,7 +114,7 @@ export default function AdminPage() {
 
             if (!resCaja.ok) throw new Error(dataCaja.error || 'Error al consultar /api/caja');
 
-            if (!dataCaja.configuracionNegocio || Number(dataCaja.configuracionNegocio.configurado) === 0 || (dataCaja.usuarios || []).length === 0) {
+            if (!dataCaja.configuracionNegocio || Number(dataCaja.configuracionNegocio.configurado) === 0 || !dataCaja.sistemaInstalado) {
                 window.location.href = '/';
                 return;
             }
@@ -142,10 +142,6 @@ export default function AdminPage() {
                 setCfgUsaRecetas(Boolean(c.usa_recetas_ensamblaje));
             }
 
-            const admins = (dataCaja.usuarios || []).filter((u) => u.rol === 'admin' || u.rol === 'superadmin');
-            if (admins.length > 0 && !loginAdminId) {
-                setLoginAdminId(String(admins[0].id));
-            }
             if (dataCaja.insumos?.length > 0 && !compraInsumoId) {
                 setCompraInsumoId(String(dataCaja.insumos[0].id));
                 setRecetaInsumoId(String(dataCaja.insumos[0].id));
@@ -242,17 +238,12 @@ export default function AdminPage() {
         e.preventDefault();
         limpiarAlertas();
         try {
-            const payload = modoLoginManual
-                ? {
-                    accion: 'login',
-                    nombreUsuario: loginAdminNombreManual.trim(),
-                    pin: loginAdminPin
-                }
-                : {
-                    accion: 'login',
-                    usuarioId: Number(loginAdminId),
-                    pin: loginAdminPin
-                };
+            // El panel admin siempre exige escribir el nombre de usuario (no se exponen cuentas privilegiadas)
+            const payload = {
+                accion: 'login',
+                nombreUsuario: loginAdminNombreManual.trim(),
+                pin: loginAdminPin
+            };
 
             const res = await fetch('/api/caja', {
                 method: 'POST',
@@ -716,30 +707,18 @@ export default function AdminPage() {
                         </div>
                     )}
                     <form onSubmit={handleLoginAdmin} style={formCol}>
-                        {!modoLoginManual ? (
-                            <label>
-                                Administrador:
-                                <select value={loginAdminId} onChange={(e) => setLoginAdminId(e.target.value)} style={inputStyle}>
-                                    {listaAdmins.map((a) => (
-                                        <option key={a.id} value={a.id}>
-                                            {a.nombre} ({a.rol === 'superadmin' ? 'Super Admin' : 'Admin'})
-                                        </option>
-                                    ))}
-                                </select>
-                            </label>
-                        ) : (
-                            <label>
-                                Usuario:
-                                <input
-                                    type="text"
-                                    placeholder="Nombre de usuario"
-                                    required
-                                    value={loginAdminNombreManual}
-                                    onChange={(e) => setLoginAdminNombreManual(e.target.value)}
-                                    style={inputStyle}
-                                />
-                            </label>
-                        )}
+                        <label>
+                            Usuario:
+                            <input
+                                type="text"
+                                placeholder="Nombre de usuario"
+                                autoComplete="username"
+                                required
+                                value={loginAdminNombreManual}
+                                onChange={(e) => setLoginAdminNombreManual(e.target.value)}
+                                style={inputStyle}
+                            />
+                        </label>
                         <label>
                             PIN / Contraseña de Acceso:
                             <input
@@ -752,18 +731,6 @@ export default function AdminPage() {
                             />
                         </label>
                         <button type="submit" style={btnPrimario}>Entrar al Panel Admin</button>
-                        <button
-                            type="button"
-                            onClick={() => {
-                                limpiarAlertas();
-                                setModoLoginManual(!modoLoginManual);
-                                setLoginAdminNombreManual('');
-                                setLoginAdminPin('');
-                            }}
-                            style={{ background: 'none', border: 'none', color: '#64748b', fontSize: '0.78rem', cursor: 'pointer', textDecoration: 'underline', padding: '0.2rem' }}
-                        >
-                            {modoLoginManual ? 'Seleccionar desde la lista de administradores' : 'Ingresar nombre de usuario manualmente'}
-                        </button>
                         <a href="/" style={{ ...btnSecundario, textAlign: 'center', marginTop: '0.25rem' }}>Volver al Inicio</a>
                     </form>
                 </div>
