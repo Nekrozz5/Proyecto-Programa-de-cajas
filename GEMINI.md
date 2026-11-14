@@ -2,22 +2,24 @@
 
 ## 1. Stack Tecnológico y Arquitectura
 - **Entorno:** Node.js (CommonJS) con Next.js (App Router) y SQLite3 local (`caja.db`).
-- **Autenticación y Seguridad:** JWT con cookies HttpOnly gestionadas desde el servidor (`jose`), contraseñas hasheadas con `bcryptjs` (salt rounds = 10), control de intentos fallidos en memoria con rate limiting y sincronización automática de credenciales técnicas (`DEVELOPER_PASSWORD` en `.env.local`).
+- **Autenticación y Seguridad:** JWT con cookies HttpOnly gestionadas desde el servidor (`jose`), contraseñas hasheadas con `bcryptjs` (salt rounds = 10), control de intentos fallidos en memoria con rate limiting dual (por IP con `TRUST_PROXY` y por cuenta de usuario) y sincronización automática de credenciales técnicas (`DEVELOPER_PASSWORD` en `.env.local`).
 - **Control de Sesiones Avanzado (`server/sesion.js`):**
   - TTL diferenciado por rol: `developer` (15 min), `superadmin` / `admin` (30 min), `user` (8 horas).
   - `INSTANCE_BOOT_ID`: Identificador de arranque del proceso que invalida de inmediato tokens administrativos/técnicos al reiniciar el servidor (`npm run dev`), eliminando sesiones zombis.
   - Cookies de sesión estrictas (Session Cookies destruidas al cerrar ventana) para perfiles administrativos y cierre por inactividad en frontend (15 min).
 - **Infraestructura y Preparación para Producción:**
-  - Base de datos portable con ruta configurable por variable de entorno `DATABASE_PATH` y concurrencia gestionada con `PRAGMA busy_timeout = 5000` en `database/database.js`.
+  - Base de datos portable con ruta configurable por variable de entorno `DATABASE_PATH` y concurrencia gestionada con `PRAGMA busy_timeout = 5000` y modo WAL en `database/database.js`.
   - Script de respaldo atómico en caliente (`scripts/backup.js`) ejecutado con `npm run backup` usando SQLite `VACUUM INTO`, purga local automática y soporte opcional para sincronización a AWS S3.
   - Empaquetado optimizado en `next.config.js` con `serverExternalPackages: ['sqlite3', 'bcryptjs', 'exceljs']`.
-  - Contenerización lista para despliegue con `Dockerfile` multi-stage y `docker-compose.yml`.
+  - Contenerización lista para despliegue con `Dockerfile` multi-stage y `docker-compose.yml` (aislamiento en loopback `127.0.0.1`).
   - Gestión de procesos para servidores Linux con PM2 (`ecosystem.config.js`).
+  - Validación temprana y perezosa de secretos de producción mediante `server/secretos.js` e `instrumentation.js`.
   - Documentación organizada en `README.md` y la carpeta `docs/` (`docs/ARQUITECTURA.md`, `docs/DEPLOY_AWS.md`, `docs/PRUEBAS.md`).
-- **APIs y Librerías de Reportes / Visualización:**
+- **APIs, Reportes y Notificaciones:**
   - `exceljs` (`^4.4.0`): Generación de libros Excel (`.xlsx`) en servidor con múltiples hojas (`Movimientos` y `Arqueos de Caja`).
   - `jspdf` (`^4.2.1`) y `jspdf-autotable` (`^5.0.9`): Exportación de reportes PDF de caja auditada en el navegador (`app/admin/exportarPDF.js`).
   - `recharts` (`^3.10.1`): Gráficos financieros interactivos en `/admin` (`app/admin/GraficosFinancieros.js`).
+  - `nodemailer` (`^10.5.0`): Notificaciones automáticas por correo electrónico vía SMTP (`server/mailer.js`) al cerrar cada turno, con plantilla HTML ejecutiva y libro Excel `.xlsx` adjunto en caliente.
 - **Estructura de Carpetas:**
   - `README.md`: Punto de entrada, estructura general y comandos rápidos.
   - `docs/`: Documentación técnica (`ARQUITECTURA.md`), despliegue en nube (`DEPLOY_AWS.md`) y checklist de pruebas (`PRUEBAS.md`).
@@ -25,8 +27,11 @@
   - `database/migraciones.js`: Sistema de migraciones versionado con `PRAGMA user_version`. Toda mutación al esquema se aplica de forma transaccional e idempotente (migraciones v1 a v6).
   - `server/queries.js`: Lógica de negocio y consultas con promesas nativas (`async/await`) usando `runQuery`, `getQuery`, `allQuery` y `transaccion()`.
   - `server/sesion.js`: Manejo de sesión JWT del servidor (crear, validar, renovar y destruir cookies HttpOnly `pos_session`).
+  - `server/mailer.js`: Servicio SMTP (`nodemailer`) con plantillas HTML responsivas y adjuntos en background.
+  - `server/secretos.js`: Verificación estricta de variables de entorno y secretos pre-arranque en producción.
+  - `instrumentation.js`: Gancho de arranque de Next.js para validación temprana de seguridad.
   - `scripts/backup.js`: Script de copia de seguridad atómica con retención configurable.
-  - `app/api/caja/route.js`: Endpoint principal (`GET` de estado/sesión/catálogo/auditoría y `POST` por `accion`: `login`, `logout`, `instalacion_inicial`, `abrir`, `reabrir`, `vender`, `egreso`, `ingreso_efectivo`, `cerrar`, `anular`, `crear_usuario`, `borrar_usuario`, `cambiar_password`, `guardar_configuracion`, `crear_categoria`, `crear_producto`, `comprar_producto_directo`, `crear_insumo`, `comprar_insumo`, `merma_insumo`, `asignar_receta`, `crear_caja_fisica`, `desactivar_caja_fisica`, `reactivar_caja_fisica`).
+  - `app/api/caja/route.js`: Endpoint principal (`GET` de estado/sesión/catálogo/auditoría y `POST` por `accion`: `login`, `logout`, `instalacion_inicial`, `abrir`, `reabrir`, `vender`, `egreso`, `ingreso_efectivo`, `cerrar`, `anular`, `crear_usuario`, `borrar_usuario`, `cambiar_password`, `guardar_configuracion`, `crear_categoria`, `crear_producto`, `comprar_producto_directo`, `crear_insumo`, `comprar_insumo`, `merma_insumo`, `asignar_receta`, `crear_caja_fisica`, `desactivar_caja_fisica`, `reactivar_caja_fisica`, `test_email`, `reenviar_reporte_email`).
   - `app/api/reportes/route.js`: Endpoint administrativo (`GET`) para tendencias JSON, exportación CSV (`?formato=csv`) y exportación Excel (`?formato=xlsx`, con filtro opcional `?cajaId=`).
   - `app/caja/page.js` y `app/admin/page.js`: Vistas de operador y administrador.
   - `app/admin/GraficosFinancieros.js` y `app/admin/exportarPDF.js`: Módulos de visualización financiera y exportación PDF del panel administrativo.
@@ -69,7 +74,7 @@
 - **Compatibilidad y Reseteo de Base de Datos:** Si un rediseño del esquema de base de datos no es compatible con versiones anteriores locales, está autorizado reiniciar o eliminar la base de datos local (`caja.db`) y sus copias de seguridad para inicializar el proyecto con un esquema limpio.
 - **Transacciones en escrituras:** Toda función o procedimiento que escriba en la base de datos (ventas, egresos, compras, cierres, anulaciones, migraciones) debe ejecutarse obligatoriamente dentro de `transaccion(async (dbTx) => { ... })`.
 - **Sesión exclusivamente en el servidor:** La identidad y permisos del usuario se resuelven siempre desde el token de sesión validado en el servidor (`server/sesion.js`), nunca a partir de datos manipulables enviados desde el cliente.
-- **Seguridad en contraseñas:** Contraseñas y PINs gestionados con hash `bcrypt` (10 rondas mínimo). Queda estrictamente prohibido el uso o inclusión de cuentas con claves fijas o hardcodeadas en el código fuente.
+- **Seguridad en contraseñas:** Contraseñas y PINs gestionados con hash `bcrypt` (10 rondas mínimo). Queda estrictamente prohibido el uso o inclusión de cuentas con claves fijas o hardcodeadas en el código fuente. Mínimo 8 caracteres para administradores/developers y 4 para cajeros.
 - **Estado de caja y validación numérica:** Las ventas y egresos solo pueden registrarse en cajas en estado `'abierta'`. Todas las cantidades y montos monetarios deben ser números estrictamente mayores a cero (`> 0`).
 - **Descuento de stock atómico:** Todo decremento de inventario debe realizarse con un `UPDATE` atómico (`WHERE stock >= ?` o validación concurrente equivalente) para evitar sobreventas o valores negativos involuntarios.
 - **Manejo de fechas y zonas horarias:** Las fechas se almacenan en UTC (`CURRENT_TIMESTAMP`). Al consultar o filtrar fechas para el usuario, utilizar siempre `'localtime'` en SQLite, incluyendo las cláusulas `WHERE` (ej. `datetime(fecha_hora, 'localtime')`).
@@ -154,6 +159,7 @@ Cuando se clona o actualiza este repositorio en un equipo nuevo, el agente y el 
    - *(Solo en Linux/VPS si no existen binarios precompilados de `sqlite3`)*: `build-essential` y `python3`.
 2. **Dependencias y APIs Instaladas (`package.json`):**
    - **Core / Backend / Auth:** `next` (`^16.4.3`), `react` (`^19.3.1`), `react-dom` (`^19.3.1`), `sqlite3` (`^6.0.1`), `bcryptjs` (`^3.0.3`), `jose` (`^6.2.17`).
+   - **Notificaciones y Correo:** `nodemailer` (`^10.5.0`).
    - **Reportes y Gráficos:** `exceljs` (`^4.4.0`), `jspdf` (`^4.2.1`), `jspdf-autotable` (`^5.0.9`), `recharts` (`^3.10.1`).
 3. **Política de Ejecución en Windows (PowerShell):**
    - Si PowerShell bloquea `npm.ps1` con `PSSecurityException` (`UnauthorizedAccess`), habilitar scripts locales una sola vez para el usuario actual:
@@ -170,13 +176,21 @@ Cuando se clona o actualiza este repositorio en un equipo nuevo, el agente y el 
      NODE_ENV=development
      PORT=3000
      DATABASE_PATH=./caja.db
-     SESSION_SECRET=<cadena_hex_aleatoria_de_64_caracteres>
+     SESSION_SECRET=<cadena_hex_aleatoria_de_al_menos_32_caracteres>
      DEVELOPER_PASSWORD=<tu_contraseña_developer>
+
+     # Opcional: Configuración SMTP para notificaciones por correo
+     # SMTP_HOST=smtp.gmail.com
+     # SMTP_PORT=465
+     # SMTP_SECURE=true
+     # SMTP_USER=tu_correo@gmail.com
+     # SMTP_PASS=tu_contraseña_de_aplicacion
+     # EMAIL_DESTINATARIO_CIERRE=dueno@empresa.com
      ```
 6. **Comprobación Rápida del Entorno:**
    - Verificar en PowerShell que todo esté listo antes de iniciar:
      ```powershell
-     node -v; npm -v; Test-Path node_modules\next; Test-Path node_modules\sqlite3; Test-Path node_modules\exceljs; Test-Path node_modules\recharts; Test-Path node_modules\jspdf; Test-Path .env.local
+     node -v; npm -v; Test-Path node_modules\next; Test-Path node_modules\sqlite3; Test-Path node_modules\nodemailer; Test-Path node_modules\exceljs; Test-Path node_modules\recharts; Test-Path node_modules\jspdf; Test-Path .env.local
      ```
 7. **Ejecución en la Computadora:**
    - **Modo desarrollo:** `npm run dev` (o `npm.cmd run dev`). Al iniciar, `caja.db` se crea y migra automáticamente si aún no existe. Abrir `http://localhost:3000` en el navegador.
@@ -205,32 +219,34 @@ Cuando se clona o actualiza este repositorio en un equipo nuevo, el agente y el 
     - Ocultamiento de directorio administrativo: `GET /api/caja` sin sesión solo entrega cajeros (sin rol) y estado booleano de instalación; login administrativo en `/admin` siempre manual.
     - SQLite de alto rendimiento: activación de `PRAGMA journal_mode = WAL` y `PRAGMA foreign_keys = ON` en la conexión, y verificación de backups en caliente con `VACUUM INTO`.
     - Documentación de infraestructura actualizada en `docs/DEPLOY_AWS.md`, `docs/ARQUITECTURA.md`, `README.md` y `.env.production.example`.
-  - Preparación integral para producción y despliegue en AWS / VPS:
+  - **Preparación integral para producción y despliegue en AWS / VPS:**
     - Ruta de base de datos configurable mediante `DATABASE_PATH` en `database/database.js` y `PRAGMA busy_timeout = 5000` para alta concurrencia.
     - Script atómico de respaldo en caliente (`scripts/backup.js`) con `VACUUM INTO`, purga automática local y subida opcional a Amazon S3 (`npm run backup`).
     - Configuración de empaquetado de producción en `next.config.js` (`serverExternalPackages: ['sqlite3', 'bcryptjs', 'exceljs']`).
     - Empaquetado en contenedores con `Dockerfile` multi-stage y `docker-compose.yml`.
     - Configuración de procesos resilientes para servidores Linux en `ecosystem.config.js` (PM2).
     - Plantilla de variables de producción `.env.production.example` y guía completa `docs/DEPLOY_AWS.md`.
-    - Documentación ordenada en `README.md` y `docs/` (`ARQUITECTURA.md`, `DEPLOY_AWS.md`, `PRUEBAS.md`), con limpieza de archivos obsoletos (`index.js`, `seed.js`, `test.js`, `schema.sql`).
-  - Configuración del workspace para VS Code y Antigravity IDE:
+    - Documentación ordenada en `README.md` y `docs/` (`ARQUITECTURA.md`, `DEPLOY_AWS.md`, `PRUEBAS.md`), con limpieza de archivos obsoletos.
+  - **Configuración del workspace para VS Code y Antigravity IDE:**
     - Creación de `.vscode/extensions.json` con recomendaciones (SQLite Viewer, Docker, ESLint, Prettier).
     - Creación de `.vscode/settings.json` optimizando observadores de archivos, exclusión de logs/backups y formateo.
     - Documentación de pautas de sincronización entre PC y laptop.
-  - Migración a arquitectura con esquema versionado (`database/migraciones.js`, PRAGMA `user_version` hasta v6).
-  - Migración v6: Tabla `cajas_fisicas` para gestión multicaixa de terminales/estaciones con "Caja 1 - Principal" por defecto, vinculación `caja_fisica_id` en `cajas`, soporte de múltiples cajas abiertas en simultáneo y reformulación de terminología de `Caja #` a `N° Turno` en UI, Excel (.xlsx) y PDF.
-  - Gestión administrativa de estaciones físicas en `/admin` con regla de negocio de mínimo 1 caja física activa requerida y baja lógica protegida sin turnos abiertos en curso.
-  - Migraciones v4 y v5: Tabla `categorias` para catálogo interactivo por pestañas, normalización multicategoría y limpieza de categoría 'General'.
-  - Sincronización automática y segura de la cuenta `developer` vinculada a `DEVELOPER_PASSWORD` en `.env.local` con hash bcrypt.
-  - Módulo de sesiones seguras (`server/sesion.js`) con `INSTANCE_BOOT_ID` (invalidación automática al reiniciar servidor), TTL por rol (15 min dev, 30 min admin, 8 h cajero) y session cookies para roles administrativos.
-  - Cierre automático de sesión en frontend tras 15 minutos de inactividad para roles privilegiados en `/admin` y `/caja`.
-  - Nueva acción `ingreso_efectivo` para inyección de cambio/sencillo al cajón sin inflar las ventas ni distorsionar utilidades.
-  - Rediseño de creación de productos en `app/admin/page.js`: modalidades asistidas `unitario` (autocreación o enlace a insumo con proveedor y vencimiento), `receta` (escandallo multi-insumo dinámico) y `libre`.
-  - Optimización de catálogo en caja (`app/caja/page.js`): navegación por pestañas de categorías, inputs numéricos reactivos con debounce, validación atómica de stock en carrito y botón para eliminar ítems.
-  - Implementación de transacciones atómicas seguras en `server/queries.js`.
-  - Lógica de arqueo ciego, control de apertura única por usuario y trazabilidad de reaperturas auditadas.
-  - Soporte de inventario híbrido (`libre`, `directo`, `receta`) con costeo ponderado y rollback garantizado en anulaciones.
-  - Elaboración de batería de 7 escenarios de prueba integral documentados en `docs/PRUEBAS.md`.
+  - **Migración a arquitectura con esquema versionado (`database/migraciones.js`, PRAGMA `user_version` hasta v6):**
+    - Migración v6: Tabla `cajas_fisicas` para gestión multicaja de terminales/estaciones con "Caja 1 - Principal" por defecto, vinculación `caja_fisica_id` en `cajas`, soporte de múltiples cajas abiertas en simultáneo y reformulación de terminología de `Caja #` a `N° Turno` en UI, Excel (.xlsx) y PDF.
+    - Gestión administrativa de estaciones físicas en `/admin` con regla de negocio de mínimo 1 caja física activa requerida y baja lógica protegida sin turnos abiertos en curso.
+    - Migraciones v4 y v5: Tabla `categorias` para catálogo interactivo por pestañas, normalización multicategoría y limpieza de categoría 'General'.
+  - **Seguridad de cuentas y sesiones:**
+    - Sincronización automática y segura de la cuenta `developer` vinculada a `DEVELOPER_PASSWORD` en `.env.local` con hash bcrypt.
+    - Módulo de sesiones seguras (`server/sesion.js`) con `INSTANCE_BOOT_ID` (invalidación automática al reiniciar servidor), TTL por rol (15 min dev, 30 min admin, 8 h cajero) y session cookies para roles administrativos.
+    - Cierre automático de sesión en frontend tras 15 minutos de inactividad para roles privilegiados en `/admin` y `/caja`.
+  - **Operaciones de caja y catálogo:**
+    - Acción `ingreso_efectivo` para inyección de cambio/sencillo al cajón sin inflar las ventas ni distorsionar utilidades.
+    - Rediseño de creación de productos en `app/admin/page.js`: modalidades asistidas `unitario` (autocreación o enlace a insumo con proveedor y vencimiento), `receta` (escandallo multi-insumo dinámico) y `libre`.
+    - Optimización de catálogo en caja (`app/caja/page.js`): navegación por pestañas de categorías, inputs numéricos reactivos con debounce, validación atómica de stock en carrito y botón para eliminar ítems.
+    - Implementación de transacciones atómicas seguras en `server/queries.js`.
+    - Lógica de arqueo ciego, control de apertura única por usuario y trazabilidad de reaperturas auditadas.
+    - Soporte de inventario híbrido (`libre`, `directo`, `receta`) con costeo ponderado y rollback garantizado en anulaciones.
+    - Batería completa de 10 escenarios de prueba documentada en `docs/PRUEBAS.md`.
 - **En Progreso:**
   - Validación y ejecución de la suite de pruebas funcionales y de concurrencia (`docs/PRUEBAS.md`).
   - Alineación de estilos y ergonomía responsiva para pantallas táctiles de POS y tablets.

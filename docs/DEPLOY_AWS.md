@@ -1,15 +1,17 @@
 # Guía de Despliegue en AWS: Sistema POS y Control de Cajas
 
-Esta guía detalla paso a paso cómo poner en producción este sistema en **AWS Lightsail** o **AWS EC2**, manteniendo bases de datos aisladas por negocio y optimizando costos.
+Esta guía detalla paso a paso cómo poner en producción este sistema en **AWS Lightsail** o **AWS EC2**, manteniendo bases de datos aisladas por negocio, alta seguridad con SSL, notificaciones automáticas por correo y optimización de costos.
 
 ---
 
 ## 1. Arquitectura Recomendada
 
-- **Servidor:** AWS Lightsail (Instancia Linux Ubuntu 24.04 LTS).
+- **Servidor:** AWS Lightsail (Instancia Linux Ubuntu 24.04 LTS o 22.04 LTS).
   - Costo: **$3.50 a $5.00 USD / mes** (1 vCPU, 512 MB o 1 GB RAM, SSD 20-40 GB).
-- **Base de Datos:** SQLite local persistente (`caja.db`) montada en disco SSD.
+- **Base de Datos:** SQLite local persistente (`caja.db`) montada en disco SSD local con modo WAL y timeout concurrente.
 - **Acceso Web:** Nginx como Proxy Inverso + SSL gratuito (HTTPS) con Let's Encrypt / Certbot.
+- **Gestión de Procesos:** PM2 (`ecosystem.config.js`) con reinicio automático ante fallos y arranque en boot.
+- **Notificaciones por Correo:** SMTP saliente (`nodemailer`) para enviar automáticamente reportes de cierre de turno con libro Excel adjunto al dueño o gerente.
 - **Respaldos:** Script automatizado (`npm run backup`) con `VACUUM INTO` y sincronización diaria a AWS S3.
 
 ---
@@ -47,12 +49,12 @@ sudo apt install -y build-essential python3 sqlite3 curl git nginx certbot pytho
 curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
 sudo apt install -y nodejs
 
-# Instalar gestor de procesos PM2
+# Instalar gestor de procesos PM2 globalmente
 sudo npm install -g pm2
 ```
 
 ### Configuración de Memoria Swap (Vital para servidores de 512MB / 1GB)
-Evita que el proceso se quede sin memoria RAM durante la compilación:
+Evita que el proceso se quede sin memoria RAM durante la compilación (`next build`):
 
 ```bash
 sudo fallocate -l 2G /swapfile
@@ -102,11 +104,23 @@ SETUP_TOKEN=REEMPLAZAR_setup_token_aleatorio
 
 # Activa la lectura confiable de la IP real detrás de Nginx
 TRUST_PROXY=true
+
+# ==========================================
+# NOTIFICACIONES POR CORREO (OPCIONAL / RECOMENDADO)
+# ==========================================
+# Proveedor por defecto: Gmail con contraseña de aplicación (o Amazon SES, Resend, Brevo)
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=465
+SMTP_SECURE=true
+SMTP_USER=tu_correo_de_envio@gmail.com
+SMTP_PASS=tu_contraseña_de_aplicacion_google
+EMAIL_DESTINATARIO_CIERRE=dueno@tunegocio.com
+EMAIL_REMITENTE="Mi Negocio POS" <tu_correo_de_envio@gmail.com>
 ```
 
 > **Advertencia sobre SQLite y Modo WAL:** La base de datos opera en modo `WAL` (`Write-Ahead Logging`) para máxima concurrencia y velocidad. El archivo de base de datos (`caja.db`) **debe residir en un disco local persistente (SSD/EBS)**. No montes el directorio `data/` en sistemas de archivos en red como AWS EFS o NFS, ya que carecen de compatibilidad con bloqueos POSIX compartidos requeridos por SQLite WAL.
 
-Crea el directorio de datos para la base de datos persistente:
+Crea los directorios persistentes de datos y respaldos:
 ```bash
 mkdir -p data backups
 ```
@@ -122,7 +136,7 @@ npm run build
 pm2 start ecosystem.config.js --name "pos-negocio1"
 pm2 save
 pm2 startup
-# (Ejecuta el comando que PM2 te imprima en pantalla para habilitar el arranque en boot)
+# (Ejecuta el comando sudo env PATH=... que PM2 te imprima en pantalla para habilitar el arranque en boot)
 ```
 
 ---
@@ -166,15 +180,16 @@ Apunta el registro DNS `A` de tu subdominio (`pos.tunegocio.com`) a la Static IP
 ```bash
 sudo certbot --nginx -d pos.tunegocio.com
 ```
-*Certbot configurará automáticamente la renovación de certificados cada 90 días y forzará la redirección a HTTPS.*
+*Certbot configurará automáticamente la renovación periódica de certificados y forzará la redirección automática a HTTPS.*
 
 ### Paso 3: Instalación y Configuración Inicial (Vía HTTPS Seguro)
-**IMPORTANTE:** Realiza este paso inmediatamente después de configurar Nginx y certbot, antes de compartir la URL o entregar el sistema al cliente o cajeros:
-1. Accede por primera vez desde el navegador exclusivamente mediante HTTPS a tu dominio oficial (ej. `https://pos.tunegocio.com` o `https://tu-dominio`).
+**IMPORTANTE:** Realiza este paso inmediatamente después de configurar Nginx y certbot, antes de entregar el sistema a los cajeros:
+1. Accede por primera vez desde el navegador exclusivamente mediante HTTPS a tu dominio oficial (ej. `https://pos.tunegocio.com`).
 2. Verás el asistente de instalación inicial en 3 pasos.
 3. Elige la modalidad de inventario, el nombre de la empresa y crea la cuenta del **Super Admin**.
 4. En el campo **"Token de instalación"**, introduce el valor exacto que definiste en `SETUP_TOKEN` dentro de tu `.env`.
-5. Una vez guardado, el sistema queda sellado e inicializado de forma permanente y segura con comunicación cifrada de extremo a extremo. Ya puedes compartir la URL oficial con el personal del negocio.
+5. Una vez guardado, el sistema queda sellado e inicializado de forma permanente y segura. Ya puedes compartir la URL oficial con el personal del negocio.
+6. Entra al panel de administración (`/admin`), dirígete a la sección de notificaciones y haz clic en **"Enviar correo de prueba"** para verificar que la configuración SMTP funcione correctamente.
 
 ---
 
@@ -189,7 +204,7 @@ Si deseas alojar varios clientes en un solo servidor Lightsail ($5 o $10 USD/mes
 3. En Nginx creas un archivo de configuración para cada dominio apuntando al puerto respectivo:
    - `negocio1.tudominio.com` -> `proxy_pass http://127.0.0.1:3001;`
    - `negocio2.tudominio.com` -> `proxy_pass http://127.0.0.1:3002;`
-4. Cada negocio queda **completamente aislado**, sin riesgo de que se mezclen ventas o usuarios, y el costo de servidor se divide entre todos los clientes.
+4. Cada negocio queda **completamente aislado**, sin riesgo de que se mezclen ventas, arqueos o usuarios, y el costo de servidor se divide entre todos los clientes.
 
 ---
 
