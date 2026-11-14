@@ -9,7 +9,7 @@ Este documento resume la arquitectura del sistema POS, su modelo de seguridad, l
 - **Frontend / Fullstack:** Next.js 16 (App Router) con React 19.
 - **Base de Datos:** SQLite3 local (`sqlite3`) con SQL nativo parametrizado (sin ORM).
 - **Autenticación:** JWT firmado con `jose` en cookies `HttpOnly` (`pos_session`) y hash de contraseñas con `bcryptjs` (10 rondas).
-- **Despliegue y Respaldos:** PM2 (`ecosystem.config.js`), Docker (`Dockerfile` / `docker-compose.yml`) y respaldo en caliente con `VACUUM INTO` (`scripts/backup.js`).
+- **Despliegue y Respaldos:** PM2 (`ecosystem.config.js`), Docker (`Dockerfile` / `docker-compose.yml` con publicación exclusiva en loopback `127.0.0.1`) y respaldo en caliente con `VACUUM INTO` (`scripts/backup.js`).
 
 ---
 
