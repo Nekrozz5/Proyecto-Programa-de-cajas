@@ -1774,6 +1774,81 @@ async function cerrarCaja(cajaId, efectivoRealFisico, usuarioId = null) {
     });
 }
 
+async function obtenerDatosCierreParaNotificacion(cajaId) {
+    const caja = await getQuery(
+        `SELECT c.id, c.monto_inicial, c.efectivo_esperado, c.efectivo_real,
+                c.diferencia_efectivo, c.qr_esperado, c.veces_reabierta,
+                datetime(c.fecha_apertura, 'localtime') as fecha_apertura,
+                datetime(c.fecha_cierre, 'localtime') as fecha_cierre,
+                c.estado,
+                COALESCE(cf.nombre, 'Caja Principal') as caja_nombre,
+                COALESCE(u.nombre, '—') as cajero_nombre,
+                COALESCE(u.usuario, '—') as cajero_usuario
+         FROM cajas c
+         LEFT JOIN cajas_fisicas cf ON c.caja_fisica_id = cf.id
+         LEFT JOIN usuarios u ON c.usuario_id = u.id
+         WHERE c.id = ?`,
+        [cajaId]
+    );
+    if (!caja) return null;
+
+    const negocio = await obtenerConfiguracionNegocio();
+
+    const movimientos = await allQuery(
+        `SELECT id, tipo, metodo_pago, monto, descripcion, datetime(fecha_hora, 'localtime') as fecha_hora
+         FROM movimientos
+         WHERE caja_id = ? AND estado = 'completado'
+         ORDER BY id ASC`,
+        [cajaId]
+    );
+
+    let totalVentasEfectivo = 0;
+    let totalVentasQR = 0;
+    let totalInyeccionSencillo = 0;
+    let totalEgresos = 0;
+    let cantidadVentas = 0;
+    let cantidadEgresos = 0;
+
+    for (const m of movimientos) {
+        const monto = Number(m.monto || 0);
+        if (m.tipo === 'ingreso') {
+            const desc = (m.descripcion || '').toLowerCase();
+            if (desc.startsWith('inyección')) {
+                totalInyeccionSencillo += monto;
+            } else {
+                cantidadVentas++;
+                if (m.metodo_pago === 'efectivo') {
+                    totalVentasEfectivo += monto;
+                } else if (m.metodo_pago === 'qr') {
+                    totalVentasQR += monto;
+                }
+            }
+        } else if (m.tipo === 'egreso') {
+            cantidadEgresos++;
+            totalEgresos += monto;
+        }
+    }
+
+    return {
+        caja,
+        negocio,
+        metricas: {
+            fondoInicial: Number(caja.monto_inicial || 0),
+            totalVentas: redondear2(totalVentasEfectivo + totalVentasQR),
+            totalVentasEfectivo: redondear2(totalVentasEfectivo),
+            totalVentasQR: redondear2(totalVentasQR),
+            totalInyeccionSencillo: redondear2(totalInyeccionSencillo),
+            totalEgresos: redondear2(totalEgresos),
+            efectivoEsperado: caja.efectivo_esperado !== null ? Number(caja.efectivo_esperado) : 0,
+            efectivoReal: caja.efectivo_real !== null ? Number(caja.efectivo_real) : 0,
+            diferenciaEfectivo: caja.diferencia_efectivo !== null ? Number(caja.diferencia_efectivo) : 0,
+            qrEsperado: Number(caja.qr_esperado || 0),
+            cantidadVentas,
+            cantidadEgresos
+        }
+    };
+}
+
 async function obtenerPrediccionComprasInsumos(diasAnalisis = 30, diasCobertura = 7) {
     const insumos = await obtenerInsumos();
     const reporte = [];
@@ -2153,5 +2228,6 @@ module.exports = {
     obtenerTendenciasVentas,
     generarReporteCSV,
     generarReporteExcel,
-    sanitizarTextoCSV
+    sanitizarTextoCSV,
+    obtenerDatosCierreParaNotificacion
 };

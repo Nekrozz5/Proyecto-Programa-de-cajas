@@ -184,6 +184,13 @@ Cuando se clona o actualiza este repositorio en un equipo nuevo, el agente y el 
 
 ## 6. Estado del Proyecto
 - **Hecho:**
+  - **Notificaciones automáticas por correo electrónico de Cierre de Caja y Arqueo:**
+    - Módulo centralizado `server/mailer.js` con `nodemailer` para envíos SMTP transparentes, resilientes y con $0 costo mensual.
+    - Plantilla HTML ejecutiva responsiva con diseño limpio: estación de cobro, cajero, balance de ventas (Efectivo vs. QR), inyección de sencillo, egresos, y tarjeta destacada con la diferencia de arqueo (cuadrado exacto, sobrante o faltante).
+    - Adjunto automático del libro oficial en Excel (`Reporte_Turno_XX.xlsx`) generado en caliente con `exceljs`.
+    - Despacho en segundo plano al ejecutar `cerrarCaja` en `/api/caja`, garantizando que el cierre de caja del cajero sea instantáneo e inmune a fallos de red.
+    - Soporte administrativo en `/admin`: indicador visual de estado del servicio, botón para enviar correo de prueba y opción para reenviar el reporte por correo de cualquier turno cerrado previo.
+    - Configuración segura vía variables de entorno en `.env.local` y `.env.production.example` (`SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, `EMAIL_DESTINATARIO_CIERRE`).
   - **Reportes exportables en Excel (`.xlsx`), PDF y CSV:**
     - Exportación Excel en servidor (`generarReporteExcel` en `server/queries.js` con `exceljs`) servida desde `GET /api/reportes?formato=xlsx`, generando hojas *Movimientos* y *Arqueos de Caja*.
     - Exportación PDF en cliente (`exportarReportePDF` en `app/admin/exportarPDF.js` con `jspdf` y `jspdf-autotable`) con resumen financiero, desglose por método de pago y tabla de movimientos de la caja auditada.

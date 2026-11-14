@@ -152,6 +152,9 @@ export async function GET(request) {
             esAdmin ? obtenerDesgloseMetodosPago(cajaReferencia.id) : Promise.resolve([])
         ]);
 
+        const { verificarEstadoEmail } = require('../../../server/mailer');
+        const estadoEmail = esAdmin ? verificarEstadoEmail() : null;
+
         return NextResponse.json({
             usuarioSesion,
             sistemaInstalado,
@@ -168,7 +171,8 @@ export async function GET(request) {
             insumos,
             usuarios,
             categorias,
-            prediccionInsumos
+            prediccionInsumos,
+            estadoEmail
         });
     } catch (error) {
         return NextResponse.json({ error: error.message }, { status: error.status || 500 });
@@ -281,7 +285,36 @@ export async function POST(request) {
 
         if (accion === 'cerrar') {
             const arqueo = await cerrarCaja(Number(body.cajaId), body.efectivoReal, usuarioSesion.id);
+            try {
+                const { enviarNotificacionCierreCaja } = require('../../../server/mailer');
+                enviarNotificacionCierreCaja(Number(body.cajaId)).catch((errEmail) => {
+                    console.error('[Cierre] Error en despacho asíncrono de correo:', errEmail);
+                });
+            } catch (errReq) {
+                console.error('[Cierre] Error al invocar módulo mailer:', errReq);
+            }
             return NextResponse.json({ ok: true, arqueo });
+        }
+
+        if (accion === 'probar_email') {
+            await exigirUsuarioSesion(request, ROLES_ADMIN);
+            const { enviarEmailPrueba } = require('../../../server/mailer');
+            const resultado = await enviarEmailPrueba(body.destinatario);
+            if (!resultado.enviado) {
+                return NextResponse.json({ ok: false, error: resultado.error || 'No se pudo enviar el correo de prueba.' }, { status: 400 });
+            }
+            return NextResponse.json({ ok: true, mensaje: `Correo de prueba enviado exitosamente a ${resultado.destino}` });
+        }
+
+        if (accion === 'reenviar_cierre_email') {
+            await exigirUsuarioSesion(request, ROLES_ADMIN);
+            const { enviarNotificacionCierreCaja } = require('../../../server/mailer');
+            const resultado = await enviarNotificacionCierreCaja(Number(body.cajaId));
+            if (!resultado.enviado) {
+                const mensajeError = resultado.error || (resultado.motivo === 'no_configurado' ? 'El correo no está configurado en .env.local' : 'No se pudo enviar el correo.');
+                return NextResponse.json({ ok: false, error: mensajeError }, { status: 400 });
+            }
+            return NextResponse.json({ ok: true, mensaje: `Reporte de Turno #${body.cajaId} enviado por correo exitosamente.` });
         }
 
         if (accion === 'anular') {
