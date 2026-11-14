@@ -7,6 +7,27 @@ const MAX_INTENTOS_LOGIN = 5;
 const TIEMPO_BLOQUEO_LOGIN_MS = 15 * 60 * 1000; // 15 minutos
 const intentosFallidosLogin = new Map();
 
+// Segundo contador por cuenta (sin IP): evita que rotar la IP permita fuerza bruta ilimitada.
+// 20 intentos fallidos dentro de una ventana de 15 minutos bloquean la cuenta 15 minutos.
+// El bloqueo expira solo (no se reinicia con un login correcto mientras dure la ventana).
+const MAX_INTENTOS_CUENTA = 20;
+const VENTANA_INTENTOS_CUENTA_MS = 15 * 60 * 1000;
+const TIEMPO_BLOQUEO_CUENTA_MS = 15 * 60 * 1000;
+const intentosFallidosCuenta = new Map();
+
+// Límite de entradas en memoria para que nombres de usuario aleatorios no hagan crecer los mapas sin control
+const MAX_ENTRADAS_RATE_LIMIT = 10000;
+
+function purgarEntradasExpiradas(mapa, ventanaMs) {
+    if (mapa.size < MAX_ENTRADAS_RATE_LIMIT) return;
+    const ahora = Date.now();
+    for (const [clave, reg] of mapa) {
+        const bloqueoVencido = !reg.bloqueadoHasta || reg.bloqueadoHasta <= ahora;
+        const ventanaVencida = !reg.primerIntento || ahora - reg.primerIntento > ventanaMs;
+        if (bloqueoVencido && ventanaVencida) mapa.delete(clave);
+    }
+}
+
 function esHashBcrypt(valor) {
     return typeof valor === 'string' && /^\$2[aby]\$\d{2}\$/.test(valor);
 }
@@ -43,7 +64,8 @@ function verificarBloqueoLogin(clave) {
 
 function registrarIntentoFallidoLogin(clave) {
     const ahora = Date.now();
-    const actual = intentosFallidosLogin.get(clave) || { intentos: 0, bloqueadoHasta: null };
+    purgarEntradasExpiradas(intentosFallidosLogin, TIEMPO_BLOQUEO_LOGIN_MS);
+    const actual = intentosFallidosLogin.get(clave) || { intentos: 0, bloqueadoHasta: null, primerIntento: ahora };
     actual.intentos += 1;
 
     if (actual.intentos >= MAX_INTENTOS_LOGIN) {
@@ -61,6 +83,54 @@ function registrarIntentoFallidoLogin(clave) {
 
 function limpiarIntentosLogin(clave) {
     intentosFallidosLogin.delete(clave);
+}
+
+// Clave del contador por cuenta: la cuenta real si existe (unifica login por id y por nombre);
+// si no existe, el identificador intentado normalizado.
+function obtenerClaveCuenta(candidato, identificadorIntentado) {
+    if (candidato && candidato.id) return `cuenta:${Number(candidato.id)}`;
+    return `intento:${String(identificadorIntentado || 'desconocido').trim().toLowerCase()}`;
+}
+
+function verificarBloqueoCuenta(claveCuenta) {
+    const registro = intentosFallidosCuenta.get(claveCuenta);
+    if (!registro) return;
+    const ahora = Date.now();
+
+    if (registro.bloqueadoHasta && registro.bloqueadoHasta > ahora) {
+        const reloj = formatearMinutosYSegundos(Math.ceil((registro.bloqueadoHasta - ahora) / 1000));
+        throw new Error(
+            `Cuenta bloqueada temporalmente por exceso de intentos fallidos (${MAX_INTENTOS_CUENTA}) desde distintos orígenes. Intenta nuevamente en ${reloj} (min:seg).`
+        );
+    }
+
+    // Bloqueo vencido o ventana de conteo vencida: el registro expira solo
+    const bloqueoVencido = registro.bloqueadoHasta && registro.bloqueadoHasta <= ahora;
+    const ventanaVencida = !registro.bloqueadoHasta && ahora - registro.primerIntento > VENTANA_INTENTOS_CUENTA_MS;
+    if (bloqueoVencido || ventanaVencida) {
+        intentosFallidosCuenta.delete(claveCuenta);
+    }
+}
+
+function registrarIntentoFallidoCuenta(claveCuenta) {
+    const ahora = Date.now();
+    purgarEntradasExpiradas(intentosFallidosCuenta, VENTANA_INTENTOS_CUENTA_MS);
+    let actual = intentosFallidosCuenta.get(claveCuenta);
+    if (!actual || (!actual.bloqueadoHasta && ahora - actual.primerIntento > VENTANA_INTENTOS_CUENTA_MS)) {
+        actual = { intentos: 0, primerIntento: ahora, bloqueadoHasta: null };
+    }
+    actual.intentos += 1;
+    if (actual.intentos >= MAX_INTENTOS_CUENTA && !actual.bloqueadoHasta) {
+        actual.bloqueadoHasta = ahora + TIEMPO_BLOQUEO_CUENTA_MS;
+    }
+    intentosFallidosCuenta.set(claveCuenta, actual);
+}
+
+// Registra el fallo en ambos contadores. El contador por cuenta se actualiza primero
+// porque el de IP lanza la excepción de bloqueo al alcanzar su límite.
+function registrarFalloLogin(claveIp, claveCuenta) {
+    registrarIntentoFallidoCuenta(claveCuenta);
+    registrarIntentoFallidoLogin(claveIp);
 }
 
 async function compararYActualizarPassword(pinPlano, passwordGuardado, usuarioId = null) {
@@ -189,14 +259,17 @@ async function verificarUsuario(nombre, pin, ip = 'local') {
         [nombreLimpio]
     );
 
+    const claveCuenta = obtenerClaveCuenta(candidato, `nombre:${nombreLimpio}`);
+    verificarBloqueoCuenta(claveCuenta);
+
     if (!candidato) {
-        registrarIntentoFallidoLogin(claveRL);
+        registrarFalloLogin(claveRL, claveCuenta);
         return undefined;
     }
 
     const coincide = await compararYActualizarPassword(pin, candidato.pin_o_password, candidato.id);
     if (!coincide) {
-        registrarIntentoFallidoLogin(claveRL);
+        registrarFalloLogin(claveRL, claveCuenta);
         return undefined;
     }
 
@@ -223,14 +296,17 @@ async function autenticarUsuarioPorId(usuarioId, pin, nombreUsuario = null, ip =
         );
     }
 
+    const claveCuenta = obtenerClaveCuenta(candidato, identificadorRL);
+    verificarBloqueoCuenta(claveCuenta);
+
     if (!candidato) {
-        registrarIntentoFallidoLogin(claveRL);
+        registrarFalloLogin(claveRL, claveCuenta);
         throw new Error('Credenciales incorrectas o usuario inactivo.');
     }
 
     const coincide = await compararYActualizarPassword(pin, candidato.pin_o_password, candidato.id);
     if (!coincide) {
-        registrarIntentoFallidoLogin(claveRL);
+        registrarFalloLogin(claveRL, claveCuenta);
         throw new Error('Credenciales incorrectas o usuario inactivo.');
     }
 

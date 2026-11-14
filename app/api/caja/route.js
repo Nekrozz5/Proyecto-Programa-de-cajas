@@ -50,6 +50,18 @@ import {
 
 const ROLES_ADMIN = ['admin', 'superadmin', 'developer'];
 
+// IP del cliente para el límite de intentos de login.
+// Solo se confía en x-real-ip cuando TRUST_PROXY=true (Nginx la fija con $remote_addr y
+// sobrescribe cualquier valor enviado por el cliente). En cualquier otro caso se ignoran
+// todos los headers (falsificables) y se usa 'local'.
+function obtenerIpCliente(request) {
+    if (String(process.env.TRUST_PROXY || '').trim().toLowerCase() !== 'true') {
+        return 'local';
+    }
+    const ip = String(request.headers.get('x-real-ip') || '').trim();
+    return ip ? ip.slice(0, 64) : 'local';
+}
+
 // GET /api/caja -> Devuelve configuración, sesión activa y datos según el estado de autenticación
 export async function GET(request) {
     try {
@@ -161,9 +173,7 @@ export async function POST(request) {
         const { accion } = body;
 
         if (accion === 'login') {
-            const ip = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
-                || request.headers.get('x-real-ip')
-                || 'local';
+            const ip = obtenerIpCliente(request);
             const usuario = await autenticarUsuarioPorId(
                 Number(body.usuarioId || 0),
                 String(body.pin || ''),
