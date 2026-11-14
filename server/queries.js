@@ -326,6 +326,27 @@ async function obtenerUsuarios() {
     );
 }
 
+// Política mínima de contraseña / PIN según rol.
+// Solo se aplica al crear usuarios o cambiar claves; no afecta hashes existentes ni el login.
+const LONGITUD_MINIMA_PIN_POR_ROL = {
+    user: 4,
+    admin: 8,
+    superadmin: 8,
+    developer: 8
+};
+
+function validarPoliticaPin(pin, rol) {
+    const pinStr = String(pin ?? '').trim();
+    const minimo = LONGITUD_MINIMA_PIN_POR_ROL[rol] || 8;
+    if (pinStr.length < minimo) {
+        const etiqueta = rol === 'user'
+            ? 'el PIN de un Cajero'
+            : `la contraseña de un perfil ${rol === 'superadmin' ? 'Super Admin' : rol === 'developer' ? 'Developer' : 'Administrador'}`;
+        throw new Error(`Contraseña / PIN demasiado corto: ${etiqueta} debe tener al menos ${minimo} caracteres.`);
+    }
+    return pinStr;
+}
+
 async function crearUsuario(nombre, pin, rol) {
     const nombreLimpio = String(nombre || '').trim();
     if (!nombreLimpio) {
@@ -334,8 +355,9 @@ async function crearUsuario(nombre, pin, rol) {
     if (pin === null || pin === undefined || String(pin).trim() === '') {
         throw new Error('La contraseña / PIN no puede estar vacía.');
     }
-    const pinStr = String(pin).trim();
-    const hashPin = esHashBcrypt(pinStr) ? pinStr : await bcrypt.hash(pinStr, BCRYPT_ROUNDS);
+    const pinStr = validarPoliticaPin(pin, rol);
+    // Siempre se hashea el valor recibido: no se aceptan hashes bcrypt pre-armados como PIN
+    const hashPin = await bcrypt.hash(pinStr, BCRYPT_ROUNDS);
 
     try {
         const res = await runQuery(
@@ -405,7 +427,9 @@ async function cambiarPasswordConPermiso(ejecutorId, usuarioObjetivoId, nuevoPin
         throw new Error('Usuario objetivo no encontrado.');
     }
 
-    const nuevoHash = await bcrypt.hash(String(nuevoPin).trim(), BCRYPT_ROUNDS);
+    // La política se evalúa según el rol del usuario cuya clave se cambia
+    const nuevoPinValido = validarPoliticaPin(nuevoPin, objetivo.rol);
+    const nuevoHash = await bcrypt.hash(nuevoPinValido, BCRYPT_ROUNDS);
 
     // Caso 1: El usuario cambia su propia contraseña/PIN (pinActual es OBLIGATORIO)
     if (Number(ejecutorId) === Number(usuarioObjetivoId)) {
