@@ -88,9 +88,22 @@ Configura tus valores:
 NODE_ENV=production
 PORT=3000
 DATABASE_PATH=/var/www/negocio1/data/caja.db
+
+# Clave secreta generada aleatoriamente (mínimo 32 caracteres)
 SESSION_SECRET=$(openssl rand -hex 32)
+
+# Contraseña maestra del perfil developer técnico (mínimo 8 caracteres)
 DEVELOPER_PASSWORD=TuPasswordSuperSegura2026!
+
+# Token de seguridad para habilitar la instalación inicial (obligatorio en producción)
+# Genera uno aleatorio con: openssl rand -hex 16
+SETUP_TOKEN=TokenInstalacionSeguro2026!
+
+# Activa la lectura confiable de la IP real detrás de Nginx
+TRUST_PROXY=true
 ```
+
+> **Advertencia sobre SQLite y Modo WAL:** La base de datos opera en modo `WAL` (`Write-Ahead Logging`) para máxima concurrencia y velocidad. El archivo de base de datos (`caja.db`) **debe residir en un disco local persistente (SSD/EBS)**. No montes el directorio `data/` en sistemas de archivos en red como AWS EFS o NFS, ya que carecen de compatibilidad con bloqueos POSIX compartidos requeridos por SQLite WAL.
 
 Crea el directorio de datos para la base de datos persistente:
 ```bash
@@ -110,6 +123,14 @@ pm2 save
 pm2 startup
 # (Ejecuta el comando que PM2 te imprima en pantalla para habilitar el arranque en boot)
 ```
+
+### Paso 5: Instalación y Configuración Inicial (Antes de Entregar la URL)
+**IMPORTANTE:** Antes de compartir la URL o entregar el sistema al cliente o cajeros:
+1. Accede por primera vez a la IP pública o dominio temporal (`http://tu-servidor:3000` o HTTPS tras configurar el dominio).
+2. Verás el asistente de instalación inicial en 3 pasos.
+3. Elige la modalidad de inventario, el nombre de la empresa y crea la cuenta del **Super Admin**.
+4. En el campo **"Token de instalación"**, introduce el valor exacto que definiste en `SETUP_TOKEN` dentro de tu `.env`.
+5. Una vez guardado, el sistema queda sellado e inicializado de forma permanente y segura. Ya puedes compartir la URL oficial con el cliente.
 
 ---
 
@@ -132,7 +153,7 @@ server {
         proxy_set_header Connection 'upgrade';
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_cache_bypass $http_upgrade;
     }

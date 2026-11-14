@@ -190,6 +190,14 @@ Cuando se clona o actualiza este repositorio en un equipo nuevo, el agente y el 
     - Integración de botones de descarga `.xlsx`, `.pdf` y `.csv` en el panel lateral de `app/admin/page.js`.
   - **Panel visual de estadísticas financieras (`app/admin/GraficosFinancieros.js`):**
     - Gráficos interactivos con `recharts` integrados en `/admin`: comparativa semanal Ingresos vs Egresos (7 días), flujo de ventas por hora, top productos por ingresos/ganancia y distribución por método de pago.
+  - **Endurecimiento de Seguridad Pre-Despliegue AWS (7 Puntos de Protección):**
+    - Protección estricta de `instalacion_inicial`: exigencia de `SETUP_TOKEN` validado con `crypto.timingSafeEqual` y transacción atómica unificada para configuración y alta del Super Admin.
+    - Rate limiting avanzado de autenticación: soporte de `TRUST_PROXY` (uso confiable de `x-real-ip` con Nginx) y contador secundario independiente por cuenta de usuario (20 intentos en 15 min con caducidad autónoma).
+    - Política de fortaleza de claves/PIN: mínimo 8 caracteres para administradores/developers y 4 para cajeros en creación y cambio de contraseñas.
+    - Validación segura y perezosa de secretos: `server/secretos.js` e `instrumentation.js` para abortar arranques en producción con secretos por defecto o débiles sin romper `next build`.
+    - Ocultamiento de directorio administrativo: `GET /api/caja` sin sesión solo entrega cajeros (sin rol) y estado booleano de instalación; login administrativo en `/admin` siempre manual.
+    - SQLite de alto rendimiento: activación de `PRAGMA journal_mode = WAL` y `PRAGMA foreign_keys = ON` en la conexión, y verificación de backups en caliente con `VACUUM INTO`.
+    - Documentación de infraestructura actualizada en `docs/DEPLOY_AWS.md`, `docs/ARQUITECTURA.md`, `README.md` y `.env.production.example`.
   - Preparación integral para producción y despliegue en AWS / VPS:
     - Ruta de base de datos configurable mediante `DATABASE_PATH` en `database/database.js` y `PRAGMA busy_timeout = 5000` para alta concurrencia.
     - Script atómico de respaldo en caliente (`scripts/backup.js`) con `VACUUM INTO`, purga automática local y subida opcional a Amazon S3 (`npm run backup`).
