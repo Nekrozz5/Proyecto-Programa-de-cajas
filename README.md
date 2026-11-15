@@ -9,8 +9,7 @@ Aplicación web de Punto de Venta (POS), control de turnos/arqueo ciego, estacio
 | Documento | Descripción |
 | :--- | :--- |
 | [docs/ARQUITECTURA.md](docs/ARQUITECTURA.md) | Diseño técnico, roles, seguridad de sesiones, base de datos, migraciones, multicaja, inventario, reportes y correo. |
-| [docs/DEPLOY_AWS.md](docs/DEPLOY_AWS.md) | Guía paso a paso para despliegue en AWS Lightsail / EC2, Nginx, SSL, PM2, Docker, SMTP y respaldos en S3. |
-| [docs/PRUEBAS.md](docs/PRUEBAS.md) | Batería de 10 escenarios de verificación funcional, concurrencia, stock, arqueo, multicaja, reportes y correo. |
+| [docs/PRUEBAS.md](docs/PRUEBAS.md) | Batería de 11 escenarios de verificación funcional, concurrencia, stock, arqueo, multicaja, reportes, correo y actualizaciones. |
 | [GEMINI.md](GEMINI.md) | Reglas de negocio, reglas técnicas y estado actual del proyecto (fuente de verdad para desarrollo y agentes). |
 
 ---
@@ -49,13 +48,12 @@ Aplicación web de Punto de Venta (POS), control de turnos/arqueo ciego, estacio
 │   ├── mailer.js                    # Servicio SMTP (nodemailer) con plantillas y adjuntos en background
 │   └── secretos.js                  # Validación de variables de entorno y secretos en producción
 ├── scripts/
-│   ├── backup.js                    # Respaldo atómico en caliente (VACUUM INTO) + retención + S3
+│   ├── backup.js                    # Respaldo atómico en caliente (VACUUM INTO) con retención automática
+│   ├── update.js                    # Actualización segura (backup previo + git pull + npm ci + build)
 │   └── seed_cafeteria.js            # Datos de prueba para catálogo de cafetería
-├── docs/                            # Documentación técnica, despliegue y pruebas
+├── docs/                            # Documentación técnica y batería de pruebas
 ├── .env.production.example          # Plantilla de variables de entorno para producción
-├── Dockerfile                       # Imagen Docker multi-stage optimizada
-├── docker-compose.yml               # Orquestación con volúmenes persistentes (data/ y backups/)
-├── ecosystem.config.js              # Configuración de PM2 para Linux
+├── ecosystem.config.js              # Configuración de PM2 para ejecución continua
 ├── instrumentation.js               # Validación temprana de seguridad en arranque de Next.js
 └── next.config.js                   # Configuración de empaquetado (serverExternalPackages)
 ```
@@ -94,5 +92,6 @@ Aplicación web de Punto de Venta (POS), control de turnos/arqueo ciego, estacio
 | `npm run dev` | Inicia el servidor de desarrollo de Next.js. |
 | `npm run build` | Compila la aplicación para producción (`next build --webpack`). |
 | `npm run start` | Inicia la aplicación compilada en modo producción. |
-| `npm run backup` | Ejecuta un respaldo en caliente en `backups/` y sincroniza con S3 si está configurado. |
+| `npm run backup` | Ejecuta un respaldo atómico en caliente en `backups/` con retención automática. |
+| `npm run update` | Actualiza el sistema de forma segura: crea backup de `caja.db`, descarga cambios (`git pull`), instala versiones exactas (`npm ci`), compila y reinicia PM2 si está activo. |
 | `npm run seed` | Carga datos de prueba de catálogo y recetas de cafetería. |

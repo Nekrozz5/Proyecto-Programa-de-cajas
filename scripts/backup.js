@@ -1,7 +1,6 @@
 const sqlite3 = require('sqlite3');
 const path = require('path');
 const fs = require('fs');
-const { execSync } = require('child_process');
 
 const dbPath = process.env.DATABASE_PATH
     ? path.resolve(process.env.DATABASE_PATH)
@@ -81,18 +80,6 @@ async function ejecutarBackup() {
         console.log(`[Backup Éxito] Respaldo generado correctamente (${tamKb} KB).`);
 
         limpiarBackupsAntiguos();
-
-        // Si se configuró bucket S3 de AWS, sincronizarlo
-        if (process.env.S3_BUCKET) {
-            const s3Destino = `s3://${process.env.S3_BUCKET}/backups/${nombreArchivo}`;
-            console.log(`[Backup S3] Subiendo respaldo a AWS S3: ${s3Destino}`);
-            try {
-                execSync(`aws s3 cp "${rutaDestino}" "${s3Destino}"`, { stdio: 'inherit' });
-                console.log(`[Backup S3 Éxito] Copia remota completada en ${s3Destino}`);
-            } catch (s3Err) {
-                console.error(`[Backup S3 Error] Falló la subida a S3:`, s3Err.message);
-            }
-        }
     });
 }
 

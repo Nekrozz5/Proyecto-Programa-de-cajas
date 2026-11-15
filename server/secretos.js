@@ -102,6 +102,20 @@ function validarEntornoArranqueProduccion() {
     }
 }
 
+// Ejecuta la validación y aborta el proceso si falla.
+// Centralizado aquí para que instrumentation.js no contenga llamadas directas a process.exit,
+// evitando advertencias del analizador estático para Edge Runtime en Next.js / Turbopack.
+function validarOAbortarArranque() {
+    try {
+        validarEntornoArranqueProduccion();
+    } catch (err) {
+        console.error('\n==================================================================');
+        console.error('[Arranque abortado] ' + err.message);
+        console.error('==================================================================\n');
+        process.exit(1);
+    }
+}
+
 module.exports = {
     esProduccion,
     contieneMarcadorEjemplo,
@@ -110,5 +124,6 @@ module.exports = {
     motivoPasswordDeveloperInvalida,
     exigirPasswordDeveloperProduccion,
     obtenerSetupTokenValido,
-    validarEntornoArranqueProduccion
+    validarEntornoArranqueProduccion,
+    validarOAbortarArranque
 };

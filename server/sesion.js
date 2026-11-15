@@ -149,14 +149,32 @@ function extraerTokenDeRequest(request) {
     return null;
 }
 
-function obtenerOpcionesCookieSesion(rol = null, maxAge = null) {
+function esConexionSegura(request = null) {
+    if (process.env.NODE_ENV !== 'production') return false;
+    if (!request) return true;
+
+    const protoHeader = request.headers && typeof request.headers.get === 'function'
+        ? String(request.headers.get('x-forwarded-proto') || '').trim().toLowerCase()
+        : '';
+    if (protoHeader) {
+        return protoHeader.split(',')[0].trim() === 'https';
+    }
+
+    if (typeof request.url === 'string') {
+        return request.url.startsWith('https://');
+    }
+
+    return true;
+}
+
+function obtenerOpcionesCookieSesion(rol = null, maxAge = null, request = null) {
     const esAdminODev = rol && ROLES_ADMINISTRATIVOS_O_TECNICOS.includes(rol);
 
     const opciones = {
         name: NOMBRE_COOKIE_SESION,
         httpOnly: true,
         sameSite: 'lax',
-        secure: process.env.NODE_ENV === 'production',
+        secure: esConexionSegura(request),
         path: '/'
     };
 
@@ -173,14 +191,14 @@ function obtenerOpcionesCookieSesion(rol = null, maxAge = null) {
     return opciones;
 }
 
-function adjuntarCookieSesion(response, token, rol = null) {
-    const opciones = obtenerOpcionesCookieSesion(rol);
+function adjuntarCookieSesion(response, token, rol = null, request = null) {
+    const opciones = obtenerOpcionesCookieSesion(rol, null, request);
     response.cookies.set(opciones.name, token, opciones);
     return response;
 }
 
-function limpiarCookieSesion(response) {
-    const opciones = obtenerOpcionesCookieSesion(null, 0);
+function limpiarCookieSesion(response, request = null) {
+    const opciones = obtenerOpcionesCookieSesion(null, 0, request);
     response.cookies.set(opciones.name, '', opciones);
     return response;
 }

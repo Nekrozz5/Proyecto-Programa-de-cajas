@@ -7,14 +7,15 @@
   - TTL diferenciado por rol: `developer` (15 min), `superadmin` / `admin` (30 min), `user` (8 horas).
   - `INSTANCE_BOOT_ID`: Identificador de arranque del proceso que invalida de inmediato tokens administrativos/técnicos al reiniciar el servidor (`npm run dev`), eliminando sesiones zombis.
   - Cookies de sesión estrictas (Session Cookies destruidas al cerrar ventana) para perfiles administrativos y cierre por inactividad en frontend (15 min).
-- **Infraestructura y Preparación para Producción:**
+- **Infraestructura y Preparación para Producción Local / Híbrida:**
   - Base de datos portable con ruta configurable por variable de entorno `DATABASE_PATH` y concurrencia gestionada con `PRAGMA busy_timeout = 5000` y modo WAL en `database/database.js`.
-  - Script de respaldo atómico en caliente (`scripts/backup.js`) ejecutado con `npm run backup` usando SQLite `VACUUM INTO`, purga local automática y soporte opcional para sincronización a AWS S3.
+  - Script de respaldo atómico en caliente (`scripts/backup.js`) ejecutado con `npm run backup` usando SQLite `VACUUM INTO` y purga local automática.
   - Empaquetado optimizado en `next.config.js` con `serverExternalPackages: ['sqlite3', 'bcryptjs', 'exceljs']`.
-  - Contenerización lista para despliegue con `Dockerfile` multi-stage y `docker-compose.yml` (aislamiento en loopback `127.0.0.1`).
-  - Gestión de procesos para servidores Linux con PM2 (`ecosystem.config.js`).
+  - Gestión de procesos con PM2 (`ecosystem.config.js`) y actualización segura automatizada (`scripts/update.js`).
+  - Blindaje contra errores de máquina cliente: protección `notranslate` en `app/layout.js` (contra fallos del DOM en React por traducción automática de Chrome) y `Cache-Control: no-store` en `/api/caja`.
   - Validación temprana y perezosa de secretos de producción mediante `server/secretos.js` e `instrumentation.js`.
-  - Documentación organizada en `README.md` y la carpeta `docs/` (`docs/ARQUITECTURA.md`, `docs/DEPLOY_AWS.md`, `docs/PRUEBAS.md`).
+  - Soporte nativo para operación dual (PC local por `http://localhost:3000` / LAN + acceso móvil remoto por `https://` vía Cloudflare Tunnel) con detección automática de `cf-connecting-ip` y cookie `Secure` adaptativa por protocolo.
+  - Documentación organizada en `README.md` y la carpeta `docs/` (`docs/ARQUITECTURA.md`, `docs/PRUEBAS.md`).
 - **APIs, Reportes y Notificaciones:**
   - `exceljs` (`^4.4.0`): Generación de libros Excel (`.xlsx`) en servidor con múltiples hojas (`Movimientos` y `Arqueos de Caja`).
   - `jspdf` (`^4.2.1`) y `jspdf-autotable` (`^5.0.9`): Exportación de reportes PDF de caja auditada en el navegador (`app/admin/exportarPDF.js`).
@@ -22,7 +23,7 @@
   - `nodemailer` (`^10.5.0`): Notificaciones automáticas por correo electrónico vía SMTP (`server/mailer.js`) al cerrar cada turno, con plantilla HTML ejecutiva y libro Excel `.xlsx` adjunto en caliente.
 - **Estructura de Carpetas:**
   - `README.md`: Punto de entrada, estructura general y comandos rápidos.
-  - `docs/`: Documentación técnica (`ARQUITECTURA.md`), despliegue en nube (`DEPLOY_AWS.md`) y checklist de pruebas (`PRUEBAS.md`).
+  - `docs/`: Documentación técnica (`ARQUITECTURA.md`) y checklist de pruebas (`PRUEBAS.md`).
   - `database/database.js`: Inicialización de SQLite, activación de claves foráneas (`PRAGMA foreign_keys = ON`), modo WAL, timeout y ejecución automática de migraciones.
   - `database/migraciones.js`: Sistema de migraciones versionado con `PRAGMA user_version`. Toda mutación al esquema se aplica de forma transaccional e idempotente (migraciones v1 a v6).
   - `server/queries.js`: Lógica de negocio y consultas con promesas nativas (`async/await`) usando `runQuery`, `getQuery`, `allQuery` y `transaccion()`.
@@ -31,6 +32,7 @@
   - `server/secretos.js`: Verificación estricta de variables de entorno y secretos pre-arranque en producción.
   - `instrumentation.js`: Gancho de arranque de Next.js para validación temprana de seguridad.
   - `scripts/backup.js`: Script de copia de seguridad atómica con retención configurable.
+  - `scripts/update.js`: Script de actualización segura automatizada (`npm run update`: backup previo + `git pull` + `npm ci` + `build`).
   - `app/api/caja/route.js`: Endpoint principal (`GET` de estado/sesión/catálogo/auditoría y `POST` por `accion`: `login`, `logout`, `instalacion_inicial`, `abrir`, `reabrir`, `vender`, `egreso`, `ingreso_efectivo`, `cerrar`, `anular`, `crear_usuario`, `borrar_usuario`, `cambiar_password`, `guardar_configuracion`, `crear_categoria`, `crear_producto`, `comprar_producto_directo`, `crear_insumo`, `comprar_insumo`, `merma_insumo`, `asignar_receta`, `crear_caja_fisica`, `desactivar_caja_fisica`, `reactivar_caja_fisica`, `test_email`, `reenviar_reporte_email`).
   - `app/api/reportes/route.js`: Endpoint administrativo (`GET`) para tendencias JSON, exportación CSV (`?formato=csv`) y exportación Excel (`?formato=xlsx`, con filtro opcional `?cajaId=`).
   - `app/caja/page.js` y `app/admin/page.js`: Vistas de operador y administrador.
@@ -106,17 +108,17 @@
   ```bash
   npm run start
   ```
-- **Ejecutar respaldo en caliente de la base de datos (SQLite VACUUM INTO + S3):**
+- **Ejecutar respaldo en caliente de la base de datos (SQLite VACUUM INTO):**
   ```bash
   npm run backup
   ```
-- **Despliegue con PM2 en servidor Linux:**
+- **Actualizar un equipo en producción de forma segura (Backup + Git Pull + npm ci + Build):**
+  ```bash
+  npm run update
+  ```
+- **Despliegue con PM2:**
   ```bash
   pm2 start ecosystem.config.js
-  ```
-- **Despliegue con Docker Compose:**
-  ```bash
-  docker compose up -d --build
   ```
 - **Flujo de Trabajo Git / GitHub:**
   - *Comandos locales (ejecutables por la IA):*
@@ -136,7 +138,6 @@ Para garantizar una experiencia consistente al trabajar en múltiples equipos (e
 
 ### A. Extensiones de VS Code Configuradas (`.vscode/extensions.json`)
 - **SQLite Viewer (`qwtel.sqlite-viewer`):** Permite inspeccionar, consultar y filtrar tablas de `caja.db` directamente desde el explorador de VS Code sin instalar software adicional.
-- **Docker (`ms-azuretools.vscode-docker`):** Facilita la gestión de imágenes, contenedores y archivos `Dockerfile` / `docker-compose.yml`.
 - **ESLint (`dbaeumer.vscode-eslint`):** Asegura consistencia de sintaxis y detección temprana de errores en JavaScript/React.
 - **Prettier (`esbenp.prettier-vscode`):** Formateador uniforme de código según las reglas del proyecto.
 
@@ -211,24 +212,25 @@ Cuando se clona o actualiza este repositorio en un equipo nuevo, el agente y el 
     - Integración de botones de descarga `.xlsx`, `.pdf` y `.csv` en el panel lateral de `app/admin/page.js`.
   - **Panel visual de estadísticas financieras (`app/admin/GraficosFinancieros.js`):**
     - Gráficos interactivos con `recharts` integrados en `/admin`: comparativa semanal Ingresos vs Egresos (7 días), flujo de ventas por hora, top productos por ingresos/ganancia y distribución por método de pago.
-  - **Endurecimiento de Seguridad Pre-Despliegue AWS (7 Puntos de Protección):**
+  - **Endurecimiento de Seguridad y Soporte de Acceso Remoto (Cloudflare Tunnel / Híbrido):**
     - Protección estricta de `instalacion_inicial`: exigencia de `SETUP_TOKEN` validado con `crypto.timingSafeEqual` y transacción atómica unificada para configuración y alta del Super Admin.
-    - Rate limiting avanzado de autenticación: soporte de `TRUST_PROXY` (uso confiable de `x-real-ip` con Nginx) y contador secundario independiente por cuenta de usuario (20 intentos en 15 min con caducidad autónoma).
+    - Rate limiting avanzado de autenticación: soporte de `TRUST_PROXY` (lectura de `cf-connecting-ip` para Cloudflare Tunnel y `x-real-ip` para proxies) y contador secundario independiente por cuenta de usuario (20 intentos en 15 min con caducidad autónoma).
+    - Cookie `Secure` adaptativa por protocolo en `server/sesion.js`: permite operación simultánea por `http://localhost:3000` (o LAN sin internet) para el cajero local y por `https://` para acceso móvil remoto del dueño/administrador.
     - Política de fortaleza de claves/PIN: mínimo 8 caracteres para administradores/developers y 4 para cajeros en creación y cambio de contraseñas.
     - Validación segura y perezosa de secretos: `server/secretos.js` e `instrumentation.js` para abortar arranques en producción con secretos por defecto o débiles sin romper `next build`.
     - Ocultamiento de directorio administrativo: `GET /api/caja` sin sesión solo entrega cajeros (sin rol) y estado booleano de instalación; login administrativo en `/admin` siempre manual.
     - SQLite de alto rendimiento: activación de `PRAGMA journal_mode = WAL` y `PRAGMA foreign_keys = ON` en la conexión, y verificación de backups en caliente con `VACUUM INTO`.
-    - Documentación de infraestructura actualizada en `docs/DEPLOY_AWS.md`, `docs/ARQUITECTURA.md`, `README.md` y `.env.production.example`.
-  - **Preparación integral para producción y despliegue en AWS / VPS:**
+  - **Preparación integral para producción local e híbrida:**
     - Ruta de base de datos configurable mediante `DATABASE_PATH` en `database/database.js` y `PRAGMA busy_timeout = 5000` para alta concurrencia.
-    - Script atómico de respaldo en caliente (`scripts/backup.js`) con `VACUUM INTO`, purga automática local y subida opcional a Amazon S3 (`npm run backup`).
+    - Script atómico de respaldo en caliente (`scripts/backup.js`) con `VACUUM INTO` y purga automática local (`npm run backup`).
+    - Script de actualización segura (`scripts/update.js`) con backup preventivo + `git pull` + `npm ci` + `npm run build` (`npm run update`).
+    - Blindaje contra errores de navegador/máquina cliente (`notranslate` en `app/layout.js` y `Cache-Control: no-store` en `/api/caja`).
     - Configuración de empaquetado de producción en `next.config.js` (`serverExternalPackages: ['sqlite3', 'bcryptjs', 'exceljs']`).
-    - Empaquetado en contenedores con `Dockerfile` multi-stage y `docker-compose.yml`.
-    - Configuración de procesos resilientes para servidores Linux en `ecosystem.config.js` (PM2).
-    - Plantilla de variables de producción `.env.production.example` y guía completa `docs/DEPLOY_AWS.md`.
-    - Documentación ordenada en `README.md` y `docs/` (`ARQUITECTURA.md`, `DEPLOY_AWS.md`, `PRUEBAS.md`), con limpieza de archivos obsoletos.
+    - Configuración de procesos resilientes en `ecosystem.config.js` (PM2).
+    - Plantilla de variables de producción `.env.production.example`.
+    - Documentación ordenada en `README.md` y `docs/` (`ARQUITECTURA.md`, `PRUEBAS.md`), con limpieza de archivos exclusivos de AWS y Docker.
   - **Configuración del workspace para VS Code y Antigravity IDE:**
-    - Creación de `.vscode/extensions.json` con recomendaciones (SQLite Viewer, Docker, ESLint, Prettier).
+    - Creación de `.vscode/extensions.json` con recomendaciones (SQLite Viewer, ESLint, Prettier).
     - Creación de `.vscode/settings.json` optimizando observadores de archivos, exclusión de logs/backups y formateo.
     - Documentación de pautas de sincronización entre PC y laptop.
   - **Migración a arquitectura con esquema versionado (`database/migraciones.js`, PRAGMA `user_version` hasta v6):**
@@ -246,7 +248,7 @@ Cuando se clona o actualiza este repositorio en un equipo nuevo, el agente y el 
     - Implementación de transacciones atómicas seguras en `server/queries.js`.
     - Lógica de arqueo ciego, control de apertura única por usuario y trazabilidad de reaperturas auditadas.
     - Soporte de inventario híbrido (`libre`, `directo`, `receta`) con costeo ponderado y rollback garantizado en anulaciones.
-    - Batería completa de 10 escenarios de prueba documentada en `docs/PRUEBAS.md`.
+    - Batería completa de 11 escenarios de prueba documentada en `docs/PRUEBAS.md`.
 - **En Progreso:**
   - Validación y ejecución de la suite de pruebas funcionales y de concurrencia (`docs/PRUEBAS.md`).
   - Alineación de estilos y ergonomía responsiva para pantallas táctiles de POS y tablets.

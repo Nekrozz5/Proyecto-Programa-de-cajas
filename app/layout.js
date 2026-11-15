@@ -1,11 +1,14 @@
 export const metadata = {
   title: 'Control de Cajas',
   description: 'Sistema de punto de venta y control de caja',
+  other: {
+    google: 'notranslate',
+  },
 };
 
 export default function RootLayout({ children }) {
   return (
-    <html lang="es">
+    <html lang="es" translate="no" className="notranslate">
       <body style={{ margin: 0, fontFamily: 'sans-serif', backgroundColor: '#f4f4f9' }}>
         {children}
       </body>

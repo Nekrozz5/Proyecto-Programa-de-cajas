@@ -8,7 +8,8 @@
     "build": "next build --webpack",
     "start": "next start",
     "seed": "node scripts/seed_cafeteria.js",
-    "backup": "node scripts/backup.js"
+    "backup": "node scripts/backup.js",
+    "update": "node scripts/update.js"
   },
   "keywords": [],
   "author": "",

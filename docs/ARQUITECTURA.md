@@ -14,7 +14,8 @@ Este documento describe la arquitectura global del sistema POS, su modelo de seg
   - `jspdf` (`^4.2.1`) y `jspdf-autotable` (`^5.0.9`): Generación en cliente de reportes PDF de balance y auditoría de turno.
   - `recharts` (`^3.10.1`): Gráficos interactivos de métricas financieras en `/admin` (flujo horario, balance de 7 días, top productos, métodos de pago).
 - **Servicio de Notificaciones:** `nodemailer` (`^10.5.0`): Envíos SMTP en segundo plano con plantilla HTML ejecutiva y adjuntos en caliente.
-- **Despliegue y Respaldos:** PM2 (`ecosystem.config.js`), Docker (`Dockerfile` / `docker-compose.yml` publicado en loopback `127.0.0.1`) y respaldo en caliente con `VACUUM INTO` (`scripts/backup.js`).
+- **Despliegue, Actualización y Respaldos:** PM2 (`ecosystem.config.js`), actualización automatizada (`scripts/update.js`) y respaldo en caliente con `VACUUM INTO` (`scripts/backup.js`).
+- **Blindaje Multi-Dispositivo:** Protección contra traducción automática del DOM (`notranslate` en `app/layout.js`) y encabezados `Cache-Control: no-store` en `/api/caja` para evitar datos obsoletos entre máquinas o tras actualizaciones.
 
 ---
 
@@ -28,8 +29,9 @@ Este documento describe la arquitectura global del sistema POS, su modelo de seg
 - **`INSTANCE_BOOT_ID`:** Cada arranque del proceso Node genera un identificador único de instancia. Si el servidor se reinicia, todos los tokens administrativos y técnicos de arranques anteriores quedan invalidados inmediatamente, eliminando sesiones zombis.
 - **Inactividad y cookies de sesión:** Los perfiles administrativos utilizan Session Cookies (se destruyen al cerrar la ventana) y cuentan con un detector de inactividad de 15 minutos en frontend que fuerza el logout.
 - **Rate limiting dual:**
-  - Por IP de origen con soporte de `TRUST_PROXY` (uso seguro de `x-real-ip` cuando se ejecuta detrás de Nginx).
+  - Por IP de origen con soporte de `TRUST_PROXY` (lectura segura de `cf-connecting-ip` para Cloudflare Tunnel y `x-real-ip` para proxies inversos, separando el tráfico externo del cajero local).
   - Por cuenta de usuario individual en memoria (límite de intentos fallidos con caducidad autónoma para frenar ataques de fuerza bruta).
+- **Cookie `Secure` adaptativa:** En producción, `server/sesion.js` activa `secure: true` cuando la conexión proviene de HTTPS (como el acceso móvil remoto por túnel) y permite `secure: false` en conexiones HTTP locales (`localhost` o LAN sin internet) para que ambos entornos operen en paralelo sin bloqueos de sesión.
 - **Instalación Inicial Protegida (`SETUP_TOKEN`):** El endpoint de instalación inicial exige un token preconfigurado en las variables de entorno, validado con comparación en tiempo constante (`crypto.timingSafeEqual`) para evitar fugas de información por canales laterales.
 - **Validación Temprana de Secretos (`instrumentation.js`):** El hook `register()` de Next.js ejecuta `validarEntornoArranqueProduccion()` al iniciar el servidor de producción. Si algún secreto obligatorio está ausente, usa valores por defecto o no cumple la longitud mínima requerida, aborta el arranque de inmediato con un mensaje descriptivo sin romper la fase de compilación (`next build`).
 - **Cuenta `developer`:** Sincronizada automáticamente con la variable `DEVELOPER_PASSWORD` y oculta de los listados estándar de usuarios.
@@ -115,6 +117,5 @@ Este documento describe la arquitectura global del sistema POS, su modelo de seg
 
 El comando `npm run backup`:
 1. Ejecuta `VACUUM INTO` sobre la base de datos activa (copia atómica en caliente sin detener el POS ni interrumpir ventas).
-2. Guarda el archivo en la carpeta `backups/` con marca de tiempo UTC.
+2. Guarda el archivo en la carpeta `backups/` con marca de tiempo local.
 3. Purga automáticamente copias antiguas manteniendo las últimas `MAX_BACKUPS_LOCAL` (30 por defecto).
-4. Si la variable `S3_BUCKET` está definida y AWS CLI está configurado, sincroniza la copia con el bucket de AWS S3 correspondiente.

@@ -1,5 +1,5 @@
 // ==========================================
-// CONFIGURACIÓN DE PM2 PARA PRODUCCIÓN (AWS Lightsail / EC2)
+// CONFIGURACIÓN DE PM2 PARA PRODUCCIÓN LOCAL / SERVIDOR
 // ==========================================
 
 module.exports = {

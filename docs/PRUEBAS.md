@@ -1,6 +1,6 @@
 # Checklist de Pruebas Funcionales y de Concurrencia
 
-Lista de verificación manual para validar arranque, seguridad, control de caja, stock atómico, arqueo ciego, recetas, anulaciones, multicaja, reportes y servicio de notificaciones.
+Lista de verificación manual para validar arranque, seguridad, control de caja, stock atómico, arqueo ciego, recetas, anulaciones, multicaja, reportes, notificaciones, blindaje multi-dispositivo y actualizaciones seguras.
 
 ---
 
@@ -68,3 +68,13 @@ Lista de verificación manual para validar arranque, seguridad, control de caja,
 - [ ] Con SMTP configurado en `.env.local` / `.env`, haz clic en **"Enviar correo de prueba"**: verifica la llegada del correo de diagnóstico al destinatario configurado.
 - [ ] Cierra un turno como cajero: confirma que la respuesta en pantalla sea inmediata (no se quede congelada esperando al servidor de correo) y que en la casilla del destinatario se reciba el correo con la plantilla ejecutiva y el archivo `Reporte_Turno_XX.xlsx` adjunto.
 - [ ] En `/admin`, selecciona un turno cerrado en el historial y presiona **"Reenviar reporte por correo"**: comprueba que el correo se envíe de nuevo con el archivo Excel correspondiente.
+
+## 11. Blindaje Multi-Dispositivo, Operación Dual y Actualizaciones
+- [ ] **Operación Dual (HTTP local + HTTPS remoto):**
+  - Inicia sesión localmente en `http://localhost:3000` (o red LAN): la cookie de sesión debe establecerse y funcionar fluidamente sin requerir SSL.
+  - Conéctate en simultáneo por HTTPS (vía Cloudflare Tunnel): la cookie de sesión debe adoptar `secure: true` adaptativamente por protocolo y permitir operar en paralelo.
+  - Comprueba que las respuestas de `/api/caja` incluyan encabezados `Cache-Control: no-store` para impedir que navegadores de distintas máquinas almacenen estados de caja desactualizados.
+- [ ] **Blindaje contra traducción automática:**
+  - En Google Chrome, activa la traducción automática de páginas: comprueba que las directivas `notranslate` en `app/layout.js` eviten rupturas en el reconciliador del DOM de React en las pantallas de cobro y administración.
+- [ ] **Actualización segura automatizada (`npm run update`):**
+  - Ejecuta `npm run update`: comprueba que el script realice un respaldo preventivo de `caja.db` en `backups/`, sincronice el código con `git pull --ff-only`, instale dependencias con `npm ci` y recompile con `npm run build` de forma limpia.

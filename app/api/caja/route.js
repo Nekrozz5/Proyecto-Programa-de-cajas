@@ -52,16 +52,26 @@ import {
 
 const ROLES_ADMIN = ['admin', 'superadmin', 'developer'];
 
+export const dynamic = 'force-dynamic';
+
+const HEADERS_SIN_CACHE = {
+    'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+    'Pragma': 'no-cache',
+    'Expires': '0'
+};
+
 // IP del cliente para el límite de intentos de login.
-// Solo se confía en x-real-ip cuando TRUST_PROXY=true (Nginx la fija con $remote_addr y
-// sobrescribe cualquier valor enviado por el cliente). En cualquier otro caso se ignoran
-// todos los headers (falsificables) y se usa 'local'.
+// Solo se confía en cf-connecting-ip (Cloudflare Tunnel) o x-real-ip (Proxy inverso)
+// cuando TRUST_PROXY=true. En cualquier otro caso se usa 'local'.
 function obtenerIpCliente(request) {
     if (String(process.env.TRUST_PROXY || '').trim().toLowerCase() !== 'true') {
         return 'local';
     }
-    const ip = String(request.headers.get('x-real-ip') || '').trim();
-    return ip ? ip.slice(0, 64) : 'local';
+    const cfIp = String(request.headers.get('cf-connecting-ip') || '').trim();
+    if (cfIp) return cfIp.slice(0, 64);
+
+    const realIp = String(request.headers.get('x-real-ip') || '').trim();
+    return realIp ? realIp.slice(0, 64) : 'local';
 }
 
 // GET /api/caja -> Devuelve configuración, sesión activa y datos según el estado de autenticación
@@ -95,14 +105,14 @@ export async function GET(request) {
                 productos: [],
                 insumos: [],
                 prediccionInsumos: []
-            });
+            }, { headers: HEADERS_SIN_CACHE });
 
             // Si el cliente traía una cookie de sesión previa que ya fue invalidada (p. ej. por reinicio del servidor o expiración),
             // limpiamos la cookie de inmediato en el navegador para no dejar sesiones residuales
             const teniaCookie = request.cookies?.get?.(NOMBRE_COOKIE_SESION)
                 || (request.headers.get('cookie') && request.headers.get('cookie').includes(NOMBRE_COOKIE_SESION));
             if (teniaCookie) {
-                limpiarCookieSesion(respuestaSinSesion);
+                limpiarCookieSesion(respuestaSinSesion, request);
             }
 
             return respuestaSinSesion;
@@ -143,7 +153,7 @@ export async function GET(request) {
                 usuarios,
                 categorias,
                 prediccionInsumos
-            });
+            }, { headers: HEADERS_SIN_CACHE });
         }
 
         const [estadisticas, movimientos, desglosePagos] = await Promise.all([
@@ -173,9 +183,9 @@ export async function GET(request) {
             categorias,
             prediccionInsumos,
             estadoEmail
-        });
+        }, { headers: HEADERS_SIN_CACHE });
     } catch (error) {
-        return NextResponse.json({ error: error.message }, { status: error.status || 500 });
+        return NextResponse.json({ error: error.message }, { status: error.status || 500, headers: HEADERS_SIN_CACHE });
     }
 }
 
@@ -195,13 +205,13 @@ export async function POST(request) {
             );
             const token = await crearTokenSesion(usuario);
             const response = NextResponse.json({ ok: true, usuario });
-            adjuntarCookieSesion(response, token, usuario.rol);
+            adjuntarCookieSesion(response, token, usuario.rol, request);
             return response;
         }
 
         if (accion === 'logout') {
             const response = NextResponse.json({ ok: true });
-            limpiarCookieSesion(response);
+            limpiarCookieSesion(response, request);
             return response;
         }
 

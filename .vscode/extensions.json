@@ -2,7 +2,6 @@
   "recommendations": [
     "qwtel.sqlite-viewer",
     "dbaeumer.vscode-eslint",
-    "esbenp.prettier-vscode",
-    "ms-azuretools.vscode-docker"
+    "esbenp.prettier-vscode"
   ]
 }
