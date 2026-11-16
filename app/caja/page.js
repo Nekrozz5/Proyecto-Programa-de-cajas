@@ -15,6 +15,7 @@ export default function CajaPage() {
     const [productos, setProductos] = useState([]);
     const [categorias, setCategorias] = useState([]);
     const [categoriasSeleccionadas, setCategoriasSeleccionadas] = useState([]);
+    const [busquedaPOS, setBusquedaPOS] = useState('');
     const [usuarios, setUsuarios] = useState([]);
     const [movimientos, setMovimientos] = useState([]);
 
@@ -609,6 +610,13 @@ export default function CajaPage() {
             return false;
         }
 
+        if (busquedaPOS.trim()) {
+            const termino = busquedaPOS.toLowerCase();
+            const coincideNombre = (p.nombre || '').toLowerCase().includes(termino);
+            const coincideCat = (p.categoria || '').toLowerCase().includes(termino);
+            if (!coincideNombre && !coincideCat) return false;
+        }
+
         if (categoriasSeleccionadas.length === 0) return true;
         const catsProd = (p.categoria || '')
             .split(',')
@@ -1127,9 +1135,44 @@ export default function CajaPage() {
                             <div style={{ display: 'grid', gridTemplateColumns: '1.35fr 1fr', gap: '1.25rem', alignItems: 'start' }}>
                                 {/* Catálogo de Productos */}
                                 <section style={cardStyle}>
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
-                                        <h2 style={{ margin: 0, fontSize: '1.2rem' }}>Catálogo de Productos</h2>
-                                        <span style={{ fontSize: '0.85rem', color: '#64748b' }}>Haz clic en un producto para agregarlo</span>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                                        <div>
+                                            <h2 style={{ margin: 0, fontSize: '1.2rem' }}>Catálogo de Productos</h2>
+                                            <span style={{ fontSize: '0.82rem', color: '#64748b' }}>
+                                                {productosFiltrados.length} de {productos.length} producto(s) visible(s)
+                                            </span>
+                                        </div>
+                                        {/* Buscador Rápido en POS */}
+                                        <div style={{ position: 'relative', minWidth: '220px' }}>
+                                            <input
+                                                type="text"
+                                                placeholder="🔍 Buscar producto..."
+                                                value={busquedaPOS}
+                                                onChange={(e) => setBusquedaPOS(e.target.value)}
+                                                style={{ ...inputStyle, padding: '0.4rem 1.8rem 0.4rem 0.65rem', fontSize: '0.84rem', margin: 0 }}
+                                            />
+                                            {busquedaPOS && (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setBusquedaPOS('')}
+                                                    style={{
+                                                        position: 'absolute',
+                                                        right: '8px',
+                                                        top: '50%',
+                                                        transform: 'translateY(-50%)',
+                                                        background: 'transparent',
+                                                        border: 'none',
+                                                        color: '#94a3b8',
+                                                        cursor: 'pointer',
+                                                        fontWeight: 'bold',
+                                                        fontSize: '0.85rem'
+                                                    }}
+                                                    title="Limpiar búsqueda"
+                                                >
+                                                    ✕
+                                                </button>
+                                            )}
+                                        </div>
                                     </div>
 
                                     {/* Barra de Categorías */}
@@ -1286,96 +1329,109 @@ export default function CajaPage() {
                                     ) : productosFiltrados.length === 0 ? (
                                         <div style={{ textAlign: 'center', padding: '2rem 1rem', background: '#f8fafc', borderRadius: '8px', border: '1px dashed #cbd5e1' }}>
                                             <p style={{ margin: '0 0 0.5rem', color: '#64748b' }}>
-                                                No hay productos registrados que coincidan con las categorías seleccionadas.
+                                                {busquedaPOS
+                                                    ? <>No hay productos que coincidan con &ldquo;<strong>{busquedaPOS}</strong>&rdquo;.</>
+                                                    : 'No hay productos registrados que coincidan con las categorías seleccionadas.'}
                                             </p>
                                             <button
                                                 type="button"
-                                                onClick={resetearFiltroCategorias}
+                                                onClick={() => {
+                                                    setBusquedaPOS('');
+                                                    resetearFiltroCategorias();
+                                                }}
                                                 style={{ ...btnSecundario, padding: '0.4rem 0.8rem', fontSize: '0.82rem' }}
                                             >
                                                 Mostrar todos los productos
                                             </button>
                                         </div>
                                     ) : (
-                                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(175px, 1fr))', gap: '0.75rem' }}>
-                                            {productosFiltrados.map((p) => {
-                                                const itemsEnCarrito = carrito.filter((item) => item.productoId === p.id);
-                                                const cantidadEnCarrito = itemsEnCarrito.reduce((sum, item) => sum + (Number(item.cantidad) || 0), 0);
-                                                const esLibre = p.tipo_inventario === 'libre' || p.unidades_disponibles === null || p.unidades_disponibles === Infinity;
-                                                const disponiblesRestantes = esLibre ? Infinity : Math.max(0, p.unidades_disponibles - cantidadEnCarrito);
-                                                const sinStock = !esLibre && disponiblesRestantes <= 0;
-                                                const tieneModificadores = p.grupos_modificadores && p.grupos_modificadores.length > 0;
+                                        /* Contenedor con Scroll Propio para Selección de Productos */
+                                        <div style={{
+                                            maxHeight: '560px',
+                                            overflowY: 'auto',
+                                            paddingRight: '0.4rem',
+                                            paddingBottom: '0.5rem'
+                                        }}>
+                                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(175px, 1fr))', gap: '0.75rem' }}>
+                                                {productosFiltrados.map((p) => {
+                                                    const itemsEnCarrito = carrito.filter((item) => item.productoId === p.id);
+                                                    const cantidadEnCarrito = itemsEnCarrito.reduce((sum, item) => sum + (Number(item.cantidad) || 0), 0);
+                                                    const esLibre = p.tipo_inventario === 'libre' || p.unidades_disponibles === null || p.unidades_disponibles === Infinity;
+                                                    const disponiblesRestantes = esLibre ? Infinity : Math.max(0, p.unidades_disponibles - cantidadEnCarrito);
+                                                    const sinStock = !esLibre && disponiblesRestantes <= 0;
+                                                    const tieneModificadores = p.grupos_modificadores && p.grupos_modificadores.length > 0;
 
-                                                return (
-                                                    <button
-                                                        key={p.id}
-                                                        onClick={() => iniciarAgregarAlCarrito(p)}
-                                                        disabled={sinStock}
-                                                        style={{
-                                                            textAlign: 'left',
-                                                            padding: '0.8rem',
-                                                            borderRadius: '8px',
-                                                            border: cantidadEnCarrito > 0 ? '2px solid #0284c7' : '1px solid #cbd5e1',
-                                                            background: sinStock ? '#f8fafc' : cantidadEnCarrito > 0 ? '#f0f9ff' : '#fff',
-                                                            cursor: sinStock ? 'not-allowed' : 'pointer',
-                                                            opacity: sinStock ? 0.6 : 1,
-                                                            position: 'relative',
-                                                            transition: 'all 0.15s ease'
-                                                        }}
-                                                    >
-                                                        {cantidadEnCarrito > 0 && (
-                                                            <span style={{
-                                                                position: 'absolute',
-                                                                top: '6px',
-                                                                right: '6px',
-                                                                background: '#0284c7',
-                                                                color: '#fff',
-                                                                borderRadius: '999px',
-                                                                padding: '0.1rem 0.45rem',
-                                                                fontSize: '0.72rem',
-                                                                fontWeight: 'bold'
-                                                            }}>
-                                                                {cantidadEnCarrito} en pedido
-                                                            </span>
-                                                        )}
-                                                        <div style={{ fontSize: '0.72rem', color: '#64748b', textTransform: 'uppercase' }}>
-                                                            {(p.categoria && p.categoria.trim()) ? p.categoria : 'Sin categoría'} • {p.tipo_inventario}
-                                                            {tieneModificadores && (
-                                                                <span style={{ marginLeft: '0.35rem', color: '#0284c7', fontWeight: 'bold' }}>
-                                                                    ✨ Con opciones
+                                                    return (
+                                                        <button
+                                                            key={p.id}
+                                                            onClick={() => iniciarAgregarAlCarrito(p)}
+                                                            disabled={sinStock}
+                                                            style={{
+                                                                textAlign: 'left',
+                                                                padding: '0.8rem',
+                                                                borderRadius: '8px',
+                                                                border: cantidadEnCarrito > 0 ? '2px solid #0284c7' : '1px solid #cbd5e1',
+                                                                background: sinStock ? '#f8fafc' : cantidadEnCarrito > 0 ? '#f0f9ff' : '#fff',
+                                                                cursor: sinStock ? 'not-allowed' : 'pointer',
+                                                                opacity: sinStock ? 0.6 : 1,
+                                                                position: 'relative',
+                                                                transition: 'all 0.15s ease'
+                                                            }}
+                                                        >
+                                                            {cantidadEnCarrito > 0 && (
+                                                                <span style={{
+                                                                    position: 'absolute',
+                                                                    top: '6px',
+                                                                    right: '6px',
+                                                                    background: '#0284c7',
+                                                                    color: '#fff',
+                                                                    borderRadius: '999px',
+                                                                    padding: '0.1rem 0.45rem',
+                                                                    fontSize: '0.72rem',
+                                                                    fontWeight: 'bold'
+                                                                }}>
+                                                                    {cantidadEnCarrito} en pedido
                                                                 </span>
                                                             )}
-                                                        </div>
-                                                        <div style={{ fontWeight: 'bold', fontSize: '0.98rem', margin: '0.2rem 0', color: '#0f172a' }}>
-                                                            {p.nombre}
-                                                        </div>
-                                                        <div style={{ color: '#0070f3', fontWeight: 'bold', fontSize: '1.05rem' }}>
-                                                            Bs {Number(p.precio).toFixed(2)}
-                                                        </div>
-                                                        <div style={{ fontSize: '0.78rem', color: sinStock ? '#b91c1c' : '#166534', marginTop: '0.3rem', fontWeight: 500 }}>
-                                                            {esLibre ? (
-                                                                'Disponible (Libre)'
-                                                            ) : sinStock ? (
-                                                                <span>⚠️ {p.insumo_limitante ? p.insumo_limitante : 'Sin stock disponible'} {cantidadEnCarrito > 0 ? `(${cantidadEnCarrito} en pedido)` : ''}</span>
-                                                            ) : (
-                                                                <span>
-                                                                    Stock: <strong>{disponiblesRestantes}</strong> disponibles
-                                                                    {p.tipo_inventario === 'combo' && Number(p.limite_maximo_activo) === 1 && (
-                                                                        <span style={{ color: '#0369a1', marginLeft: '0.25rem' }}>
-                                                                            ({p.limite_unidades_restante} rest.)
-                                                                        </span>
-                                                                    )}
-                                                                    {cantidadEnCarrito > 0 && (
-                                                                        <span style={{ color: '#0369a1', marginLeft: '0.25rem' }}>
-                                                                            (de {p.unidades_disponibles})
-                                                                        </span>
-                                                                    )}
-                                                                </span>
-                                                            )}
-                                                        </div>
-                                                    </button>
-                                                );
-                                            })}
+                                                            <div style={{ fontSize: '0.72rem', color: '#64748b', textTransform: 'uppercase' }}>
+                                                                {(p.categoria && p.categoria.trim()) ? p.categoria : 'Sin categoría'} • {p.tipo_inventario}
+                                                                {tieneModificadores && (
+                                                                    <span style={{ marginLeft: '0.35rem', color: '#0284c7', fontWeight: 'bold' }}>
+                                                                        ✨ Con opciones
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                            <div style={{ fontWeight: 'bold', fontSize: '0.98rem', margin: '0.2rem 0', color: '#0f172a' }}>
+                                                                {p.nombre}
+                                                            </div>
+                                                            <div style={{ color: '#0070f3', fontWeight: 'bold', fontSize: '1.05rem' }}>
+                                                                Bs {Number(p.precio).toFixed(2)}
+                                                            </div>
+                                                            <div style={{ fontSize: '0.78rem', color: sinStock ? '#b91c1c' : '#166534', marginTop: '0.3rem', fontWeight: 500 }}>
+                                                                {esLibre ? (
+                                                                    'Disponible (Libre)'
+                                                                ) : sinStock ? (
+                                                                    <span>⚠️ {p.insumo_limitante ? p.insumo_limitante : 'Sin stock disponible'} {cantidadEnCarrito > 0 ? `(${cantidadEnCarrito} en pedido)` : ''}</span>
+                                                                ) : (
+                                                                    <span>
+                                                                        Stock: <strong>{disponiblesRestantes}</strong> disponibles
+                                                                        {p.tipo_inventario === 'combo' && Number(p.limite_maximo_activo) === 1 && (
+                                                                            <span style={{ color: '#0369a1', marginLeft: '0.25rem' }}>
+                                                                                ({p.limite_unidades_restante} rest.)
+                                                                            </span>
+                                                                        )}
+                                                                        {cantidadEnCarrito > 0 && (
+                                                                            <span style={{ color: '#0369a1', marginLeft: '0.25rem' }}>
+                                                                                (de {p.unidades_disponibles})
+                                                                            </span>
+                                                                        )}
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                        </button>
+                                                    );
+                                                })}
+                                            </div>
                                         </div>
                                     )}
                                 </section>
