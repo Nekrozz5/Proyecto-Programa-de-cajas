@@ -657,6 +657,308 @@ const MIGRACIONES = [
             await runRaw(conn, `CREATE INDEX IF NOT EXISTS idx_combo_comp_prod ON combo_componentes(componente_producto_id)`);
             await runRaw(conn, `CREATE INDEX IF NOT EXISTS idx_det_mov_combos ON detalle_movimientos_combos(detalle_movimiento_id)`);
         }
+    },
+    {
+        version: 9,
+        descripcion: 'Soporte contable modular por régimen tributario (Simplificado vs. General), pagos mixtos (efectivo + QR), respaldo fiscal de ventas/compras/egresos, permisos por usuario/caja y Kardex de productos directos',
+        up: async (conn) => {
+            // 1. Configuración fiscal y de régimen modular en configuracion_negocio
+            await agregarColumnaSiNoExiste(conn, 'configuracion_negocio', 'nit_negocio', `TEXT DEFAULT ''`);
+            await agregarColumnaSiNoExiste(conn, 'configuracion_negocio', 'regimen_tributario', `TEXT DEFAULT 'simplificado_control_interno'`);
+            await agregarColumnaSiNoExiste(conn, 'configuracion_negocio', 'emite_factura', `INTEGER DEFAULT 0`);
+            await agregarColumnaSiNoExiste(conn, 'configuracion_negocio', 'iva_porcentaje', `REAL DEFAULT 13`);
+            await agregarColumnaSiNoExiste(conn, 'configuracion_negocio', 'it_porcentaje', `REAL DEFAULT 3`);
+            await agregarColumnaSiNoExiste(conn, 'configuracion_negocio', 'usa_respaldo_compras_egresos', `INTEGER DEFAULT 1`);
+
+            // 2. Permisos de registro de respaldo fiscal por usuario y por estación de caja física
+            await agregarColumnaSiNoExiste(conn, 'usuarios', 'puede_registrar_respaldo_fiscal', `INTEGER DEFAULT 1`);
+            await agregarColumnaSiNoExiste(conn, 'cajas_fisicas', 'habilita_respaldo_fiscal', `INTEGER DEFAULT 1`);
+
+            // 3. Conciliación de QR en cierres de caja
+            await agregarColumnaSiNoExiste(conn, 'cajas', 'qr_real', `REAL DEFAULT NULL`);
+            await agregarColumnaSiNoExiste(conn, 'cajas', 'diferencia_qr', `REAL DEFAULT NULL`);
+            await agregarColumnaSiNoExiste(conn, 'cajas', 'observaciones_cierre', `TEXT DEFAULT ''`);
+
+            // 4. Recrear tabla movimientos para soportar metodo_pago = 'mixto', desglose efectivo/QR, categoría contable, descuentos y datos de facturación
+            await runRaw(conn, `
+                CREATE TABLE movimientos_v9 (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    caja_id INTEGER NOT NULL,
+                    usuario_id INTEGER NOT NULL,
+                    tipo TEXT CHECK(tipo IN ('ingreso', 'egreso')) NOT NULL,
+                    categoria_contable TEXT CHECK(categoria_contable IN ('venta', 'aporte_cambio', 'gasto_operativo', 'compra_insumo', 'pago_proveedor', 'retiro_dueno', 'otro')) NOT NULL DEFAULT 'venta',
+                    subtotal_bruto REAL NOT NULL DEFAULT 0,
+                    descuento_total REAL NOT NULL DEFAULT 0,
+                    monto REAL NOT NULL,
+                    metodo_pago TEXT CHECK(metodo_pago IN ('efectivo', 'qr', 'mixto')) NOT NULL,
+                    monto_efectivo REAL NOT NULL DEFAULT 0,
+                    monto_qr REAL NOT NULL DEFAULT 0,
+                    referencia_qr TEXT DEFAULT NULL,
+                    monto_recibido REAL,
+                    cambio REAL DEFAULT 0,
+                    tipo_comprobante TEXT CHECK(tipo_comprobante IN ('recibo', 'factura', 'sin_respaldo')) NOT NULL DEFAULT 'recibo',
+                    nro_factura TEXT DEFAULT NULL,
+                    cuf_autorizacion TEXT DEFAULT NULL,
+                    cliente_nit_ci TEXT DEFAULT NULL,
+                    cliente_razon_social TEXT DEFAULT NULL,
+                    descripcion TEXT DEFAULT '',
+                    estado TEXT CHECK(estado IN ('completado', 'anulado')) DEFAULT 'completado',
+                    fecha_hora DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    anulado_por INTEGER,
+                    fecha_anulacion DATETIME,
+                    motivo_anulacion TEXT,
+                    FOREIGN KEY (caja_id) REFERENCES cajas(id),
+                    FOREIGN KEY (usuario_id) REFERENCES usuarios(id),
+                    FOREIGN KEY (anulado_por) REFERENCES usuarios(id)
+                )
+            `);
+
+            await runRaw(conn, `
+                INSERT INTO movimientos_v9 (
+                    id, caja_id, usuario_id, tipo, categoria_contable,
+                    subtotal_bruto, descuento_total, monto, metodo_pago,
+                    monto_efectivo, monto_qr, referencia_qr,
+                    monto_recibido, cambio, tipo_comprobante,
+                    nro_factura, cuf_autorizacion, cliente_nit_ci, cliente_razon_social,
+                    descripcion, estado, fecha_hora, anulado_por, fecha_anulacion, motivo_anulacion
+                )
+                SELECT
+                    m.id,
+                    m.caja_id,
+                    m.usuario_id,
+                    m.tipo,
+                    CASE
+                        WHEN m.tipo = 'egreso' THEN 'gasto_operativo'
+                        WHEN m.tipo = 'ingreso' AND (
+                            m.descripcion LIKE '[REPOSICIÓN DE EFECTIVO]%'
+                            OR LOWER(m.descripcion) LIKE 'inyección%'
+                            OR NOT EXISTS (SELECT 1 FROM detalle_movimientos d WHERE d.movimiento_id = m.id)
+                        ) THEN 'aporte_cambio'
+                        ELSE 'venta'
+                    END,
+                    m.monto,
+                    0,
+                    m.monto,
+                    m.metodo_pago,
+                    CASE WHEN m.metodo_pago = 'efectivo' THEN m.monto ELSE 0 END,
+                    CASE WHEN m.metodo_pago = 'qr' THEN m.monto ELSE 0 END,
+                    NULL,
+                    m.monto_recibido,
+                    COALESCE(m.cambio, 0),
+                    'recibo',
+                    NULL,
+                    NULL,
+                    NULL,
+                    NULL,
+                    m.descripcion,
+                    m.estado,
+                    m.fecha_hora,
+                    m.anulado_por,
+                    m.fecha_anulacion,
+                    m.motivo_anulacion
+                FROM movimientos m
+            `);
+
+            await runRaw(conn, `DROP TABLE movimientos`);
+            await runRaw(conn, `ALTER TABLE movimientos_v9 RENAME TO movimientos`);
+            await runRaw(conn, `CREATE INDEX IF NOT EXISTS idx_movimientos_caja_id ON movimientos(caja_id)`);
+            await runRaw(conn, `CREATE INDEX IF NOT EXISTS idx_movimientos_fecha ON movimientos(fecha_hora)`);
+            await runRaw(conn, `CREATE INDEX IF NOT EXISTS idx_movimientos_cat ON movimientos(categoria_contable)`);
+
+            // 5. Tabla normalizada de pagos por movimiento (soporte de pagos mixtos y auditoría)
+            await runRaw(conn, `
+                CREATE TABLE IF NOT EXISTS movimientos_pagos (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    movimiento_id INTEGER NOT NULL,
+                    metodo_pago TEXT CHECK(metodo_pago IN ('efectivo', 'qr')) NOT NULL,
+                    monto REAL NOT NULL CHECK(monto > 0),
+                    referencia TEXT DEFAULT NULL,
+                    FOREIGN KEY (movimiento_id) REFERENCES movimientos(id) ON DELETE CASCADE
+                )
+            `);
+            await runRaw(conn, `CREATE INDEX IF NOT EXISTS idx_mov_pagos_movimiento ON movimientos_pagos(movimiento_id)`);
+
+            // Poblar movimientos_pagos para movimientos existentes
+            await runRaw(conn, `
+                INSERT INTO movimientos_pagos (movimiento_id, metodo_pago, monto, referencia)
+                SELECT id, metodo_pago, monto, referencia_qr
+                FROM movimientos
+                WHERE monto > 0 AND metodo_pago IN ('efectivo', 'qr')
+            `);
+
+            // 6. Respaldo fiscal en compras de insumos (movimientos_insumos)
+            await agregarColumnaSiNoExiste(conn, 'movimientos_insumos', 'proveedor_nombre', `TEXT DEFAULT NULL`);
+            await agregarColumnaSiNoExiste(conn, 'movimientos_insumos', 'proveedor_nit', `TEXT DEFAULT NULL`);
+            await agregarColumnaSiNoExiste(conn, 'movimientos_insumos', 'nro_factura_compra', `TEXT DEFAULT NULL`);
+            await agregarColumnaSiNoExiste(conn, 'movimientos_insumos', 'con_factura', `INTEGER DEFAULT 0`);
+            await agregarColumnaSiNoExiste(conn, 'movimientos_insumos', 'monto_total_compra', `REAL DEFAULT 0`);
+            await agregarColumnaSiNoExiste(conn, 'movimientos_insumos', 'usuario_id', `INTEGER DEFAULT NULL REFERENCES usuarios(id)`);
+
+            await runRaw(conn, `
+                UPDATE movimientos_insumos
+                SET monto_total_compra = ROUND(cantidad * costo_unitario, 2)
+                WHERE monto_total_compra IS NULL OR monto_total_compra = 0
+            `);
+
+            // 7. Kardex completo de Productos de Stock Directo
+            await runRaw(conn, `
+                CREATE TABLE IF NOT EXISTS movimientos_productos_directos (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    producto_id INTEGER NOT NULL,
+                    movimiento_id INTEGER DEFAULT NULL,
+                    usuario_id INTEGER DEFAULT NULL,
+                    tipo TEXT CHECK(tipo IN ('inventario_inicial', 'compra', 'venta', 'merma', 'reingreso_anulacion', 'ajuste')) NOT NULL,
+                    cantidad REAL NOT NULL,
+                    stock_resultante REAL NOT NULL,
+                    costo_unitario REAL NOT NULL,
+                    monto_total REAL NOT NULL DEFAULT 0,
+                    proveedor_nombre TEXT DEFAULT NULL,
+                    proveedor_nit TEXT DEFAULT NULL,
+                    nro_factura_compra TEXT DEFAULT NULL,
+                    con_factura INTEGER DEFAULT 0,
+                    motivo TEXT DEFAULT '',
+                    fecha_hora DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (producto_id) REFERENCES productos(id),
+                    FOREIGN KEY (movimiento_id) REFERENCES movimientos(id),
+                    FOREIGN KEY (usuario_id) REFERENCES usuarios(id)
+                )
+            `);
+            await runRaw(conn, `CREATE INDEX IF NOT EXISTS idx_mov_prod_dir_prod ON movimientos_productos_directos(producto_id)`);
+            await runRaw(conn, `CREATE INDEX IF NOT EXISTS idx_mov_prod_dir_mov ON movimientos_productos_directos(movimiento_id)`);
+        }
+    },
+    {
+        version: 10,
+        descripcion: 'Snapshot tributario por movimiento (régimen, alícuotas e importes IVA/IT), parámetro it_base en configuracion_negocio, costo_promedio_resultante y saldo de apertura de Kardex para productos directos existentes',
+        up: async (conn) => {
+            // 1. Parámetro configurable de base imponible del IT (a confirmar con el contador)
+            await agregarColumnaSiNoExiste(
+                conn,
+                'configuracion_negocio',
+                'it_base',
+                `TEXT DEFAULT 'todas_las_ventas'`
+            );
+            await runRaw(conn, `
+                UPDATE configuracion_negocio
+                SET it_base = 'todas_las_ventas'
+                WHERE it_base IS NULL OR it_base NOT IN ('todas_las_ventas', 'solo_facturadas')
+            `);
+
+            // 2. Columnas aditivas de snapshot fiscal en movimientos
+            await agregarColumnaSiNoExiste(conn, 'movimientos', 'regimen_tributario', `TEXT DEFAULT NULL`);
+            await agregarColumnaSiNoExiste(conn, 'movimientos', 'iva_porcentaje', `REAL DEFAULT 0`);
+            await agregarColumnaSiNoExiste(conn, 'movimientos', 'it_porcentaje', `REAL DEFAULT 0`);
+            await agregarColumnaSiNoExiste(conn, 'movimientos', 'iva_monto', `REAL DEFAULT 0`);
+            await agregarColumnaSiNoExiste(conn, 'movimientos', 'it_monto', `REAL DEFAULT 0`);
+
+            // 3. Rellenar snapshot histórico en movimientos existentes y registrar trazabilidad
+            const cfg = await getRaw(conn, `SELECT regimen_tributario, iva_porcentaje, it_porcentaje, it_base FROM configuracion_negocio WHERE id = 1`);
+            const regimenActual = cfg?.regimen_tributario === 'regimen_general' ? 'regimen_general' : 'simplificado_control_interno';
+            const ivaActual = Number(cfg?.iva_porcentaje ?? 13);
+            const itActual = Number(cfg?.it_porcentaje ?? 3);
+
+            const movsExistentes = await allRaw(
+                conn,
+                `SELECT id, tipo, COALESCE(categoria_contable, 'venta') as categoria_contable,
+                        monto, COALESCE(tipo_comprobante, 'recibo') as tipo_comprobante
+                 FROM movimientos
+                 WHERE regimen_tributario IS NULL
+                 ORDER BY id ASC`
+            );
+
+            const reclasificadosConFactura = [];
+            const reclasificadosConRecibo = [];
+
+            for (const m of movsExistentes) {
+                const monto = Number(m.monto || 0);
+                const esFactura = m.tipo_comprobante === 'factura';
+                if (esFactura) {
+                    const ivaM = Math.round((monto * (ivaActual / 100) + Number.EPSILON) * 100) / 100;
+                    const itM = m.tipo === 'ingreso' && m.categoria_contable === 'venta'
+                        ? Math.round((monto * (itActual / 100) + Number.EPSILON) * 100) / 100
+                        : 0;
+                    await runRaw(
+                        conn,
+                        `UPDATE movimientos
+                         SET regimen_tributario = 'regimen_general',
+                             iva_porcentaje = ?,
+                             it_porcentaje = ?,
+                             iva_monto = ?,
+                             it_monto = ?
+                         WHERE id = ?`,
+                        [ivaActual, m.tipo === 'ingreso' ? itActual : 0, ivaM, itM, m.id]
+                    );
+                    reclasificadosConFactura.push(m.id);
+                } else {
+                    await runRaw(
+                        conn,
+                        `UPDATE movimientos
+                         SET regimen_tributario = ?,
+                             iva_porcentaje = 0,
+                             it_porcentaje = 0,
+                             iva_monto = 0,
+                             it_monto = 0
+                         WHERE id = ?`,
+                        [regimenActual, m.id]
+                    );
+                    reclasificadosConRecibo.push(m.id);
+                }
+            }
+
+            if (movsExistentes.length > 0) {
+                console.log(
+                    `[Migraciones v10 Snapshot] Movimientos históricos rellenados: total=${movsExistentes.length} | ` +
+                    `con factura (IVA ${ivaActual}% / IT ${itActual}%): [${reclasificadosConFactura.join(', ') || 'ninguno'}] | ` +
+                    `con recibo/interno (IVA=0, IT=0): [${reclasificadosConRecibo.join(', ') || 'ninguno'}]`
+                );
+            }
+
+            // 4. Columna costo_promedio_resultante en movimientos_productos_directos
+            await agregarColumnaSiNoExiste(
+                conn,
+                'movimientos_productos_directos',
+                'costo_promedio_resultante',
+                `REAL DEFAULT 0`
+            );
+            await runRaw(
+                conn,
+                `UPDATE movimientos_productos_directos
+                 SET costo_promedio_resultante = costo_unitario
+                 WHERE costo_promedio_resultante IS NULL OR costo_promedio_resultante = 0`
+            );
+
+            // 5. Sembrar saldo de apertura en Kardex para productos de stock directo existentes que no tengan movimientos
+            const prodsSinKardex = await allRaw(
+                conn,
+                `SELECT p.id, p.nombre, COALESCE(p.stock, 0) as stock, COALESCE(p.costo, 0) as costo
+                 FROM productos p
+                 WHERE p.tipo_inventario = 'directo'
+                   AND NOT EXISTS (
+                       SELECT 1 FROM movimientos_productos_directos mpd WHERE mpd.producto_id = p.id
+                   )
+                 ORDER BY p.id ASC`
+            );
+
+            const sembrados = [];
+            for (const p of prodsSinKardex) {
+                const stockNum = Number(Number(p.stock || 0).toFixed(4));
+                const costoNum = Number(Number(p.costo || 0).toFixed(4));
+                const montoTotal = Math.round((stockNum * costoNum + Number.EPSILON) * 100) / 100;
+                await runRaw(
+                    conn,
+                    `INSERT INTO movimientos_productos_directos (
+                        producto_id, movimiento_id, usuario_id, tipo,
+                        cantidad, stock_resultante, costo_unitario, costo_promedio_resultante, monto_total, motivo
+                    ) VALUES (?, NULL, NULL, 'inventario_inicial', ?, ?, ?, ?, ?, 'Saldo de apertura (migración v10)')`,
+                    [p.id, stockNum, stockNum, costoNum, costoNum, montoTotal]
+                );
+                sembrados.push(`${p.id}:${p.nombre}(stock=${stockNum},costo=${costoNum})`);
+            }
+
+            if (sembrados.length > 0) {
+                console.log(`[Migraciones v10 Kardex] Saldos de apertura sembrados (${sembrados.length}): ${sembrados.join(', ')}`);
+            }
+        }
     }
 ];
 
@@ -717,6 +1019,37 @@ async function sincronizarCuentaDeveloper(conn) {
     }
 }
 
+async function respaldarAntesDeMigrar(conn, versionActual, versionDestino) {
+    // Si la BD es nueva (versionActual === 0 y sin tablas previas) no requiere respaldo pre-migración
+    if (!versionActual || versionActual <= 0) {
+        const tablasExistentes = await allRaw(
+            conn,
+            `SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'`
+        );
+        if (!tablasExistentes || tablasExistentes.length === 0) {
+            return null;
+        }
+    }
+
+    const backupDir = process.env.BACKUP_DIR
+        ? path.resolve(process.env.BACKUP_DIR)
+        : path.resolve(process.cwd(), 'backups');
+
+    if (!fs.existsSync(backupDir)) {
+        fs.mkdirSync(backupDir, { recursive: true });
+    }
+
+    const ahora = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    const sello = `${ahora.getFullYear()}-${pad(ahora.getMonth() + 1)}-${pad(ahora.getDate())}_${pad(ahora.getHours())}-${pad(ahora.getMinutes())}-${pad(ahora.getSeconds())}_${ahora.getMilliseconds()}`;
+    const nombreArchivo = `caja-pre-migracion-v${versionActual}-a-v${versionDestino}-${sello}.db`;
+    const rutaDestino = path.join(backupDir, nombreArchivo);
+
+    await runRaw(conn, `VACUUM INTO ?`, [rutaDestino]);
+    console.log(`[Migraciones Backup] Respaldo automático pre-migración (v${versionActual} -> v${versionDestino}) creado en: ${rutaDestino}`);
+    return rutaDestino;
+}
+
 async function ejecutarMigraciones(conn) {
     await runRaw(conn, `PRAGMA foreign_keys = ON`);
     const row = await getRaw(conn, `PRAGMA user_version`);
@@ -725,6 +1058,9 @@ async function ejecutarMigraciones(conn) {
     const pendientes = MIGRACIONES.filter((m) => m.version > versionActual).sort((a, b) => a.version - b.version);
 
     if (pendientes.length > 0) {
+        const versionDestino = pendientes[pendientes.length - 1].version;
+        await respaldarAntesDeMigrar(conn, versionActual, versionDestino);
+
         for (const migracion of pendientes) {
             console.log(`[Migraciones] Aplicando v${migracion.version}: ${migracion.descripcion}...`);
             // En SQLite, PRAGMA foreign_keys = OFF debe ejecutarse fuera de la transacción para recrear tablas

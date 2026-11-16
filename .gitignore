@@ -41,6 +41,9 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
+# Archivos temporales de pruebas en scratch
+scratch/tmp/
+
 # Archivos del sistema operativo y editores
 .DS_Store
 Thumbs.db

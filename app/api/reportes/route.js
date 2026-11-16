@@ -11,10 +11,19 @@ export async function GET(request) {
         const { searchParams } = new URL(request.url);
         const formato = searchParams.get('formato');
         const cajaId = searchParams.get('cajaId');
+        const desde = searchParams.get('desde');
+        const hasta = searchParams.get('hasta');
+        const filtros = {
+            desde: desde || null,
+            hasta: hasta || null
+        };
 
         if (formato === 'xlsx') {
-            const buffer = await generarReporteExcel(cajaId ? Number(cajaId) : null);
-            const nombreArchivo = cajaId ? `reporte_caja_${Number(cajaId)}.xlsx` : 'reporte_cajas_completo.xlsx';
+            const buffer = await generarReporteExcel(cajaId ? Number(cajaId) : null, filtros);
+            const sufijo = cajaId
+                ? `turno_${Number(cajaId)}`
+                : (desde || hasta ? `${desde || 'inicio'}_a_${hasta || 'hoy'}` : 'completo');
+            const nombreArchivo = `reporte_contable_${sufijo}.xlsx`;
             return new NextResponse(buffer, {
                 status: 200,
                 headers: {
@@ -25,12 +34,15 @@ export async function GET(request) {
         }
 
         if (formato === 'csv') {
-            const csv = await generarReporteCSV(cajaId ? Number(cajaId) : null);
+            const csv = await generarReporteCSV(cajaId ? Number(cajaId) : null, filtros);
+            const sufijo = cajaId
+                ? `turno_${Number(cajaId)}`
+                : (desde || hasta ? `${desde || 'inicio'}_a_${hasta || 'hoy'}` : 'completo');
             return new NextResponse(csv, {
                 status: 200,
                 headers: {
                     'Content-Type': 'text/csv; charset=utf-8',
-                    'Content-Disposition': 'attachment; filename="reporte_caja.csv"'
+                    'Content-Disposition': `attachment; filename="reporte_contable_${sufijo}.csv"`
                 }
             });
         }

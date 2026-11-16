@@ -316,15 +316,32 @@ async function autenticarUsuarioPorId(usuarioId, pin, nombreUsuario = null, ip =
 }
 
 async function obtenerUsuarioPorId(id) {
-    return await getQuery(`SELECT id, nombre, rol FROM usuarios WHERE id = ? AND activo = 1`, [id]);
+    return await getQuery(`SELECT id, nombre, rol, COALESCE(puede_registrar_respaldo_fiscal, 1) as puede_registrar_respaldo_fiscal FROM usuarios WHERE id = ? AND activo = 1`, [id]);
 }
 
 async function obtenerUsuarios() {
     // El rol 'developer' es estrictamente invisible para todos los roles en listados y selectores
     return await allQuery(
-        `SELECT id, nombre, rol FROM usuarios WHERE activo = 1 AND rol != 'developer'
+        `SELECT id, nombre, rol, COALESCE(puede_registrar_respaldo_fiscal, 1) as puede_registrar_respaldo_fiscal
+         FROM usuarios WHERE activo = 1 AND rol != 'developer'
          ORDER BY CASE rol WHEN 'superadmin' THEN 1 WHEN 'admin' THEN 2 ELSE 3 END, id ASC`
     );
+}
+
+async function actualizarPermisoFiscalUsuario(adminId, usuarioObjetivoId, habilitado) {
+    const ejecutor = await obtenerUsuarioPorId(adminId);
+    if (!ejecutor || !esRolAdministrativo(ejecutor.rol)) {
+        throw new Error('Permiso denegado: solo un Administrador puede modificar permisos de registro fiscal.');
+    }
+    const idNum = Number(usuarioObjetivoId);
+    if (!Number.isFinite(idNum) || idNum <= 0) {
+        throw new Error('ID de usuario inválido.');
+    }
+    await runQuery(
+        `UPDATE usuarios SET puede_registrar_respaldo_fiscal = ? WHERE id = ?`,
+        [habilitado ? 1 : 0, idNum]
+    );
+    return true;
 }
 
 // Lista pública mínima para el selector de login de /caja: solo cajeros activos, sin rol.
@@ -495,6 +512,14 @@ async function guardarConfiguracionNegocio(adminId, config) {
         throw new Error('Permiso denegado: solo el rol Developer puede modificar la modalidad del negocio.');
     }
 
+    const regimen = config.regimenTributario === 'regimen_general' ? 'regimen_general' : 'simplificado_control_interno';
+    const ivaPorc = config.ivaPorcentaje !== undefined ? redondear2(numeroNoNegativo(config.ivaPorcentaje, 'El porcentaje de IVA')) : 13;
+    const itPorc = config.itPorcentaje !== undefined ? redondear2(numeroNoNegativo(config.itPorcentaje, 'El porcentaje de IT')) : 3;
+    const itBase = config.itBase === 'solo_facturadas' ? 'solo_facturadas' : (config.itBase === 'todas_las_ventas' ? 'todas_las_ventas' : null);
+    const emiteFacturaFinal = regimen === 'simplificado_control_interno'
+        ? 0
+        : (config.emiteFactura !== undefined ? (config.emiteFactura ? 1 : 0) : null);
+
     await runQuery(
         `UPDATE configuracion_negocio
          SET nombre_negocio = ?,
@@ -502,6 +527,13 @@ async function guardarConfiguracionNegocio(adminId, config) {
              usa_stock_directo = ?,
              usa_vencimiento = ?,
              usa_recetas_ensamblaje = ?,
+             nit_negocio = COALESCE(?, nit_negocio, ''),
+             regimen_tributario = COALESCE(?, regimen_tributario, 'simplificado_control_interno'),
+             emite_factura = COALESCE(?, emite_factura, 0),
+             iva_porcentaje = ?,
+             it_porcentaje = ?,
+             it_base = COALESCE(?, it_base, 'todas_las_ventas'),
+             usa_respaldo_compras_egresos = COALESCE(?, usa_respaldo_compras_egresos, 1),
              configurado = 1
          WHERE id = 1`,
         [
@@ -509,7 +541,56 @@ async function guardarConfiguracionNegocio(adminId, config) {
             config.modalidadNombre || 'Personalizado',
             config.usaStockDirecto ? 1 : 0,
             config.usaVencimiento ? 1 : 0,
-            config.usaRecetasEnsamblaje ? 1 : 0
+            config.usaRecetasEnsamblaje ? 1 : 0,
+            config.nitNegocio !== undefined ? String(config.nitNegocio).trim() : null,
+            config.regimenTributario !== undefined ? regimen : null,
+            emiteFacturaFinal,
+            ivaPorc,
+            itPorc,
+            itBase,
+            config.usaRespaldoComprasEgresos !== undefined ? (config.usaRespaldoComprasEgresos ? 1 : 0) : null
+        ]
+    );
+    return await obtenerConfiguracionNegocio();
+}
+
+// Permite a cualquier Administrador o Super Admin ajustar el Régimen Tributario, NIT y opciones de respaldo fiscal
+async function guardarConfiguracionContable(adminId, config) {
+    const ejecutor = await obtenerUsuarioPorId(adminId);
+    if (!ejecutor || !esRolAdministrativo(ejecutor.rol)) {
+        throw new Error('Permiso denegado: solo un Administrador o Super Admin puede modificar la configuración contable.');
+    }
+
+    const regimen = config.regimenTributario === 'regimen_general' ? 'regimen_general' : 'simplificado_control_interno';
+    const emiteFactura = regimen === 'simplificado_control_interno'
+        ? 0
+        : (config.emiteFactura !== undefined ? (config.emiteFactura ? 1 : 0) : 1);
+    const ivaPorc = config.ivaPorcentaje !== undefined ? redondear2(numeroNoNegativo(config.ivaPorcentaje, 'El porcentaje de IVA')) : 13;
+    const itPorc = config.itPorcentaje !== undefined ? redondear2(numeroNoNegativo(config.itPorcentaje, 'El porcentaje de IT')) : 3;
+    // Parametrización de la base imponible del IT ('todas_las_ventas' | 'solo_facturadas') - A confirmar con el contador
+    const itBase = config.itBase === 'solo_facturadas' ? 'solo_facturadas' : 'todas_las_ventas';
+    const usaRespaldo = config.usaRespaldoComprasEgresos !== undefined ? (config.usaRespaldoComprasEgresos ? 1 : 0) : 1;
+
+    await runQuery(
+        `UPDATE configuracion_negocio
+         SET nombre_negocio = COALESCE(?, nombre_negocio),
+             nit_negocio = ?,
+             regimen_tributario = ?,
+             emite_factura = ?,
+             iva_porcentaje = ?,
+             it_porcentaje = ?,
+             it_base = ?,
+             usa_respaldo_compras_egresos = ?
+         WHERE id = 1`,
+        [
+            config.nombreNegocio ? String(config.nombreNegocio).trim() : null,
+            String(config.nitNegocio || '').trim(),
+            regimen,
+            emiteFactura,
+            ivaPorc,
+            itPorc,
+            itBase,
+            usaRespaldo
         ]
     );
     return await obtenerConfiguracionNegocio();
@@ -673,7 +754,7 @@ async function recalcularCostoCombosQueContienenProducto(productoId) {
 }
 
 // Compra de insumo con Costo Promedio Ponderado (CPP) y actualización en cascada de recetas
-async function registrarCompraInsumo(insumoId, cantidadComprada, costoTotalCompra, motivo = 'Compra a proveedor', distribuidora = null) {
+async function registrarCompraInsumo(insumoId, cantidadComprada, costoTotalCompra, motivo = 'Compra a proveedor', distribuidora = null, datosFiscales = {}) {
     const cantValidada = numeroPositivo(cantidadComprada, 'La cantidad comprada');
     const costoValidado = redondear2(numeroNoNegativo(costoTotalCompra, 'El costo total de compra'));
 
@@ -694,14 +775,39 @@ async function registrarCompraInsumo(insumoId, cantidadComprada, costoTotalCompr
         [Number(nuevoStock.toFixed(4)), Number(nuevoCostoUnitario.toFixed(4)), insumoId]
     );
 
-    const motivoFinal = distribuidora && String(distribuidora).trim() !== ''
-        ? `Compra a distribuidora: ${String(distribuidora).trim()}`
+    const provNombre = distribuidora && String(distribuidora).trim() !== ''
+        ? String(distribuidora).trim()
+        : (datosFiscales?.proveedorNombre ? String(datosFiscales.proveedorNombre).trim() : null);
+    const provNit = datosFiscales?.proveedorNit ? String(datosFiscales.proveedorNit).trim() : null;
+    const nroFac = datosFiscales?.nroFacturaCompra ? String(datosFiscales.nroFacturaCompra).trim() : null;
+    const conFac = datosFiscales?.conFactura || nroFac ? 1 : 0;
+    const usuarioId = datosFiscales?.usuarioId ? Number(datosFiscales.usuarioId) : null;
+
+    let motivoFinal = provNombre
+        ? `Compra a distribuidora: ${provNombre}`
         : (motivo || 'Compra a proveedor');
+    if (nroFac) {
+        motivoFinal += ` [Fact. #${nroFac}${provNit ? ` | NIT: ${provNit}` : ''}]`;
+    }
 
     await runQuery(
-        `INSERT INTO movimientos_insumos (insumo_id, tipo, cantidad, costo_unitario, motivo)
-         VALUES (?, 'compra', ?, ?, ?)`,
-        [insumoId, cantValidada, Number((costoValidado / cantValidada).toFixed(4)), motivoFinal]
+        `INSERT INTO movimientos_insumos (
+            insumo_id, tipo, cantidad, costo_unitario, motivo,
+            proveedor_nombre, proveedor_nit, nro_factura_compra, con_factura, monto_total_compra, usuario_id
+         )
+         VALUES (?, 'compra', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+            insumoId,
+            cantValidada,
+            Number((costoValidado / cantValidada).toFixed(4)),
+            motivoFinal,
+            provNombre,
+            provNit,
+            nroFac,
+            conFac,
+            costoValidado,
+            usuarioId
+        ]
     );
 
     // Actualizar en cascada el costo de todos los productos que usan este insumo
@@ -1111,7 +1217,7 @@ async function crearProductoConInsumos({
     });
 }
 
-async function crearProducto(nombre, precio, costo = 0, categoria = '', stock = null, unidadMedida = 'unidades', stockMinimo = 0, fechaVencimiento = null) {
+async function crearProducto(nombre, precio, costo = 0, categoria = '', stock = null, unidadMedida = 'unidades', stockMinimo = 0, fechaVencimiento = null, usuarioId = null) {
     if (!nombre || String(nombre).trim() === '') {
         throw new Error('El nombre del producto es obligatorio.');
     }
@@ -1123,16 +1229,29 @@ async function crearProducto(nombre, precio, costo = 0, categoria = '', stock = 
     const stockMinimoValidado = redondear2(numeroNoNegativo(stockMinimo ?? 0, 'El stock mínimo de alerta'));
     const tipoInventario = stockValidado !== null ? 'directo' : 'libre';
 
-    const res = await runQuery(
-        `INSERT INTO productos (nombre, precio, costo, categoria, unidad_medida, tipo_inventario, stock, stock_minimo, fecha_vencimiento)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [nombre.trim(), precioValidado, costoValidado, categoria ? String(categoria).trim() : '', unidadMedida || 'unidades', tipoInventario, stockValidado, stockMinimoValidado, fechaVencimiento || null]
-    );
-    return res.lastID;
+    return await enTransaccion(async () => {
+        const res = await runQuery(
+            `INSERT INTO productos (nombre, precio, costo, categoria, unidad_medida, tipo_inventario, stock, stock_minimo, fecha_vencimiento)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [nombre.trim(), precioValidado, costoValidado, categoria ? String(categoria).trim() : '', unidadMedida || 'unidades', tipoInventario, stockValidado, stockMinimoValidado, fechaVencimiento || null]
+        );
+        const prodId = res.lastID;
+
+        if (tipoInventario === 'directo') {
+            await runQuery(
+                `INSERT INTO movimientos_productos_directos (
+                    producto_id, usuario_id, tipo, cantidad, stock_resultante, costo_unitario, costo_promedio_resultante, monto_total, motivo
+                 ) VALUES (?, ?, 'inventario_inicial', ?, ?, ?, ?, ?, 'Inventario inicial de creación')`,
+                [prodId, usuarioId, stockValidado, stockValidado, costoValidado, costoValidado, redondear2(stockValidado * costoValidado)]
+            );
+        }
+
+        return prodId;
+    });
 }
 
 // Reabastecimiento directo de artículos terminados con Costo Promedio Ponderado (NIC 2)
-async function registrarCompraProductoDirecto(productoId, cantidadComprada, costoTotalCompra, fechaVencimiento = null) {
+async function registrarCompraProductoDirecto(productoId, cantidadComprada, costoTotalCompra, fechaVencimiento = null, datosFiscales = {}) {
     const cantValidada = numeroPositivo(cantidadComprada, 'La cantidad comprada');
     const costoValidado = redondear2(numeroNoNegativo(costoTotalCompra, 'El costo total de compra'));
 
@@ -1167,14 +1286,165 @@ async function registrarCompraProductoDirecto(productoId, cantidadComprada, cost
             [Number(nuevoStock.toFixed(4)), Number(nuevoCostoUnitario.toFixed(4)), vencimientoActualizado, productoId]
         );
 
+        const provNombre = datosFiscales?.proveedorNombre ? String(datosFiscales.proveedorNombre).trim() : null;
+        const provNit = datosFiscales?.proveedorNit ? String(datosFiscales.proveedorNit).trim() : null;
+        const nroFac = datosFiscales?.nroFacturaCompra ? String(datosFiscales.nroFacturaCompra).trim() : null;
+        const conFac = datosFiscales?.conFactura || nroFac ? 1 : 0;
+        const usuarioId = datosFiscales?.usuarioId ? Number(datosFiscales.usuarioId) : null;
+        const costoUnitCompra = Number((costoValidado / cantValidada).toFixed(4));
+        const cppResultante = Number(nuevoCostoUnitario.toFixed(4));
+
+        let motivoKardex = provNombre ? `Compra directo a: ${provNombre}` : 'Compra de stock directo (CPP)';
+        if (nroFac) motivoKardex += ` [Fact. #${nroFac}${provNit ? ` | NIT: ${provNit}` : ''}]`;
+
+        await runQuery(
+            `INSERT INTO movimientos_productos_directos (
+                producto_id, usuario_id, tipo, cantidad, stock_resultante, costo_unitario, costo_promedio_resultante, monto_total,
+                proveedor_nombre, proveedor_nit, nro_factura_compra, con_factura, motivo
+             ) VALUES (?, ?, 'compra', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+                productoId,
+                usuarioId,
+                cantValidada,
+                Number(nuevoStock.toFixed(4)),
+                costoUnitCompra,
+                cppResultante,
+                costoValidado,
+                provNombre,
+                provNit,
+                nroFac,
+                conFac,
+                motivoKardex
+            ]
+        );
+
         await recalcularCostoCombosQueContienenProducto(productoId);
 
         return {
             productoId,
             nuevoStock: Number(nuevoStock.toFixed(4)),
-            nuevoCostoUnitario: Number(nuevoCostoUnitario.toFixed(4))
+            nuevoCostoUnitario: cppResultante
         };
     });
+}
+
+// Registrar merma o baja física de productos de stock directo (descuento atómico + Kardex)
+async function registrarMermaProductoDirecto(productoId, cantidadPerdida, motivo, usuarioId = null) {
+    const cantValidada = numeroPositivo(cantidadPerdida, 'La cantidad de merma del producto');
+    if (!motivo || String(motivo).trim() === '') {
+        throw new Error('Debes especificar el motivo de la merma del producto (ej. Envase dañado, vencimiento).');
+    }
+
+    return await enTransaccion(async () => {
+        const prod = await getQuery(`SELECT * FROM productos WHERE id = ? AND activo = 1`, [productoId]);
+        if (!prod) throw new Error('Producto no encontrado.');
+        if (prod.tipo_inventario !== 'directo') {
+            throw new Error(`Solo se puede registrar merma directa sobre artículos de stock directo (modalidad actual: "${prod.tipo_inventario}").`);
+        }
+
+        const r = await runQuery(
+            `UPDATE productos SET stock = ROUND(stock - ?, 4) WHERE id = ? AND stock >= ?`,
+            [cantValidada, productoId, cantValidada]
+        );
+        if (r.changes === 0) {
+            throw new Error(
+                `Stock insuficiente para descontar ${cantValidada} ${prod.unidad_medida || 'unidades'} de "${prod.nombre}". Stock actual: ${Number(prod.stock || 0)}`
+            );
+        }
+
+        const prodActualizado = await getQuery(`SELECT stock, costo FROM productos WHERE id = ?`, [productoId]);
+        const nuevoStock = Number(prodActualizado?.stock ?? 0);
+        const costoCpp = Number(prodActualizado?.costo ?? prod.costo ?? 0);
+        const costoPerdida = redondear2(cantValidada * costoCpp);
+
+        await runQuery(
+            `INSERT INTO movimientos_productos_directos (
+                producto_id, movimiento_id, usuario_id, tipo, cantidad, stock_resultante,
+                costo_unitario, costo_promedio_resultante, monto_total, motivo
+             ) VALUES (?, NULL, ?, 'merma', ?, ?, ?, ?, ?, ?)`,
+            [
+                productoId,
+                usuarioId ? Number(usuarioId) : null,
+                cantValidada,
+                nuevoStock,
+                costoCpp,
+                costoCpp,
+                costoPerdida,
+                String(motivo).trim()
+            ]
+        );
+
+        return {
+            productoId: Number(productoId),
+            stockRestante: nuevoStock,
+            costoUnitario: costoCpp,
+            costoPerdida
+        };
+    });
+}
+
+// Consulta de control de integridad: verifica que el saldo del Kardex coincida con productos.stock
+async function verificarIntegridadKardexDirecto() {
+    const filas = await allQuery(
+        `SELECT p.id as producto_id,
+                p.nombre,
+                ROUND(COALESCE(p.stock, 0), 4) as stock_producto,
+                ROUND(COALESCE((
+                    SELECT SUM(CASE
+                        WHEN mpd.tipo IN ('inventario_inicial', 'compra', 'reingreso_anulacion') THEN mpd.cantidad
+                        WHEN mpd.tipo IN ('venta', 'merma') THEN -mpd.cantidad
+                        WHEN mpd.tipo = 'ajuste' THEN mpd.cantidad
+                        ELSE 0
+                    END)
+                    FROM movimientos_productos_directos mpd
+                    WHERE mpd.producto_id = p.id
+                ), 0), 4) as saldo_calculado_kardex,
+                (
+                    SELECT mpd2.stock_resultante
+                    FROM movimientos_productos_directos mpd2
+                    WHERE mpd2.producto_id = p.id
+                    ORDER BY mpd2.id DESC
+                    LIMIT 1
+                ) as ultimo_stock_resultante,
+                (
+                    SELECT COUNT(*)
+                    FROM movimientos_productos_directos mpd3
+                    WHERE mpd3.producto_id = p.id
+                ) as cantidad_movimientos
+         FROM productos p
+         WHERE p.activo = 1 AND p.tipo_inventario = 'directo'
+         ORDER BY p.id ASC`
+    );
+
+    const detalles = filas.map((f) => {
+        const stockProd = Number(f.stock_producto || 0);
+        const saldoCalc = Number(f.saldo_calculado_kardex || 0);
+        const ultResult = f.ultimo_stock_resultante !== null && f.ultimo_stock_resultante !== undefined
+            ? Number(f.ultimo_stock_resultante)
+            : 0;
+        const difCalculado = redondear2(stockProd - saldoCalc);
+        const difUltimo = redondear2(stockProd - ultResult);
+        const cuadra = Math.abs(difCalculado) < 0.001 && Math.abs(difUltimo) < 0.001;
+        return {
+            productoId: f.producto_id,
+            nombre: f.nombre,
+            stockProducto: stockProd,
+            saldoCalculadoKardex: saldoCalc,
+            ultimoStockResultante: ultResult,
+            cantidadMovimientos: Number(f.cantidad_movimientos || 0),
+            diferencia: difCalculado,
+            cuadra
+        };
+    });
+
+    const descuadres = detalles.filter((d) => !d.cuadra);
+    return {
+        integridadOk: descuadres.length === 0,
+        totalProductosDirectos: detalles.length,
+        totalDescuadres: descuadres.length,
+        descuadres,
+        detalles
+    };
 }
 
 // ==========================================
@@ -1661,12 +1931,31 @@ async function reactivarCajaFisica(cajaFisicaId, adminId) {
     return true;
 }
 
+async function actualizarPermisoFiscalCajaFisica(cajaFisicaId, habilitado, adminId) {
+    const ejecutor = await obtenerUsuarioPorId(adminId);
+    if (!ejecutor || !esRolAdministrativo(ejecutor.rol)) {
+        throw new Error('Permiso denegado: solo un Administrador puede modificar las opciones fiscales de una estación.');
+    }
+    const idNum = Number(cajaFisicaId);
+    if (!Number.isFinite(idNum) || idNum <= 0) {
+        throw new Error('ID de caja física inválido.');
+    }
+    await runQuery(`UPDATE cajas_fisicas SET habilita_respaldo_fiscal = ? WHERE id = ?`, [habilitado ? 1 : 0, idNum]);
+    return true;
+}
+
 // ==========================================
 // 5. APERTURA DE TURNOS, MULTICAJA Y ARQUEOS
 // ==========================================
 async function obtenerCajasAbiertas() {
     return await allQuery(
-        `SELECT c.*, cf.nombre as caja_fisica_nombre, u.nombre as usuario_nombre, u.rol as usuario_rol
+        `SELECT c.*,
+                datetime(c.fecha_apertura, 'localtime') as fecha_apertura,
+                datetime(c.fecha_cierre, 'localtime') as fecha_cierre,
+                cf.nombre as caja_fisica_nombre,
+                COALESCE(cf.habilita_respaldo_fiscal, 1) as habilita_respaldo_fiscal,
+                u.nombre as usuario_nombre,
+                u.rol as usuario_rol
          FROM cajas c
          LEFT JOIN cajas_fisicas cf ON c.caja_fisica_id = cf.id
          LEFT JOIN usuarios u ON c.usuario_id = u.id
@@ -1677,7 +1966,13 @@ async function obtenerCajasAbiertas() {
 
 async function obtenerCajaAbierta(usuarioId = null, cajaFisicaId = null) {
     let sql = `
-        SELECT c.*, cf.nombre as caja_fisica_nombre, u.nombre as usuario_nombre, u.rol as usuario_rol
+        SELECT c.*,
+               datetime(c.fecha_apertura, 'localtime') as fecha_apertura,
+               datetime(c.fecha_cierre, 'localtime') as fecha_cierre,
+               cf.nombre as caja_fisica_nombre,
+               COALESCE(cf.habilita_respaldo_fiscal, 1) as habilita_respaldo_fiscal,
+               u.nombre as usuario_nombre,
+               u.rol as usuario_rol
         FROM cajas c
         LEFT JOIN cajas_fisicas cf ON c.caja_fisica_id = cf.id
         LEFT JOIN usuarios u ON c.usuario_id = u.id
@@ -1697,7 +1992,13 @@ async function obtenerCajaAbierta(usuarioId = null, cajaFisicaId = null) {
 
 async function obtenerHistorialCajas(cajaFisicaId = null) {
     let sql = `
-        SELECT c.*, cf.nombre as caja_fisica_nombre, u.nombre as usuario_nombre, u.rol as usuario_rol
+        SELECT c.*,
+               datetime(c.fecha_apertura, 'localtime') as fecha_apertura,
+               datetime(c.fecha_cierre, 'localtime') as fecha_cierre,
+               cf.nombre as caja_fisica_nombre,
+               COALESCE(cf.habilita_respaldo_fiscal, 1) as habilita_respaldo_fiscal,
+               u.nombre as usuario_nombre,
+               u.rol as usuario_rol
         FROM cajas c
         LEFT JOIN cajas_fisicas cf ON c.caja_fisica_id = cf.id
         LEFT JOIN usuarios u ON c.usuario_id = u.id
@@ -1816,13 +2117,17 @@ async function reabrirCajaConPermiso(adminId, cajaId, motivo = 'Revisión admini
     return true;
 }
 
-async function registrarVentaCompleta(cajaId, items, metodoPago, montoRecibido = null, descripcion = 'Venta en mostrador', usuarioId = null, cambioEntregado = null) {
+async function registrarVentaCompleta(cajaId, items, metodoPago, montoRecibido = null, descripcion = 'Venta en mostrador', usuarioId = null, cambioEntregado = null, opcionesExtra = {}) {
     if (!items || !Array.isArray(items) || items.length === 0) {
         throw new Error('La venta debe incluir al menos un producto.');
     }
 
     if (usuarioId === null || usuarioId === undefined || usuarioId === '') {
         throw new Error('El usuario que registra la venta es obligatorio.');
+    }
+
+    if (!['efectivo', 'qr', 'mixto'].includes(metodoPago)) {
+        throw new Error("Método de pago inválido. Debe ser 'efectivo', 'qr' o 'mixto'.");
     }
 
     // 1. Validar ítems y agrupar por (productoId + modificadores) sumando cantidades
@@ -1875,7 +2180,7 @@ async function registrarVentaCompleta(cajaId, items, metodoPago, montoRecibido =
             throw new Error('Permiso denegado: solo el cajero titular de la caja abierta o un Administrador puede registrar ventas en este turno.');
         }
 
-        let montoTotal = 0;
+        let subtotalBruto = 0;
         const itemsProcesados = [];
         const consumoAcumuladoInsumos = {};
         const consumoAcumuladoDirecto = {};
@@ -2043,6 +2348,7 @@ async function registrarVentaCompleta(cajaId, items, metodoPago, montoRecibido =
                             consumoAcumuladoDirecto[comp.componente_producto_id] = {
                                 productoId: comp.componente_producto_id,
                                 nombre: comp.componente_nombre,
+                                costoUnitario: Number(comp.componente_costo || 0),
                                 cantidadTotalRequerida: 0
                             };
                         }
@@ -2105,7 +2411,7 @@ async function registrarVentaCompleta(cajaId, items, metodoPago, montoRecibido =
             }
 
             const subtotal = redondear2(precioUnitario * cantidadTotal);
-            montoTotal = redondear2(montoTotal + subtotal);
+            subtotalBruto = redondear2(subtotalBruto + subtotal);
 
             itemsProcesados.push({
                 productoId: prod.id,
@@ -2122,10 +2428,25 @@ async function registrarVentaCompleta(cajaId, items, metodoPago, montoRecibido =
             });
         }
 
-        // 3. Validar montos recibidos y cambio entregado con redondear2 y tolerancia 0.01
+        // Aplicar descuento opcional si fue enviado
+        const descuentoTotal = redondear2(numeroNoNegativo(opcionesExtra?.descuento ?? 0, 'El descuento de la venta'));
+        if (descuentoTotal > 0 && descuentoTotal >= subtotalBruto) {
+            throw new Error(`El descuento (Bs ${descuentoTotal.toFixed(2)}) no puede ser igual ni mayor al subtotal de la venta (Bs ${subtotalBruto.toFixed(2)}).`);
+        }
+        const montoTotal = redondear2(subtotalBruto - descuentoTotal);
+
+        // 3. Validar montos por método de pago (efectivo, qr o mixto), monto recibido y cambio entregado
         let cambio = 0;
         let recibidoFinal = montoTotal;
+        let montoEfectivo = 0;
+        let montoQr = 0;
+        const referenciaQr = opcionesExtra?.referenciaQr && String(opcionesExtra.referenciaQr).trim() !== ''
+            ? String(opcionesExtra.referenciaQr).trim()
+            : null;
+
         if (metodoPago === 'efectivo') {
+            montoEfectivo = montoTotal;
+            montoQr = 0;
             const tieneMontoRecibido = montoRecibido !== null && montoRecibido !== undefined && montoRecibido !== '';
             const tieneCambioEntregado = cambioEntregado !== null && cambioEntregado !== undefined && cambioEntregado !== '';
 
@@ -2148,14 +2469,135 @@ async function registrarVentaCompleta(cajaId, items, metodoPago, montoRecibido =
             } else {
                 cambio = redondear2(recibidoFinal - montoTotal);
             }
+        } else if (metodoPago === 'qr') {
+            montoEfectivo = 0;
+            montoQr = montoTotal;
+            recibidoFinal = montoTotal;
+            cambio = 0;
+        } else if (metodoPago === 'mixto') {
+            montoEfectivo = redondear2(numeroPositivo(opcionesExtra?.montoEfectivo, 'El monto en efectivo del pago mixto'));
+            montoQr = redondear2(numeroPositivo(opcionesExtra?.montoQr, 'El monto por QR del pago mixto'));
+
+            if (Math.abs((montoEfectivo + montoQr) - montoTotal) > 0.01) {
+                throw new Error(
+                    `En un pago mixto, la suma de Efectivo (Bs ${montoEfectivo.toFixed(2)}) + QR (Bs ${montoQr.toFixed(2)}) debe cuadrar exactamente con el total a cobrar (Bs ${montoTotal.toFixed(2)}).`
+                );
+            }
+
+            const tieneMontoRecibido = montoRecibido !== null && montoRecibido !== undefined && montoRecibido !== '';
+            if (tieneMontoRecibido) {
+                const billeteEfectivo = redondear2(numeroNoNegativo(montoRecibido, 'El efectivo entregado por el cliente'));
+                if (billeteEfectivo < montoEfectivo) {
+                    throw new Error(
+                        `El billete/efectivo recibido (Bs ${billeteEfectivo.toFixed(2)}) es menor a la porción en efectivo del pago mixto (Bs ${montoEfectivo.toFixed(2)}).`
+                    );
+                }
+                cambio = redondear2(billeteEfectivo - montoEfectivo);
+                recibidoFinal = redondear2(billeteEfectivo + montoQr);
+            } else {
+                cambio = 0;
+                recibidoFinal = montoTotal;
+            }
         }
 
+        // Datos de facturación y snapshot tributario congelado al momento de la venta
+        const configNegocio = await obtenerConfiguracionNegocio();
+        const regimenSnapshot = configNegocio?.regimen_tributario === 'regimen_general'
+            ? 'regimen_general'
+            : 'simplificado_control_interno';
+
+        const conFactura = opcionesExtra?.tipoComprobante === 'factura' || Boolean(opcionesExtra?.conFactura);
+        if (regimenSnapshot === 'simplificado_control_interno' && conFactura) {
+            throw new Error(
+                'Operación no permitida: El negocio opera en Régimen Simplificado / Control Interno y no puede emitir ni registrar ventas con factura fiscal.'
+            );
+        }
+
+        const tipoComprobante = conFactura ? 'factura' : 'recibo';
+        const ivaPorcCfg = Number(configNegocio?.iva_porcentaje ?? 13);
+        const itPorcCfg = Number(configNegocio?.it_porcentaje ?? 3);
+        const itBaseCfg = configNegocio?.it_base === 'solo_facturadas' ? 'solo_facturadas' : 'todas_las_ventas';
+
+        let ivaPorcSnapshot = 0;
+        let itPorcSnapshot = 0;
+        let ivaMontoSnapshot = 0;
+        let itMontoSnapshot = 0;
+
+        if (regimenSnapshot === 'regimen_general') {
+            if (tipoComprobante === 'factura') {
+                ivaPorcSnapshot = ivaPorcCfg;
+                ivaMontoSnapshot = redondear2(montoTotal * (ivaPorcCfg / 100));
+            }
+            if (itBaseCfg === 'todas_las_ventas' || tipoComprobante === 'factura') {
+                itPorcSnapshot = itPorcCfg;
+                itMontoSnapshot = redondear2(montoTotal * (itPorcCfg / 100));
+            }
+        }
+
+        const nroFactura = conFactura && opcionesExtra?.nroFactura && String(opcionesExtra.nroFactura).trim() !== ''
+            ? String(opcionesExtra.nroFactura).trim()
+            : null;
+        const cufAutorizacion = conFactura && opcionesExtra?.cufAutorizacion && String(opcionesExtra.cufAutorizacion).trim() !== ''
+            ? String(opcionesExtra.cufAutorizacion).trim()
+            : null;
+        const clienteNitCi = conFactura && opcionesExtra?.clienteNitCi && String(opcionesExtra.clienteNitCi).trim() !== ''
+            ? String(opcionesExtra.clienteNitCi).trim()
+            : null;
+        const clienteRazonSocial = conFactura && opcionesExtra?.clienteRazonSocial && String(opcionesExtra.clienteRazonSocial).trim() !== ''
+            ? String(opcionesExtra.clienteRazonSocial).trim()
+            : null;
+
         const movRes = await runQuery(
-            `INSERT INTO movimientos (caja_id, usuario_id, tipo, monto, metodo_pago, monto_recibido, cambio, descripcion, estado)
-             VALUES (?, ?, 'ingreso', ?, ?, ?, ?, ?, 'completado')`,
-            [cajaId, operador.id, montoTotal, metodoPago, recibidoFinal, cambio, descripcion]
+            `INSERT INTO movimientos (
+                caja_id, usuario_id, tipo, categoria_contable,
+                subtotal_bruto, descuento_total, monto,
+                metodo_pago, monto_efectivo, monto_qr, referencia_qr,
+                monto_recibido, cambio,
+                tipo_comprobante, nro_factura, cuf_autorizacion, cliente_nit_ci, cliente_razon_social,
+                regimen_tributario, iva_porcentaje, it_porcentaje, iva_monto, it_monto,
+                descripcion, estado
+             )
+             VALUES (?, ?, 'ingreso', 'venta', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'completado')`,
+            [
+                cajaId,
+                operador.id,
+                subtotalBruto,
+                descuentoTotal,
+                montoTotal,
+                metodoPago,
+                montoEfectivo,
+                montoQr,
+                referenciaQr,
+                recibidoFinal,
+                cambio,
+                tipoComprobante,
+                nroFactura,
+                cufAutorizacion,
+                clienteNitCi,
+                clienteRazonSocial,
+                regimenSnapshot,
+                ivaPorcSnapshot,
+                itPorcSnapshot,
+                ivaMontoSnapshot,
+                itMontoSnapshot,
+                descripcion
+            ]
         );
         const movimientoId = movRes.lastID;
+
+        // Registrar desglose en tabla movimientos_pagos
+        if (montoEfectivo > 0) {
+            await runQuery(
+                `INSERT INTO movimientos_pagos (movimiento_id, metodo_pago, monto, referencia) VALUES (?, 'efectivo', ?, NULL)`,
+                [movimientoId, montoEfectivo]
+            );
+        }
+        if (montoQr > 0) {
+            await runQuery(
+                `INSERT INTO movimientos_pagos (movimiento_id, metodo_pago, monto, referencia) VALUES (?, 'qr', ?, ?)`,
+                [movimientoId, montoQr, referenciaQr]
+            );
+        }
 
         // 4. Descuento atómico de stock directo en productos y registro de detalle con modificadores y combos
         for (const det of itemsProcesados) {
@@ -2222,6 +2664,24 @@ async function registrarVentaCompleta(cajaId, items, metodoPago, montoRecibido =
                 if (r.changes === 0) {
                     throw new Error(`Stock insuficiente para ${det.nombre}`);
                 }
+                const prodAct = await getQuery(`SELECT stock, costo FROM productos WHERE id = ?`, [det.productoId]);
+                await runQuery(
+                    `INSERT INTO movimientos_productos_directos (
+                        producto_id, movimiento_id, usuario_id, tipo, cantidad, stock_resultante,
+                        costo_unitario, costo_promedio_resultante, monto_total, motivo
+                     ) VALUES (?, ?, ?, 'venta', ?, ?, ?, ?, ?, ?)`,
+                    [
+                        det.productoId,
+                        movimientoId,
+                        operador.id,
+                        det.cantidad,
+                        Number(prodAct?.stock || 0),
+                        det.costoUnitario,
+                        Number(prodAct?.costo ?? det.costoUnitario),
+                        redondear2(det.cantidad * det.costoUnitario),
+                        `Venta Ticket #${movimientoId}`
+                    ]
+                );
             }
         }
 
@@ -2237,6 +2697,25 @@ async function registrarVentaCompleta(cajaId, items, metodoPago, montoRecibido =
                     `Stock insuficiente del componente "${info.nombre}" para armar el combo (se requieren ${info.cantidadTotalRequerida} unidades).`
                 );
             }
+            const prodAct = await getQuery(`SELECT stock, costo FROM productos WHERE id = ?`, [info.productoId]);
+            const costoComp = Number(info.costoUnitario || 0);
+            await runQuery(
+                `INSERT INTO movimientos_productos_directos (
+                    producto_id, movimiento_id, usuario_id, tipo, cantidad, stock_resultante,
+                    costo_unitario, costo_promedio_resultante, monto_total, motivo
+                 ) VALUES (?, ?, ?, 'venta', ?, ?, ?, ?, ?, ?)`,
+                [
+                    info.productoId,
+                    movimientoId,
+                    operador.id,
+                    info.cantidadTotalRequerida,
+                    Number(prodAct?.stock || 0),
+                    costoComp,
+                    Number(prodAct?.costo ?? costoComp),
+                    redondear2(info.cantidadTotalRequerida * costoComp),
+                    `Venta Combo Ticket #${movimientoId}`
+                ]
+            );
         }
 
         // 5. Descuento atómico de stock_actual en insumos (recetas y modificadores) y registro con movimiento_id
@@ -2252,18 +2731,40 @@ async function registrarVentaCompleta(cajaId, items, metodoPago, montoRecibido =
                 );
             }
             await runQuery(
-                `INSERT INTO movimientos_insumos (insumo_id, movimiento_id, tipo, cantidad, costo_unitario, motivo)
-                 VALUES (?, ?, 'consumo_venta', ?, ?, ?)`,
-                [info.insumoId, movimientoId, info.cantidadTotalRequerida, info.costoUnitario, `Venta Ticket #${movimientoId}`]
+                `INSERT INTO movimientos_insumos (insumo_id, movimiento_id, usuario_id, tipo, cantidad, costo_unitario, monto_total_compra, motivo)
+                 VALUES (?, ?, ?, 'consumo_venta', ?, ?, ?, ?)`,
+                [
+                    info.insumoId,
+                    movimientoId,
+                    operador.id,
+                    info.cantidadTotalRequerida,
+                    info.costoUnitario,
+                    redondear2(info.cantidadTotalRequerida * info.costoUnitario),
+                    `Venta Ticket #${movimientoId}`
+                ]
             );
         }
 
         return {
             movimientoId,
+            subtotalBruto,
+            descuentoTotal,
             montoTotal,
             metodoPago,
+            montoEfectivo,
+            montoQr,
+            referenciaQr,
             montoRecibido: recibidoFinal,
             cambio,
+            tipoComprobante,
+            nroFactura,
+            clienteNitCi,
+            clienteRazonSocial,
+            regimenTributario: regimenSnapshot,
+            ivaPorcentaje: ivaPorcSnapshot,
+            itPorcentaje: itPorcSnapshot,
+            ivaMonto: ivaMontoSnapshot,
+            itMonto: itMontoSnapshot,
             items: itemsProcesados.map((it) => ({
                 productoId: it.productoId,
                 nombre: it.nombre,
@@ -2276,7 +2777,7 @@ async function registrarVentaCompleta(cajaId, items, metodoPago, montoRecibido =
     });
 }
 
-async function registrarEgreso(cajaId, monto, descripcion, metodoPago = 'efectivo', usuarioId = null) {
+async function registrarEgreso(cajaId, monto, descripcion, metodoPago = 'efectivo', usuarioId = null, opcionesFiscales = {}) {
     const montoValidado = redondear2(numeroPositivo(monto, 'El monto del egreso'));
 
     if (!descripcion || descripcion.trim() === '') {
@@ -2307,12 +2808,81 @@ async function registrarEgreso(cajaId, monto, descripcion, metodoPago = 'efectiv
         throw new Error('Permiso denegado: solo el cajero titular de la caja abierta o un Administrador puede registrar egresos en este turno.');
     }
 
-    const res = await runQuery(
-        `INSERT INTO movimientos (caja_id, usuario_id, tipo, monto, metodo_pago, descripcion, estado)
-         VALUES (?, ?, 'egreso', ?, ?, ?, 'completado')`,
-        [cajaId, ejecutor.id, montoValidado, metodoPago, descripcion.trim()]
-    );
-    return res.lastID;
+    const CATEGORIAS_EGRESO_VALIDAS = ['gasto_operativo', 'compra_insumo', 'pago_proveedor', 'retiro_dueno', 'otro'];
+    const categoriaContable = CATEGORIAS_EGRESO_VALIDAS.includes(opcionesFiscales?.categoriaContable)
+        ? opcionesFiscales.categoriaContable
+        : 'gasto_operativo';
+
+    const conFactura = opcionesFiscales?.tipoComprobante === 'factura' || Boolean(opcionesFiscales?.conFactura);
+    const tipoComprobante = conFactura
+        ? 'factura'
+        : (opcionesFiscales?.tipoComprobante === 'sin_respaldo' ? 'sin_respaldo' : 'recibo');
+    const nroFactura = opcionesFiscales?.nroFactura && String(opcionesFiscales.nroFactura).trim() !== ''
+        ? String(opcionesFiscales.nroFactura).trim()
+        : null;
+    const proveedorNit = opcionesFiscales?.proveedorNit && String(opcionesFiscales.proveedorNit).trim() !== ''
+        ? String(opcionesFiscales.proveedorNit).trim()
+        : null;
+    const proveedorNombre = opcionesFiscales?.proveedorNombre && String(opcionesFiscales.proveedorNombre).trim() !== ''
+        ? String(opcionesFiscales.proveedorNombre).trim()
+        : null;
+    const referenciaQr = opcionesFiscales?.referenciaQr && String(opcionesFiscales.referenciaQr).trim() !== ''
+        ? String(opcionesFiscales.referenciaQr).trim()
+        : null;
+
+    const montoEfectivo = metodoPago === 'efectivo' ? montoValidado : 0;
+    const montoQr = metodoPago === 'qr' ? montoValidado : 0;
+
+    return await enTransaccion(async () => {
+        const configNegocio = await obtenerConfiguracionNegocio();
+        const regimenSnapshot = configNegocio?.regimen_tributario === 'regimen_general'
+            ? 'regimen_general'
+            : 'simplificado_control_interno';
+        const ivaPorcCfg = Number(configNegocio?.iva_porcentaje ?? 13);
+        const ivaPorcSnapshot = (regimenSnapshot === 'regimen_general' && tipoComprobante === 'factura')
+            ? ivaPorcCfg
+            : 0;
+        const ivaMontoSnapshot = ivaPorcSnapshot > 0
+            ? redondear2(montoValidado * (ivaPorcSnapshot / 100))
+            : 0;
+
+        const res = await runQuery(
+            `INSERT INTO movimientos (
+                caja_id, usuario_id, tipo, categoria_contable,
+                subtotal_bruto, descuento_total, monto,
+                metodo_pago, monto_efectivo, monto_qr, referencia_qr,
+                tipo_comprobante, nro_factura, cliente_nit_ci, cliente_razon_social,
+                regimen_tributario, iva_porcentaje, it_porcentaje, iva_monto, it_monto,
+                descripcion, estado
+             )
+             VALUES (?, ?, 'egreso', ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 0, ?, 'completado')`,
+            [
+                cajaId,
+                ejecutor.id,
+                categoriaContable,
+                montoValidado,
+                montoValidado,
+                metodoPago,
+                montoEfectivo,
+                montoQr,
+                referenciaQr,
+                tipoComprobante,
+                nroFactura,
+                proveedorNit,
+                proveedorNombre,
+                regimenSnapshot,
+                ivaPorcSnapshot,
+                ivaMontoSnapshot,
+                descripcion.trim()
+            ]
+        );
+        const movId = res.lastID;
+        await runQuery(
+            `INSERT INTO movimientos_pagos (movimiento_id, metodo_pago, monto, referencia) VALUES (?, ?, ?, ?)`,
+            [movId, metodoPago === 'qr' ? 'qr' : 'efectivo', montoValidado, referenciaQr]
+        );
+        return movId;
+    });
 }
 
 // Inyección / Reposición de efectivo a la caja (ej. cambio o sencillo provisto por administrador o dueño)
@@ -2344,12 +2914,31 @@ async function registrarIngresoEfectivo(cajaId, monto, motivo, usuarioId = null)
     }
 
     const descripcionFinal = `[REPOSICIÓN DE EFECTIVO] ${String(motivo).trim()}`;
-    const res = await runQuery(
-        `INSERT INTO movimientos (caja_id, usuario_id, tipo, monto, metodo_pago, monto_recibido, cambio, descripcion, estado)
-         VALUES (?, ?, 'ingreso', ?, 'efectivo', ?, 0, ?, 'completado')`,
-        [cajaId, ejecutor.id, montoValidado, montoValidado, descripcionFinal]
-    );
-    return res.lastID;
+    return await enTransaccion(async () => {
+        const configNegocio = await obtenerConfiguracionNegocio();
+        const regimenSnapshot = configNegocio?.regimen_tributario === 'regimen_general'
+            ? 'regimen_general'
+            : 'simplificado_control_interno';
+
+        const res = await runQuery(
+            `INSERT INTO movimientos (
+                caja_id, usuario_id, tipo, categoria_contable,
+                subtotal_bruto, descuento_total, monto,
+                metodo_pago, monto_efectivo, monto_qr,
+                monto_recibido, cambio, tipo_comprobante,
+                regimen_tributario, iva_porcentaje, it_porcentaje, iva_monto, it_monto,
+                descripcion, estado
+             )
+             VALUES (?, ?, 'ingreso', 'aporte_cambio', ?, 0, ?, 'efectivo', ?, 0, ?, 0, 'recibo', ?, 0, 0, 0, 0, ?, 'completado')`,
+            [cajaId, ejecutor.id, montoValidado, montoValidado, montoValidado, montoValidado, regimenSnapshot, descripcionFinal]
+        );
+        const movId = res.lastID;
+        await runQuery(
+            `INSERT INTO movimientos_pagos (movimiento_id, metodo_pago, monto, referencia) VALUES (?, 'efectivo', ?, NULL)`,
+            [movId, montoValidado]
+        );
+        return movId;
+    });
 }
 
 async function anularMovimientoConPermiso(adminId, movimientoId, motivoAnulacion) {
@@ -2388,6 +2977,24 @@ async function anularMovimientoConPermiso(adminId, movimientoId, motivoAnulacion
         for (const det of detalles) {
             if (det.tipo_inventario === 'directo') {
                 await runQuery(`UPDATE productos SET stock = ROUND(stock + ?, 4) WHERE id = ?`, [det.cantidad, det.producto_id]);
+                const prodAct = await getQuery(`SELECT stock, costo FROM productos WHERE id = ?`, [det.producto_id]);
+                await runQuery(
+                    `INSERT INTO movimientos_productos_directos (
+                        producto_id, movimiento_id, usuario_id, tipo, cantidad, stock_resultante,
+                        costo_unitario, costo_promedio_resultante, monto_total, motivo
+                     ) VALUES (?, ?, ?, 'reingreso_anulacion', ?, ?, ?, ?, ?, ?)`,
+                    [
+                        det.producto_id,
+                        movimientoId,
+                        ejecutor.id,
+                        det.cantidad,
+                        Number(prodAct?.stock || 0),
+                        det.costo_unitario,
+                        Number(prodAct?.costo ?? det.costo_unitario),
+                        redondear2(det.cantidad * det.costo_unitario),
+                        `Anulación Ticket #${movimientoId}: ${motivoLimpio}`
+                    ]
+                );
             } else if (det.tipo_inventario === 'combo') {
                 // Si tenía límite activo, restituir el contador restante
                 await runQuery(
@@ -2410,6 +3017,24 @@ async function anularMovimientoConPermiso(adminId, movimientoId, motivoAnulacion
                         await runQuery(
                             `UPDATE productos SET stock = ROUND(stock + ?, 4) WHERE id = ?`,
                             [comp.cantidad_total, comp.componente_producto_id]
+                        );
+                        const prodAct = await getQuery(`SELECT stock, costo FROM productos WHERE id = ?`, [comp.componente_producto_id]);
+                        await runQuery(
+                            `INSERT INTO movimientos_productos_directos (
+                                producto_id, movimiento_id, usuario_id, tipo, cantidad, stock_resultante,
+                                costo_unitario, costo_promedio_resultante, monto_total, motivo
+                             ) VALUES (?, ?, ?, 'reingreso_anulacion', ?, ?, ?, ?, ?, ?)`,
+                            [
+                                comp.componente_producto_id,
+                                movimientoId,
+                                ejecutor.id,
+                                comp.cantidad_total,
+                                Number(prodAct?.stock || 0),
+                                comp.costo_unitario_congelado,
+                                Number(prodAct?.costo ?? comp.costo_unitario_congelado),
+                                redondear2(comp.cantidad_total * comp.costo_unitario_congelado),
+                                `Anulación Combo Ticket #${movimientoId}: ${motivoLimpio}`
+                            ]
                         );
                     }
                 }
@@ -2448,9 +3073,17 @@ async function anularMovimientoConPermiso(adminId, movimientoId, motivoAnulacion
                 [cantidadDevolver, cons.insumo_id]
             );
             await runQuery(
-                `INSERT INTO movimientos_insumos (insumo_id, movimiento_id, tipo, cantidad, costo_unitario, motivo)
-                 VALUES (?, ?, 'reingreso_anulacion', ?, ?, ?)`,
-                [cons.insumo_id, movimientoId, cantidadDevolver, costoOriginal, `Anulación Ticket #${movimientoId}`]
+                `INSERT INTO movimientos_insumos (insumo_id, movimiento_id, usuario_id, tipo, cantidad, costo_unitario, monto_total_compra, motivo)
+                 VALUES (?, ?, ?, 'reingreso_anulacion', ?, ?, ?, ?)`,
+                [
+                    cons.insumo_id,
+                    movimientoId,
+                    ejecutor.id,
+                    cantidadDevolver,
+                    costoOriginal,
+                    redondear2(cantidadDevolver * costoOriginal),
+                    `Anulación Ticket #${movimientoId}`
+                ]
             );
         }
 
@@ -2471,11 +3104,16 @@ async function anularMovimientoConPermiso(adminId, movimientoId, motivoAnulacion
 
 async function obtenerMovimientosCaja(cajaId) {
     return await allQuery(
-        `SELECT m.*, u.nombre as usuario_nombre
+        `SELECT m.*,
+                datetime(m.fecha_hora, 'localtime') as fecha_hora,
+                datetime(m.fecha_anulacion, 'localtime') as fecha_anulacion,
+                u.nombre as usuario_nombre,
+                ua.nombre as anulado_por_nombre
          FROM movimientos m
          LEFT JOIN usuarios u ON m.usuario_id = u.id
+         LEFT JOIN usuarios ua ON m.anulado_por = ua.id
          WHERE m.caja_id = ?
-         ORDER BY m.fecha_hora DESC`,
+         ORDER BY m.id DESC`,
         [cajaId]
     );
 }
@@ -2483,8 +3121,10 @@ async function obtenerMovimientosCaja(cajaId) {
 // ==========================================
 // 5. ARQUEO DE CAJA Y ESTADÍSTICAS PREDICTIVAS
 // ==========================================
-async function cerrarCaja(cajaId, efectivoRealFisico, usuarioId = null) {
+async function cerrarCaja(cajaId, efectivoRealFisico, usuarioId = null, qrRealConciliado = null, observacionesCierre = '') {
     const efectivoRealValidado = redondear2(numeroNoNegativo(efectivoRealFisico, 'El efectivo real físico'));
+    const tieneQrReal = qrRealConciliado !== null && qrRealConciliado !== undefined && qrRealConciliado !== '';
+    const qrRealValidado = tieneQrReal ? redondear2(numeroNoNegativo(qrRealConciliado, 'El monto QR conciliado')) : null;
 
     if (usuarioId === null || usuarioId === undefined || usuarioId === '') {
         throw new Error('El usuario que cierra la caja es obligatorio.');
@@ -2505,25 +3145,43 @@ async function cerrarCaja(cajaId, efectivoRealFisico, usuarioId = null) {
         }
 
         const resumen = await allQuery(
-            `SELECT tipo, metodo_pago, COALESCE(SUM(monto), 0) as total
+            `SELECT
+                tipo,
+                COALESCE(categoria_contable, CASE WHEN tipo = 'egreso' THEN 'gasto_operativo' ELSE 'venta' END) as cat,
+                COALESCE(SUM(CASE WHEN metodo_pago = 'mixto' THEN monto_efectivo WHEN metodo_pago = 'efectivo' THEN monto ELSE 0 END), 0) as total_efectivo,
+                COALESCE(SUM(CASE WHEN metodo_pago = 'mixto' THEN monto_qr WHEN metodo_pago = 'qr' THEN monto ELSE 0 END), 0) as total_qr
              FROM movimientos
              WHERE caja_id = ? AND estado = 'completado'
-             GROUP BY tipo, metodo_pago`,
+             GROUP BY tipo, cat`,
             [cajaId]
         );
 
-        let ingresosEfectivo = 0, egresosEfectivo = 0, ingresosQR = 0, egresosQR = 0;
+        let ventasEfectivo = 0;
+        let reposicionesEfectivo = 0;
+        let egresosEfectivo = 0;
+        let ingresosQR = 0;
+        let egresosQR = 0;
+
         for (const fila of resumen) {
-            if (fila.tipo === 'ingreso' && fila.metodo_pago === 'efectivo') ingresosEfectivo = redondear2(fila.total);
-            if (fila.tipo === 'egreso' && fila.metodo_pago === 'efectivo') egresosEfectivo = redondear2(fila.total);
-            if (fila.tipo === 'ingreso' && fila.metodo_pago === 'qr') ingresosQR = redondear2(fila.total);
-            if (fila.tipo === 'egreso' && fila.metodo_pago === 'qr') egresosQR = redondear2(fila.total);
+            if (fila.tipo === 'ingreso') {
+                if (fila.cat === 'aporte_cambio') {
+                    reposicionesEfectivo = redondear2(reposicionesEfectivo + fila.total_efectivo);
+                } else {
+                    ventasEfectivo = redondear2(ventasEfectivo + fila.total_efectivo);
+                    ingresosQR = redondear2(ingresosQR + fila.total_qr);
+                }
+            } else if (fila.tipo === 'egreso') {
+                egresosEfectivo = redondear2(egresosEfectivo + fila.total_efectivo);
+                egresosQR = redondear2(egresosQR + fila.total_qr);
+            }
         }
 
+        const ingresosEfectivo = redondear2(ventasEfectivo + reposicionesEfectivo);
         const fondoInicial = redondear2(caja.monto_inicial);
         const efectivoEsperado = redondear2(fondoInicial + ingresosEfectivo - egresosEfectivo);
         const qrEsperado = redondear2(ingresosQR - egresosQR);
         const diferenciaEfectivo = redondear2(efectivoRealValidado - efectivoEsperado);
+        const diferenciaQr = qrRealValidado !== null ? redondear2(qrRealValidado - qrEsperado) : null;
 
         await runQuery(
             `UPDATE cajas
@@ -2531,15 +3189,29 @@ async function cerrarCaja(cajaId, efectivoRealFisico, usuarioId = null) {
                  efectivo_esperado = ?,
                  efectivo_real = ?,
                  qr_esperado = ?,
+                 qr_real = ?,
                  diferencia_efectivo = ?,
+                 diferencia_qr = ?,
+                 observaciones_cierre = ?,
                  fecha_cierre = CURRENT_TIMESTAMP
              WHERE id = ?`,
-            [efectivoEsperado, efectivoRealValidado, qrEsperado, diferenciaEfectivo, cajaId]
+            [
+                efectivoEsperado,
+                efectivoRealValidado,
+                qrEsperado,
+                qrRealValidado,
+                diferenciaEfectivo,
+                diferenciaQr,
+                String(observacionesCierre || '').trim(),
+                cajaId
+            ]
         );
 
         return {
             cajaId,
             fondoInicial,
+            ventasEfectivo,
+            reposicionesEfectivo,
             ingresosEfectivo,
             egresosEfectivo,
             efectivoEsperado,
@@ -2548,7 +3220,9 @@ async function cerrarCaja(cajaId, efectivoRealFisico, usuarioId = null) {
             ingresosQR,
             egresosQR,
             qrEsperado,
-            ventasTotalesTurno: redondear2(ingresosEfectivo + ingresosQR)
+            qrReal: qrRealValidado,
+            diferenciaQr,
+            ventasTotalesTurno: redondear2(ventasEfectivo + ingresosQR)
         };
     });
 }
@@ -2556,13 +3230,13 @@ async function cerrarCaja(cajaId, efectivoRealFisico, usuarioId = null) {
 async function obtenerDatosCierreParaNotificacion(cajaId) {
     const caja = await getQuery(
         `SELECT c.id, c.monto_inicial, c.efectivo_esperado, c.efectivo_real,
-                c.diferencia_efectivo, c.qr_esperado, c.veces_reabierta,
+                c.diferencia_efectivo, c.qr_esperado, c.qr_real, c.diferencia_qr, c.veces_reabierta,
                 datetime(c.fecha_apertura, 'localtime') as fecha_apertura,
                 datetime(c.fecha_cierre, 'localtime') as fecha_cierre,
                 c.estado,
                 COALESCE(cf.nombre, 'Caja Principal') as caja_nombre,
                 COALESCE(u.nombre, '—') as cajero_nombre,
-                COALESCE(u.usuario, '—') as cajero_usuario
+                COALESCE(u.nombre, '—') as cajero_usuario
          FROM cajas c
          LEFT JOIN cajas_fisicas cf ON c.caja_fisica_id = cf.id
          LEFT JOIN usuarios u ON c.usuario_id = u.id
@@ -2574,7 +3248,8 @@ async function obtenerDatosCierreParaNotificacion(cajaId) {
     const negocio = await obtenerConfiguracionNegocio();
 
     const movimientos = await allQuery(
-        `SELECT id, tipo, metodo_pago, monto, descripcion, datetime(fecha_hora, 'localtime') as fecha_hora
+        `SELECT id, tipo, categoria_contable, metodo_pago, monto, monto_efectivo, monto_qr,
+                descripcion, datetime(fecha_hora, 'localtime') as fecha_hora
          FROM movimientos
          WHERE caja_id = ? AND estado = 'completado'
          ORDER BY id ASC`,
@@ -2592,11 +3267,17 @@ async function obtenerDatosCierreParaNotificacion(cajaId) {
         const monto = Number(m.monto || 0);
         if (m.tipo === 'ingreso') {
             const desc = (m.descripcion || '').toLowerCase();
-            if (desc.startsWith('inyección')) {
+            const esAporteCambio = m.categoria_contable === 'aporte_cambio'
+                || desc.startsWith('inyección')
+                || desc.startsWith('[reposición');
+            if (esAporteCambio) {
                 totalInyeccionSencillo += monto;
             } else {
                 cantidadVentas++;
-                if (m.metodo_pago === 'efectivo') {
+                if (m.metodo_pago === 'mixto') {
+                    totalVentasEfectivo += Number(m.monto_efectivo || 0);
+                    totalVentasQR += Number(m.monto_qr || 0);
+                } else if (m.metodo_pago === 'efectivo') {
                     totalVentasEfectivo += monto;
                 } else if (m.metodo_pago === 'qr') {
                     totalVentasQR += monto;
@@ -2622,6 +3303,8 @@ async function obtenerDatosCierreParaNotificacion(cajaId) {
             efectivoReal: caja.efectivo_real !== null ? Number(caja.efectivo_real) : 0,
             diferenciaEfectivo: caja.diferencia_efectivo !== null ? Number(caja.diferencia_efectivo) : 0,
             qrEsperado: Number(caja.qr_esperado || 0),
+            qrReal: caja.qr_real !== null && caja.qr_real !== undefined ? Number(caja.qr_real) : null,
+            diferenciaQr: caja.diferencia_qr !== null && caja.diferencia_qr !== undefined ? Number(caja.diferencia_qr) : null,
             cantidadVentas,
             cantidadEgresos
         }
@@ -2682,13 +3365,39 @@ async function obtenerPrediccionComprasInsumos(diasAnalisis = 30, diasCobertura 
 // 6. ESTADÍSTICAS Y CONTABILIDAD (PANEL ADMIN)
 // ==========================================
 async function obtenerEstadisticasCaja(cajaId) {
-    // Solo contamos ventas comerciales de productos para no distorsionar ingresos con reposiciones de efectivo
+    const config = await obtenerConfiguracionNegocio();
+    const ivaPorc = Number(config?.iva_porcentaje ?? 13);
+    const itPorc = Number(config?.it_porcentaje ?? 3);
+    const itBase = config?.it_base === 'solo_facturadas' ? 'solo_facturadas' : 'todas_las_ventas';
+
+    // Solo contamos ventas comerciales de productos para no distorsionar ingresos con reposiciones de efectivo.
+    // Los importes de IVA e IT respetan el snapshot congelado en cada movimiento al momento de la venta.
     const kpiVentas = await getQuery(
-        `SELECT COUNT(DISTINCT m.id) as cantidad_tickets, COALESCE(SUM(d.subtotal), 0) as ventas_totales
+        `SELECT COUNT(m.id) as cantidad_tickets,
+                COALESCE(SUM(m.subtotal_bruto), 0) as subtotal_bruto_ventas,
+                COALESCE(SUM(m.descuento_total), 0) as descuentos_totales,
+                COALESCE(SUM(m.monto), 0) as ventas_totales,
+                COALESCE(SUM(CASE WHEN m.tipo_comprobante = 'factura' THEN m.monto ELSE 0 END), 0) as ventas_facturadas,
+                COALESCE(SUM(CASE WHEN COALESCE(m.tipo_comprobante, 'recibo') != 'factura' THEN m.monto ELSE 0 END), 0) as ventas_recibo,
+                COALESCE(SUM(
+                    CASE
+                        WHEN m.regimen_tributario IS NOT NULL THEN COALESCE(m.iva_monto, 0)
+                        WHEN m.tipo_comprobante = 'factura' THEN ROUND(m.monto * (? / 100.0), 2)
+                        ELSE 0
+                    END
+                ), 0) as debito_fiscal_iva,
+                COALESCE(SUM(
+                    CASE
+                        WHEN m.regimen_tributario IS NOT NULL THEN COALESCE(m.it_monto, 0)
+                        WHEN m.tipo_comprobante = 'factura' THEN ROUND(m.monto * (? / 100.0), 2)
+                        ELSE 0
+                    END
+                ), 0) as impuesto_transacciones_it
          FROM movimientos m
-         INNER JOIN detalle_movimientos d ON m.id = d.movimiento_id
-         WHERE m.caja_id = ? AND m.tipo = 'ingreso' AND m.estado = 'completado'`,
-        [cajaId]
+         WHERE m.caja_id = ? AND m.tipo = 'ingreso' AND m.estado = 'completado'
+           AND COALESCE(m.categoria_contable, 'venta') = 'venta'
+           AND EXISTS (SELECT 1 FROM detalle_movimientos d WHERE d.movimiento_id = m.id)`,
+        [ivaPorc, itPorc, cajaId]
     );
 
     const kpiCostos = await getQuery(
@@ -2700,39 +3409,122 @@ async function obtenerEstadisticasCaja(cajaId) {
     );
 
     const kpiEgresos = await getQuery(
-        `SELECT COALESCE(SUM(monto), 0) as total_egresos
+        `SELECT COALESCE(SUM(monto), 0) as total_egresos,
+                COALESCE(SUM(CASE WHEN tipo_comprobante = 'factura' THEN monto ELSE 0 END), 0) as egresos_facturados,
+                COALESCE(SUM(
+                    CASE
+                        WHEN regimen_tributario IS NOT NULL THEN COALESCE(iva_monto, 0)
+                        WHEN tipo_comprobante = 'factura' THEN ROUND(monto * (? / 100.0), 2)
+                        ELSE 0
+                    END
+                ), 0) as credito_fiscal_iva_egresos
          FROM movimientos WHERE caja_id = ? AND tipo = 'egreso' AND estado = 'completado'`,
-        [cajaId]
+        [ivaPorc, cajaId]
     );
 
     const kpiReposiciones = await getQuery(
         `SELECT COALESCE(SUM(monto), 0) as total_reposiciones
          FROM movimientos m
          WHERE m.caja_id = ? AND m.tipo = 'ingreso' AND m.estado = 'completado'
-           AND NOT EXISTS (SELECT 1 FROM detalle_movimientos d WHERE d.movimiento_id = m.id)`,
+           AND (m.categoria_contable = 'aporte_cambio' OR NOT EXISTS (SELECT 1 FROM detalle_movimientos d WHERE d.movimiento_id = m.id))`,
         [cajaId]
     );
 
-    const rendimientoProductos = await allQuery(
-        `SELECT 
-            p.id,
-            p.nombre,
-            p.categoria,
-            COALESCE(SUM(CASE WHEN m.caja_id = ? AND m.estado = 'completado' THEN d.cantidad ELSE 0 END), 0) as unidades_vendidas,
-            COALESCE(SUM(CASE WHEN m.caja_id = ? AND m.estado = 'completado' THEN d.subtotal ELSE 0 END), 0) as ingresos_generados,
-            COALESCE(SUM(CASE WHEN m.caja_id = ? AND m.estado = 'completado' THEN (d.subtotal - (d.cantidad * d.costo_unitario)) ELSE 0 END), 0) as ganancia_generada
-         FROM productos p
-         LEFT JOIN detalle_movimientos d ON p.id = d.producto_id
-         LEFT JOIN movimientos m ON d.movimiento_id = m.id
-         WHERE p.activo = 1
-         GROUP BY p.id
-         ORDER BY unidades_vendidas DESC`,
-        [cajaId, cajaId, cajaId]
+    // Las líneas del turno se cargan por movimiento para prorratear descuentos proporcionalmente
+    // y ajustar el centavo residual en la última línea del ticket, de modo que:
+    // SUM(ingresos_generados) === Ventas Totales y SUM(ganancia_generada) === Ganancia Bruta.
+    const productosActivos = await allQuery(
+        `SELECT id, nombre, categoria FROM productos WHERE activo = 1 ORDER BY id ASC`
+    );
+    const lineasTurno = await allQuery(
+        `SELECT d.id as detalle_id,
+                d.movimiento_id,
+                d.producto_id,
+                d.cantidad,
+                d.subtotal,
+                d.costo_unitario,
+                COALESCE(m.subtotal_bruto, m.monto) as subtotal_bruto_mov,
+                COALESCE(m.descuento_total, 0) as descuento_total_mov,
+                m.monto as monto_neto_mov
+         FROM detalle_movimientos d
+         INNER JOIN movimientos m ON d.movimiento_id = m.id
+         WHERE m.caja_id = ?
+           AND m.tipo = 'ingreso'
+           AND m.estado = 'completado'
+           AND COALESCE(m.categoria_contable, 'venta') = 'venta'
+         ORDER BY d.movimiento_id ASC, d.id ASC`,
+        [cajaId]
     );
 
+    const mapaProd = new Map();
+    for (const p of productosActivos) {
+        mapaProd.set(p.id, {
+            id: p.id,
+            nombre: p.nombre,
+            categoria: p.categoria,
+            unidades_vendidas: 0,
+            ingresos_generados: 0,
+            ganancia_generada: 0
+        });
+    }
+
+    const lineasPorMov = new Map();
+    for (const l of lineasTurno) {
+        if (!lineasPorMov.has(l.movimiento_id)) lineasPorMov.set(l.movimiento_id, []);
+        lineasPorMov.get(l.movimiento_id).push(l);
+    }
+
+    for (const [, grupo] of lineasPorMov.entries()) {
+        const subBrutoMov = Number(grupo[0].subtotal_bruto_mov || 0);
+        const descMov = Number(grupo[0].descuento_total_mov || 0);
+        const montoNetoMov = redondear2(grupo[0].monto_neto_mov);
+        let acumuladoNeto = 0;
+
+        for (let i = 0; i < grupo.length; i++) {
+            const lin = grupo[i];
+            const subLinea = Number(lin.subtotal || 0);
+            let ingresoNetoLinea;
+            if (descMov <= 0 || subBrutoMov <= 0) {
+                ingresoNetoLinea = redondear2(subLinea);
+            } else if (i === grupo.length - 1) {
+                ingresoNetoLinea = redondear2(montoNetoMov - acumuladoNeto);
+            } else {
+                const descLinea = redondear2(descMov * (subLinea / subBrutoMov));
+                ingresoNetoLinea = redondear2(subLinea - descLinea);
+                acumuladoNeto = redondear2(acumuladoNeto + ingresoNetoLinea);
+            }
+
+            const costoLinea = Number(lin.cantidad || 0) * Number(lin.costo_unitario || 0);
+            const gananciaLinea = redondear2(ingresoNetoLinea - costoLinea);
+
+            let reg = mapaProd.get(lin.producto_id);
+            if (!reg) {
+                reg = {
+                    id: lin.producto_id,
+                    nombre: `Producto #${lin.producto_id}`,
+                    categoria: '',
+                    unidades_vendidas: 0,
+                    ingresos_generados: 0,
+                    ganancia_generada: 0
+                };
+                mapaProd.set(lin.producto_id, reg);
+            }
+            reg.unidades_vendidas = Number((reg.unidades_vendidas + Number(lin.cantidad || 0)).toFixed(4));
+            reg.ingresos_generados = redondear2(reg.ingresos_generados + ingresoNetoLinea);
+            reg.ganancia_generada = redondear2(reg.ganancia_generada + gananciaLinea);
+        }
+    }
+
+    const rendimientoProductos = Array.from(mapaProd.values()).sort((a, b) => b.unidades_vendidas - a.unidades_vendidas);
+
     const ventasTotales = redondear2(kpiVentas.ventas_totales);
+    const subtotalBrutoVentas = redondear2(kpiVentas.subtotal_bruto_ventas || ventasTotales);
+    const descuentosTotales = redondear2(kpiVentas.descuentos_totales || 0);
+    const ventasFacturadas = redondear2(kpiVentas.ventas_facturadas || 0);
+    const ventasRecibo = redondear2(kpiVentas.ventas_recibo || 0);
     const costoTotalVentas = redondear2(kpiCostos.costo_total_ventas);
     const totalEgresos = redondear2(kpiEgresos.total_egresos);
+    const egresosFacturados = redondear2(kpiEgresos.egresos_facturados || 0);
     const totalReposiciones = redondear2(kpiReposiciones.total_reposiciones);
 
     const ticketPromedio = kpiVentas.cantidad_tickets > 0
@@ -2742,36 +3534,83 @@ async function obtenerEstadisticasCaja(cajaId) {
     const gananciaBruta = redondear2(ventasTotales - costoTotalVentas);
     const flujoNetoOperativo = redondear2(gananciaBruta - totalEgresos);
 
+    const debitoFiscalIva = redondear2(kpiVentas.debito_fiscal_iva);
+    const impuestoTransaccionesIt = redondear2(kpiVentas.impuesto_transacciones_it);
+    const creditoFiscalIvaEgresos = redondear2(kpiEgresos.credito_fiscal_iva_egresos);
+
     return {
+        subtotalBrutoVentas,
+        descuentosTotales,
         ventasTotales,
+        ventasFacturadas,
+        ventasRecibo,
         cantidadTickets: kpiVentas.cantidad_tickets,
         ticketPromedio: redondear2(ticketPromedio),
         costoTotalVentas,
         gananciaBruta,
         totalEgresos,
+        egresosFacturados,
         totalReposiciones,
         flujoNetoOperativo,
+        debitoFiscalIva,
+        impuestoTransaccionesIt,
+        creditoFiscalIvaEgresos,
+        ivaPorcentaje: ivaPorc,
+        itPorcentaje: itPorc,
+        itBase,
+        regimenTributario: config?.regimen_tributario || 'simplificado_control_interno',
         productosMasVendidos: rendimientoProductos.filter(p => p.unidades_vendidas > 0),
         productosSinRotacion: rendimientoProductos.filter(p => p.unidades_vendidas === 0)
     };
-} // <-- AQUÍ FALTABA CERRAR LA FUNCIÓN ANTES DE LA SECCIÓN 7
+}
 
 // ==========================================
-// 7. TENDENCIAS HORARIAS, MÉTODOS DE PAGO Y EXPORTACIÓN EXCEL (CSV)
+// 7. TENDENCIAS HORARIAS, MÉTODOS DE PAGO Y EXPORTACIONES CONTABLES (CSV / EXCEL)
 // ==========================================
 async function obtenerDesgloseMetodosPago(cajaId) {
-    const filas = await allQuery(
-        `SELECT metodo_pago, COUNT(id) as transacciones, COALESCE(SUM(monto), 0) as total
-         FROM movimientos
-         WHERE caja_id = ? AND tipo = 'ingreso' AND estado = 'completado'
-         GROUP BY metodo_pago`,
+    // Excluye estrictamente reposiciones de cambio y desglosa pagos mixtos en sus canales reales (efectivo vs qr)
+    const ventas = await allQuery(
+        `SELECT m.metodo_pago, m.monto, m.monto_efectivo, m.monto_qr
+         FROM movimientos m
+         WHERE m.caja_id = ?
+           AND m.tipo = 'ingreso'
+           AND m.estado = 'completado'
+           AND COALESCE(m.categoria_contable, 'venta') = 'venta'
+           AND EXISTS (SELECT 1 FROM detalle_movimientos d WHERE d.movimiento_id = m.id)`,
         [cajaId]
     );
 
-    const sumaTotal = filas.reduce((acc, f) => acc + f.total, 0);
+    const acumulador = {
+        efectivo: { metodoPago: 'efectivo', transacciones: 0, total: 0 },
+        qr: { metodoPago: 'qr', transacciones: 0, total: 0 }
+    };
 
-    return filas.map(f => ({
-        metodoPago: f.metodo_pago,
+    for (const v of ventas) {
+        if (v.metodo_pago === 'mixto') {
+            const ef = Number(v.monto_efectivo || 0);
+            const qr = Number(v.monto_qr || 0);
+            if (ef > 0) {
+                acumulador.efectivo.transacciones += 1;
+                acumulador.efectivo.total = redondear2(acumulador.efectivo.total + ef);
+            }
+            if (qr > 0) {
+                acumulador.qr.transacciones += 1;
+                acumulador.qr.total = redondear2(acumulador.qr.total + qr);
+            }
+        } else if (v.metodo_pago === 'qr') {
+            acumulador.qr.transacciones += 1;
+            acumulador.qr.total = redondear2(acumulador.qr.total + Number(v.monto || 0));
+        } else {
+            acumulador.efectivo.transacciones += 1;
+            acumulador.efectivo.total = redondear2(acumulador.efectivo.total + Number(v.monto || 0));
+        }
+    }
+
+    const filasActivas = Object.values(acumulador).filter(f => f.total > 0);
+    const sumaTotal = filasActivas.reduce((acc, f) => acc + f.total, 0);
+
+    return filasActivas.map(f => ({
+        metodoPago: f.metodoPago,
         transacciones: f.transacciones,
         montoTotal: redondear2(f.total),
         porcentaje: sumaTotal > 0 ? Number(((f.total / sumaTotal) * 100).toFixed(1)) : 0
@@ -2783,21 +3622,23 @@ async function obtenerTendenciasVentas() {
         `SELECT strftime('%H:00', fecha_hora, 'localtime') as hora,
                 COUNT(id) as cantidad_tickets,
                 ROUND(SUM(monto), 2) as total_vendido
-         FROM movimientos
-         WHERE tipo = 'ingreso' AND estado = 'completado'
-           AND date(fecha_hora, 'localtime') = date('now', 'localtime')
+         FROM movimientos m
+         WHERE m.tipo = 'ingreso' AND m.estado = 'completado'
+           AND COALESCE(m.categoria_contable, 'venta') = 'venta'
+           AND EXISTS (SELECT 1 FROM detalle_movimientos d WHERE d.movimiento_id = m.id)
+           AND date(m.fecha_hora, 'localtime') = date('now', 'localtime')
          GROUP BY hora
          ORDER BY hora ASC`
     );
 
     const comparativaSemanal = await allQuery(
-        `SELECT date(fecha_hora, 'localtime') as fecha,
-                COUNT(id) as cantidad_tickets,
-                ROUND(SUM(CASE WHEN tipo = 'ingreso' THEN monto ELSE 0 END), 2) as ingresos,
-                ROUND(SUM(CASE WHEN tipo = 'egreso' THEN monto ELSE 0 END), 2) as egresos
-         FROM movimientos
-         WHERE estado = 'completado'
-           AND date(fecha_hora, 'localtime') >= date('now', 'localtime', '-7 days')
+        `SELECT date(m.fecha_hora, 'localtime') as fecha,
+                COUNT(CASE WHEN m.tipo = 'ingreso' AND COALESCE(m.categoria_contable, 'venta') = 'venta' THEN m.id END) as cantidad_tickets,
+                ROUND(SUM(CASE WHEN m.tipo = 'ingreso' AND COALESCE(m.categoria_contable, 'venta') = 'venta' THEN m.monto ELSE 0 END), 2) as ingresos,
+                ROUND(SUM(CASE WHEN m.tipo = 'egreso' THEN m.monto ELSE 0 END), 2) as egresos
+         FROM movimientos m
+         WHERE m.estado = 'completado'
+           AND date(m.fecha_hora, 'localtime') >= date('now', 'localtime', '-7 days')
          GROUP BY fecha
          ORDER BY fecha ASC`
     );
@@ -2812,114 +3653,521 @@ function sanitizarTextoCSV(valor) {
     return `"${protegido.replace(/"/g, '""')}"`;
 }
 
-async function generarReporteCSV(cajaId = null) {
-    const filtroCaja = cajaId ? `WHERE m.caja_id = ?` : ``;
-    const params = cajaId ? [cajaId] : [];
+function construirClausulaFiltroMovimientos(cajaId = null, filtros = {}, aliasMov = 'm') {
+    const condiciones = [];
+    const params = [];
 
-    const filas = await allQuery(
-        `SELECT m.id, m.caja_id, cf.nombre as caja_nombre, m.fecha_hora, m.tipo, m.metodo_pago,
-                m.monto, m.monto_recibido, m.cambio, m.estado, m.descripcion
-         FROM movimientos m
-         LEFT JOIN cajas c ON m.caja_id = c.id
-         LEFT JOIN cajas_fisicas cf ON c.caja_fisica_id = cf.id
-         ${filtroCaja}
-         ORDER BY m.fecha_hora DESC`,
+    if (cajaId) {
+        condiciones.push(`${aliasMov}.caja_id = ?`);
+        params.push(Number(cajaId));
+    }
+    if (filtros?.desde && /^\d{4}-\d{2}-\d{2}$/.test(String(filtros.desde).trim())) {
+        condiciones.push(`date(${aliasMov}.fecha_hora, 'localtime') >= ?`);
+        params.push(String(filtros.desde).trim());
+    }
+    if (filtros?.hasta && /^\d{4}-\d{2}-\d{2}$/.test(String(filtros.hasta).trim())) {
+        condiciones.push(`date(${aliasMov}.fecha_hora, 'localtime') <= ?`);
+        params.push(String(filtros.hasta).trim());
+    }
+
+    return {
+        whereSql: condiciones.length > 0 ? `WHERE ${condiciones.join(' AND ')}` : '',
         params
-    );
-
-    const cabeceras = [
-        'ID_Movimiento', 'Nro_Turno', 'Caja_Estacion', 'Fecha_Hora', 'Tipo', 'Metodo_Pago',
-        'Monto_Bs', 'Recibido_Bs', 'Cambio_Bs', 'Estado', 'Descripcion'
-    ].join(';');
-
-    const lineas = filas.map(r => [
-        r.id,
-        r.caja_id,
-        sanitizarTextoCSV(r.caja_nombre || 'Caja Principal'),
-        r.fecha_hora,
-        r.tipo,
-        r.metodo_pago,
-        r.monto,
-        r.monto_recibido ?? 0,
-        r.cambio ?? 0,
-        r.estado,
-        sanitizarTextoCSV(r.descripcion || '')
-    ].join(';'));
-
-    return [cabeceras, ...lineas].join('\n');
+    };
 }
 
-async function generarReporteExcel(cajaId = null) {
-    const ExcelJS = require('exceljs');
-    const filtroCaja = cajaId ? `WHERE m.caja_id = ?` : ``;
-    const params = cajaId ? [cajaId] : [];
+async function generarReporteCSV(cajaId = null, filtros = {}) {
+    const { whereSql, params } = construirClausulaFiltroMovimientos(cajaId, filtros, 'm');
 
-    const movimientos = await allQuery(
-        `SELECT m.id, m.caja_id, cf.nombre as caja_nombre, datetime(m.fecha_hora, 'localtime') as fecha_hora,
-                COALESCE(u.nombre, '—') as operador, m.tipo, m.metodo_pago,
-                m.monto, m.monto_recibido, m.cambio, m.estado, m.descripcion
+    const filas = await allQuery(
+        `SELECT m.id,
+                m.caja_id,
+                cf.nombre as caja_nombre,
+                datetime(m.fecha_hora, 'localtime') as fecha_hora,
+                COALESCE(u.nombre, '—') as operador,
+                m.tipo,
+                COALESCE(m.categoria_contable, CASE WHEN m.tipo = 'egreso' THEN 'gasto_operativo' ELSE 'venta' END) as categoria_contable,
+                m.metodo_pago,
+                COALESCE(m.tipo_comprobante, 'recibo') as tipo_comprobante,
+                COALESCE(m.nro_factura, '') as nro_factura,
+                COALESCE(m.cliente_nit_ci, '') as cliente_nit_ci,
+                COALESCE(m.cliente_razon_social, '') as cliente_razon_social,
+                COALESCE(m.subtotal_bruto, m.monto) as subtotal_bruto,
+                COALESCE(m.descuento_total, 0) as descuento_total,
+                m.monto,
+                COALESCE(m.monto_efectivo, CASE WHEN m.metodo_pago = 'efectivo' THEN m.monto ELSE 0 END) as monto_efectivo,
+                COALESCE(m.monto_qr, CASE WHEN m.metodo_pago = 'qr' THEN m.monto ELSE 0 END) as monto_qr,
+                COALESCE(m.referencia_qr, '') as referencia_qr,
+                COALESCE(m.monto_recibido, 0) as monto_recibido,
+                COALESCE(m.cambio, 0) as cambio,
+                COALESCE((SELECT ROUND(SUM(d.cantidad * d.costo_unitario), 2) FROM detalle_movimientos d WHERE d.movimiento_id = m.id), 0) as costo_cmv,
+                m.estado,
+                COALESCE(ua.nombre, '') as anulado_por_nombre,
+                COALESCE(datetime(m.fecha_anulacion, 'localtime'), '') as fecha_anulacion,
+                COALESCE(m.motivo_anulacion, '') as motivo_anulacion,
+                m.descripcion
          FROM movimientos m
          LEFT JOIN cajas c ON m.caja_id = c.id
          LEFT JOIN cajas_fisicas cf ON c.caja_fisica_id = cf.id
          LEFT JOIN usuarios u ON m.usuario_id = u.id
-         ${filtroCaja}
-         ORDER BY m.fecha_hora DESC`,
+         LEFT JOIN usuarios ua ON m.anulado_por = ua.id
+         ${whereSql}
+         ORDER BY m.id DESC`,
         params
     );
 
+    const cabeceras = [
+        'ID_Movimiento', 'Nro_Turno', 'Caja_Estacion', 'Fecha_Hora', 'Operador',
+        'Tipo', 'Categoria_Contable', 'Metodo_Pago', 'Tipo_Comprobante', 'Nro_Factura',
+        'NIT_CI', 'Razon_Social', 'Subtotal_Bs', 'Descuento_Bs', 'Monto_Bs',
+        'Monto_Efectivo_Bs', 'Monto_QR_Bs', 'Referencia_QR',
+        'Recibido_Bs', 'Cambio_Bs', 'Costo_CMV_Bs', 'Utilidad_Bruta_Bs',
+        'Estado', 'Anulado_Por', 'Fecha_Anulacion', 'Motivo_Anulacion', 'Descripcion'
+    ].join(';');
+
+    const lineas = filas.map(r => {
+        const esVentaCompletada = r.tipo === 'ingreso' && r.categoria_contable === 'venta' && r.estado === 'completado';
+        const costoCmv = esVentaCompletada ? redondear2(r.costo_cmv) : 0;
+        const utilidadBruta = esVentaCompletada ? redondear2(Number(r.monto || 0) - costoCmv) : 0;
+
+        return [
+            r.id,
+            r.caja_id,
+            sanitizarTextoCSV(r.caja_nombre || 'Caja Principal'),
+            r.fecha_hora || '',
+            sanitizarTextoCSV(r.operador || '—'),
+            r.tipo,
+            r.categoria_contable,
+            r.metodo_pago,
+            r.tipo_comprobante,
+            sanitizarTextoCSV(r.nro_factura),
+            sanitizarTextoCSV(r.cliente_nit_ci),
+            sanitizarTextoCSV(r.cliente_razon_social),
+            Number(r.subtotal_bruto || 0).toFixed(2),
+            Number(r.descuento_total || 0).toFixed(2),
+            Number(r.monto || 0).toFixed(2),
+            Number(r.monto_efectivo || 0).toFixed(2),
+            Number(r.monto_qr || 0).toFixed(2),
+            sanitizarTextoCSV(r.referencia_qr),
+            Number(r.monto_recibido || 0).toFixed(2),
+            Number(r.cambio || 0).toFixed(2),
+            costoCmv.toFixed(2),
+            utilidadBruta.toFixed(2),
+            r.estado,
+            sanitizarTextoCSV(r.anulado_por_nombre),
+            r.fecha_anulacion,
+            sanitizarTextoCSV(r.motivo_anulacion),
+            sanitizarTextoCSV(r.descripcion || '')
+        ].join(';');
+    });
+
+    // BOM UTF-8 (\uFEFF) para que Microsoft Excel en español abra tildes y símbolos directamente
+    return '\uFEFF' + [cabeceras, ...lineas].join('\n');
+}
+
+async function generarReporteExcel(cajaId = null, filtros = {}) {
+    const ExcelJS = require('exceljs');
+    const negocio = await obtenerConfiguracionNegocio();
+    const ivaPorc = Number(negocio?.iva_porcentaje ?? 13);
+    const itPorc = Number(negocio?.it_porcentaje ?? 3);
+
+    const { whereSql: whereMov, params: paramsMov } = construirClausulaFiltroMovimientos(cajaId, filtros, 'm');
+
+    const movimientos = await allQuery(
+        `SELECT m.id,
+                m.caja_id,
+                cf.nombre as caja_nombre,
+                datetime(m.fecha_hora, 'localtime') as fecha_hora,
+                COALESCE(u.nombre, '—') as operador,
+                m.tipo,
+                COALESCE(m.categoria_contable, CASE WHEN m.tipo = 'egreso' THEN 'gasto_operativo' ELSE 'venta' END) as categoria_contable,
+                m.metodo_pago,
+                COALESCE(m.tipo_comprobante, 'recibo') as tipo_comprobante,
+                COALESCE(m.nro_factura, '') as nro_factura,
+                COALESCE(m.cliente_nit_ci, '') as cliente_nit_ci,
+                COALESCE(m.cliente_razon_social, '') as cliente_razon_social,
+                COALESCE(m.subtotal_bruto, m.monto) as subtotal_bruto,
+                COALESCE(m.descuento_total, 0) as descuento_total,
+                m.monto,
+                COALESCE(m.monto_efectivo, CASE WHEN m.metodo_pago = 'efectivo' THEN m.monto ELSE 0 END) as monto_efectivo,
+                COALESCE(m.monto_qr, CASE WHEN m.metodo_pago = 'qr' THEN m.monto ELSE 0 END) as monto_qr,
+                COALESCE(m.referencia_qr, '') as referencia_qr,
+                COALESCE(m.monto_recibido, 0) as monto_recibido,
+                COALESCE(m.cambio, 0) as cambio,
+                m.regimen_tributario,
+                COALESCE(m.iva_porcentaje, 0) as iva_porcentaje,
+                COALESCE(m.it_porcentaje, 0) as it_porcentaje,
+                m.iva_monto,
+                m.it_monto,
+                COALESCE((SELECT ROUND(SUM(d.cantidad * d.costo_unitario), 2) FROM detalle_movimientos d WHERE d.movimiento_id = m.id), 0) as costo_cmv,
+                m.estado,
+                COALESCE(ua.nombre, '') as anulado_por_nombre,
+                COALESCE(datetime(m.fecha_anulacion, 'localtime'), '') as fecha_anulacion,
+                COALESCE(m.motivo_anulacion, '') as motivo_anulacion,
+                m.descripcion
+         FROM movimientos m
+         LEFT JOIN cajas c ON m.caja_id = c.id
+         LEFT JOIN cajas_fisicas cf ON c.caja_fisica_id = cf.id
+         LEFT JOIN usuarios u ON m.usuario_id = u.id
+         LEFT JOIN usuarios ua ON m.anulado_por = ua.id
+         ${whereMov}
+         ORDER BY m.id DESC`,
+        paramsMov
+    );
+
+    const condCajas = [];
+    const paramsCajas = [];
+    if (cajaId) {
+        condCajas.push(`c.id = ?`);
+        paramsCajas.push(Number(cajaId));
+    }
+    if (filtros?.desde && /^\d{4}-\d{2}-\d{2}$/.test(String(filtros.desde).trim())) {
+        condCajas.push(`date(c.fecha_apertura, 'localtime') >= ?`);
+        paramsCajas.push(String(filtros.desde).trim());
+    }
+    if (filtros?.hasta && /^\d{4}-\d{2}-\d{2}$/.test(String(filtros.hasta).trim())) {
+        condCajas.push(`date(c.fecha_apertura, 'localtime') <= ?`);
+        paramsCajas.push(String(filtros.hasta).trim());
+    }
+    const whereCajas = condCajas.length > 0 ? `WHERE ${condCajas.join(' AND ')}` : '';
+
     const cajas = await allQuery(
-        `SELECT c.id, cf.nombre as caja_nombre, COALESCE(u.nombre, '—') as cajero,
+        `SELECT c.id,
+                cf.nombre as caja_nombre,
+                COALESCE(u.nombre, '—') as cajero,
                 datetime(c.fecha_apertura, 'localtime') as fecha_apertura,
                 datetime(c.fecha_cierre, 'localtime') as fecha_cierre,
-                c.estado, c.monto_inicial, c.efectivo_esperado, c.efectivo_real,
-                c.diferencia_efectivo, c.qr_esperado, c.veces_reabierta
+                c.estado,
+                c.monto_inicial,
+                c.efectivo_esperado,
+                c.efectivo_real,
+                c.diferencia_efectivo,
+                c.qr_esperado,
+                c.qr_real,
+                c.diferencia_qr,
+                c.veces_reabierta,
+                COALESCE(c.historial_reaperturas, '') as historial_reaperturas
          FROM cajas c
          LEFT JOIN cajas_fisicas cf ON c.caja_fisica_id = cf.id
          LEFT JOIN usuarios u ON c.usuario_id = u.id
-         ${cajaId ? 'WHERE c.id = ?' : ''}
+         ${whereCajas}
          ORDER BY c.id DESC`,
-        params
+        paramsCajas
+    );
+
+    const detallesVentas = await allQuery(
+        `SELECT d.id as detalle_id,
+                m.id as movimiento_id,
+                m.caja_id,
+                datetime(m.fecha_hora, 'localtime') as fecha_hora,
+                COALESCE(u.nombre, '—') as operador,
+                p.nombre as producto_nombre,
+                p.categoria as producto_categoria,
+                p.tipo_inventario,
+                d.cantidad,
+                d.precio_unitario,
+                d.costo_unitario,
+                d.subtotal,
+                ROUND(d.cantidad * d.costo_unitario, 2) as costo_total,
+                ROUND(d.subtotal - (d.cantidad * d.costo_unitario), 2) as utilidad_bruta,
+                m.metodo_pago,
+                m.estado,
+                COALESCE((
+                    SELECT GROUP_CONCAT(dmm.nombre || (CASE WHEN dmm.precio_adicional > 0 THEN ' (+Bs ' || dmm.precio_adicional || ')' ELSE '' END), ', ')
+                    FROM detalle_movimientos_modificadores dmm
+                    WHERE dmm.detalle_movimiento_id = d.id
+                ), '') as modificadores_aplicados
+         FROM detalle_movimientos d
+         INNER JOIN movimientos m ON d.movimiento_id = m.id
+         INNER JOIN productos p ON d.producto_id = p.id
+         LEFT JOIN usuarios u ON m.usuario_id = u.id
+         ${whereMov}
+         ORDER BY d.id DESC`,
+        paramsMov
+    );
+
+    const condInsumos = [`mi.tipo IN ('compra', 'merma')`];
+    const paramsIns = [];
+    const condDirectos = [`mpd.tipo IN ('compra', 'merma')`];
+    const paramsDir = [];
+    if (filtros?.desde && /^\d{4}-\d{2}-\d{2}$/.test(String(filtros.desde).trim())) {
+        condInsumos.push(`date(mi.fecha_hora, 'localtime') >= ?`);
+        paramsIns.push(String(filtros.desde).trim());
+        condDirectos.push(`date(mpd.fecha_hora, 'localtime') >= ?`);
+        paramsDir.push(String(filtros.desde).trim());
+    }
+    if (filtros?.hasta && /^\d{4}-\d{2}-\d{2}$/.test(String(filtros.hasta).trim())) {
+        condInsumos.push(`date(mi.fecha_hora, 'localtime') <= ?`);
+        paramsIns.push(String(filtros.hasta).trim());
+        condDirectos.push(`date(mpd.fecha_hora, 'localtime') <= ?`);
+        paramsDir.push(String(filtros.hasta).trim());
+    }
+
+    const comprasYMermasInsumos = await allQuery(
+        `SELECT * FROM (
+            SELECT 'INS-' || mi.id as id,
+                   'Insumo / Materia Prima' as origen,
+                   i.nombre as item_nombre,
+                   i.unidad_medida,
+                   mi.tipo,
+                   datetime(mi.fecha_hora, 'localtime') as fecha_hora,
+                   mi.fecha_hora as fecha_orden,
+                   mi.cantidad,
+                   mi.costo_unitario,
+                   ROUND(mi.cantidad * mi.costo_unitario, 2) as monto_total,
+                   COALESCE(mi.proveedor_nombre, '') as proveedor_nombre,
+                   COALESCE(mi.proveedor_nit, '') as proveedor_nit,
+                   COALESCE(mi.nro_factura_compra, '') as nro_factura_compra,
+                   COALESCE(mi.con_factura, 0) as con_factura,
+                   mi.motivo
+            FROM movimientos_insumos mi
+            INNER JOIN insumos i ON mi.insumo_id = i.id
+            WHERE ${condInsumos.join(' AND ')}
+            UNION ALL
+            SELECT 'PRD-' || mpd.id as id,
+                   'Producto Directo' as origen,
+                   p.nombre as item_nombre,
+                   COALESCE(p.unidad_medida, 'unidades') as unidad_medida,
+                   mpd.tipo,
+                   datetime(mpd.fecha_hora, 'localtime') as fecha_hora,
+                   mpd.fecha_hora as fecha_orden,
+                   mpd.cantidad,
+                   mpd.costo_unitario,
+                   ROUND(COALESCE(mpd.monto_total, mpd.cantidad * mpd.costo_unitario), 2) as monto_total,
+                   COALESCE(mpd.proveedor_nombre, '') as proveedor_nombre,
+                   COALESCE(mpd.proveedor_nit, '') as proveedor_nit,
+                   COALESCE(mpd.nro_factura_compra, '') as nro_factura_compra,
+                   COALESCE(mpd.con_factura, 0) as con_factura,
+                   mpd.motivo
+            FROM movimientos_productos_directos mpd
+            INNER JOIN productos p ON mpd.producto_id = p.id
+            WHERE ${condDirectos.join(' AND ')}
+         )
+         ORDER BY fecha_orden DESC`,
+        [...paramsIns, ...paramsDir]
+    );
+
+    const condKardexCrono = [];
+    const paramsKardexCrono = [];
+    if (cajaId) {
+        condKardexCrono.push(`(mpd.movimiento_id IS NULL OR m.caja_id = ?)`);
+        paramsKardexCrono.push(Number(cajaId));
+    }
+    if (filtros?.desde && /^\d{4}-\d{2}-\d{2}$/.test(String(filtros.desde).trim())) {
+        condKardexCrono.push(`date(mpd.fecha_hora, 'localtime') >= ?`);
+        paramsKardexCrono.push(String(filtros.desde).trim());
+    }
+    if (filtros?.hasta && /^\d{4}-\d{2}-\d{2}$/.test(String(filtros.hasta).trim())) {
+        condKardexCrono.push(`date(mpd.fecha_hora, 'localtime') <= ?`);
+        paramsKardexCrono.push(String(filtros.hasta).trim());
+    }
+    const whereKardexCrono = condKardexCrono.length > 0 ? `WHERE ${condKardexCrono.join(' AND ')}` : '';
+
+    const kardexCronologicoProductos = await allQuery(
+        `SELECT mpd.id,
+                mpd.producto_id,
+                p.nombre as producto_nombre,
+                COALESCE(p.unidad_medida, 'unidades') as unidad_medida,
+                mpd.movimiento_id,
+                COALESCE(u.nombre, 'Sistema') as operador,
+                mpd.tipo,
+                datetime(mpd.fecha_hora, 'localtime') as fecha_hora,
+                mpd.cantidad,
+                mpd.stock_resultante,
+                mpd.costo_unitario,
+                COALESCE(NULLIF(mpd.costo_promedio_resultante, 0), mpd.costo_unitario, p.costo, 0) as costo_promedio_resultante,
+                COALESCE(mpd.monto_total, ROUND(mpd.cantidad * mpd.costo_unitario, 2)) as monto_total,
+                COALESCE(mpd.proveedor_nombre, '') as proveedor_nombre,
+                COALESCE(mpd.nro_factura_compra, '') as nro_factura_compra,
+                mpd.motivo
+         FROM movimientos_productos_directos mpd
+         INNER JOIN productos p ON mpd.producto_id = p.id
+         LEFT JOIN usuarios u ON mpd.usuario_id = u.id
+         LEFT JOIN movimientos m ON mpd.movimiento_id = m.id
+         ${whereKardexCrono}
+         ORDER BY mpd.id ASC`,
+        paramsKardexCrono
+    );
+
+    const insumosKardex = await allQuery(
+        `SELECT i.id,
+                i.nombre,
+                'Insumo / Receta' as clase,
+                i.unidad_medida,
+                i.stock_actual,
+                i.costo_por_unidad,
+                ROUND(i.stock_actual * i.costo_por_unidad, 2) as valor_inventario,
+                COALESCE((SELECT SUM(cantidad) FROM movimientos_insumos mi WHERE mi.insumo_id = i.id AND mi.tipo = 'compra'), 0) as total_compras,
+                COALESCE((
+                    SELECT MAX(0, SUM(CASE WHEN mi.tipo = 'consumo_venta' THEN mi.cantidad WHEN mi.tipo = 'reingreso_anulacion' THEN -mi.cantidad ELSE 0 END))
+                    FROM movimientos_insumos mi WHERE mi.insumo_id = i.id
+                ), 0) as total_consumo_ventas,
+                COALESCE((SELECT SUM(cantidad) FROM movimientos_insumos mi WHERE mi.insumo_id = i.id AND mi.tipo = 'merma'), 0) as total_mermas
+         FROM insumos i
+         WHERE i.activo = 1
+         ORDER BY i.nombre ASC`
+    );
+
+    const productosDirectosKardex = await allQuery(
+        `SELECT p.id,
+                p.nombre,
+                'Producto Directo' as clase,
+                p.unidad_medida,
+                COALESCE(p.stock, 0) as stock_actual,
+                COALESCE(p.costo, 0) as costo_por_unidad,
+                ROUND(COALESCE(p.stock, 0) * COALESCE(p.costo, 0), 2) as valor_inventario,
+                COALESCE((SELECT SUM(cantidad) FROM movimientos_productos_directos mpd WHERE mpd.producto_id = p.id AND mpd.tipo IN ('inventario_inicial', 'compra')), 0) as total_compras,
+                COALESCE((
+                    SELECT MAX(0, SUM(CASE WHEN mpd.tipo = 'venta' THEN mpd.cantidad WHEN mpd.tipo = 'reingreso_anulacion' THEN -mpd.cantidad ELSE 0 END))
+                    FROM movimientos_productos_directos mpd WHERE mpd.producto_id = p.id
+                ), 0) as total_consumo_ventas,
+                COALESCE((SELECT SUM(cantidad) FROM movimientos_productos_directos mpd WHERE mpd.producto_id = p.id AND mpd.tipo = 'merma'), 0) as total_mermas
+         FROM productos p
+         WHERE p.activo = 1 AND p.tipo_inventario = 'directo'
+         ORDER BY p.nombre ASC`
     );
 
     const workbook = new ExcelJS.Workbook();
-    workbook.creator = 'Sistema POS Híbrido';
+    workbook.creator = 'Sistema POS & Control Contable Híbrido';
     workbook.created = new Date();
 
+    const estiloCabecera = (fila, colorHex = 'FF0F172A') => {
+        fila.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+        fila.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: colorHex } };
+        fila.alignment = { vertical: 'middle', horizontal: 'center' };
+    };
+
+    const estiloTotales = (fila) => {
+        fila.font = { bold: true, color: { argb: 'FF0F172A' } };
+        fila.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
+    };
+
+    // =========================================================================
+    // HOJA 1: MOVIMIENTOS Y LIBRO DE VENTAS / EGRESOS
+    // =========================================================================
     const hojaMov = workbook.addWorksheet('Movimientos');
     hojaMov.columns = [
         { header: 'ID', key: 'id', width: 10 },
-        { header: 'N° Turno', key: 'caja_id', width: 12 },
+        { header: 'N° Turno', key: 'caja_id', width: 11 },
         { header: 'Estación / Caja', key: 'caja_nombre', width: 20 },
         { header: 'Fecha y Hora', key: 'fecha_hora', width: 20 },
-        { header: 'Operador', key: 'operador', width: 18 },
-        { header: 'Tipo', key: 'tipo', width: 12 },
+        { header: 'Operador', key: 'operador', width: 16 },
+        { header: 'Tipo', key: 'tipo', width: 11 },
+        { header: 'Categoría Contable', key: 'categoria_contable', width: 18 },
         { header: 'Método Pago', key: 'metodo_pago', width: 14 },
-        { header: 'Monto (Bs)', key: 'monto', width: 14 },
+        { header: 'Comprobante', key: 'tipo_comprobante', width: 13 },
+        { header: 'N° Factura', key: 'nro_factura', width: 14 },
+        { header: 'NIT / CI', key: 'cliente_nit_ci', width: 15 },
+        { header: 'Razón Social / Proveedor', key: 'cliente_razon_social', width: 24 },
+        { header: 'Subtotal (Bs)', key: 'subtotal_bruto', width: 14 },
+        { header: 'Descuento (Bs)', key: 'descuento_total', width: 14 },
+        { header: 'Monto Total (Bs)', key: 'monto', width: 16 },
+        { header: 'Efectivo (Bs)', key: 'monto_efectivo', width: 14 },
+        { header: 'QR (Bs)', key: 'monto_qr', width: 14 },
+        { header: 'Referencia QR', key: 'referencia_qr', width: 16 },
         { header: 'Recibido (Bs)', key: 'monto_recibido', width: 14 },
-        { header: 'Cambio (Bs)', key: 'cambio', width: 14 },
+        { header: 'Cambio (Bs)', key: 'cambio', width: 13 },
+        { header: 'Costo CMV (Bs)', key: 'costo_cmv', width: 15 },
+        { header: 'Utilidad Bruta (Bs)', key: 'utilidad_bruta', width: 17 },
+        { header: 'IVA (Bs)', key: 'iva_monto', width: 13 },
         { header: 'Estado', key: 'estado', width: 13 },
+        { header: 'Anulado Por', key: 'anulado_por_nombre', width: 15 },
+        { header: 'Fecha Anulación', key: 'fecha_anulacion', width: 19 },
+        { header: 'Motivo Anulación', key: 'motivo_anulacion', width: 24 },
         { header: 'Descripción', key: 'descripcion', width: 34 }
     ];
-
-    const estiloCabecera = (fila) => {
-        fila.font = { bold: true, color: { argb: 'FFFFFFFF' } };
-        fila.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0F172A' } };
-        fila.alignment = { vertical: 'middle', horizontal: 'center' };
-    };
     estiloCabecera(hojaMov.getRow(1));
 
+    let sumSubtotalVentas = 0;
+    let sumDescuentoVentas = 0;
+    let sumMontoVentas = 0;
+    let sumEfectivoVentas = 0;
+    let sumQrVentas = 0;
+    let sumCostoVentas = 0;
+    let sumUtilidadVentas = 0;
+    let sumIvaVentas = 0;
+    let sumItVentas = 0;
+    let sumEgresos = 0;
+    let sumAportesCambio = 0;
+
     for (const m of movimientos) {
+        const esCompletado = m.estado === 'completado';
+        const esVenta = m.tipo === 'ingreso' && m.categoria_contable === 'venta';
+        const montoNum = Number(m.monto || 0);
+        const subtotalNum = Number(m.subtotal_bruto || montoNum);
+        const descNum = Number(m.descuento_total || 0);
+        const efNum = Number(m.monto_efectivo || 0);
+        const qrNum = Number(m.monto_qr || 0);
+        const cmvNum = (esCompletado && esVenta) ? redondear2(m.costo_cmv) : 0;
+        const utilNum = (esCompletado && esVenta) ? redondear2(montoNum - cmvNum) : 0;
+        const tieneSnapshot = m.regimen_tributario !== null && m.regimen_tributario !== undefined;
+        const ivaNum = esCompletado
+            ? (tieneSnapshot
+                ? redondear2(m.iva_monto || 0)
+                : (m.tipo_comprobante === 'factura' ? redondear2(montoNum * (ivaPorc / 100)) : 0))
+            : 0;
+        const itNum = (esCompletado && esVenta)
+            ? (tieneSnapshot
+                ? redondear2(m.it_monto || 0)
+                : (m.tipo_comprobante === 'factura' ? redondear2(montoNum * (itPorc / 100)) : 0))
+            : 0;
+
+        if (esCompletado) {
+            if (esVenta) {
+                sumSubtotalVentas = redondear2(sumSubtotalVentas + subtotalNum);
+                sumDescuentoVentas = redondear2(sumDescuentoVentas + descNum);
+                sumMontoVentas = redondear2(sumMontoVentas + montoNum);
+                sumEfectivoVentas = redondear2(sumEfectivoVentas + efNum);
+                sumQrVentas = redondear2(sumQrVentas + qrNum);
+                sumCostoVentas = redondear2(sumCostoVentas + cmvNum);
+                sumUtilidadVentas = redondear2(sumUtilidadVentas + utilNum);
+                sumIvaVentas = redondear2(sumIvaVentas + ivaNum);
+                sumItVentas = redondear2(sumItVentas + itNum);
+            } else if (m.categoria_contable === 'aporte_cambio') {
+                sumAportesCambio = redondear2(sumAportesCambio + montoNum);
+            } else if (m.tipo === 'egreso') {
+                sumEgresos = redondear2(sumEgresos + montoNum);
+            }
+        }
+
         hojaMov.addRow({
             ...m,
-            monto: Number(m.monto || 0),
+            subtotal_bruto: subtotalNum,
+            descuento_total: descNum,
+            monto: montoNum,
+            monto_efectivo: efNum,
+            monto_qr: qrNum,
             monto_recibido: Number(m.monto_recibido || 0),
-            cambio: Number(m.cambio || 0)
+            cambio: Number(m.cambio || 0),
+            costo_cmv: cmvNum,
+            utilidad_bruta: utilNum,
+            iva_monto: ivaNum
         });
     }
-    ['H', 'I', 'J'].forEach((col) => {
+
+    if (movimientos.length > 0) {
+        const filaTotMov = hojaMov.addRow({
+            id: 'TOTAL',
+            descripcion: `Ventas Completadas: Bs ${sumMontoVentas.toFixed(2)} | Aportes Cambio: Bs ${sumAportesCambio.toFixed(2)} | Egresos: Bs ${sumEgresos.toFixed(2)}`,
+            subtotal_bruto: sumSubtotalVentas,
+            descuento_total: sumDescuentoVentas,
+            monto: sumMontoVentas,
+            monto_efectivo: sumEfectivoVentas,
+            monto_qr: sumQrVentas,
+            costo_cmv: sumCostoVentas,
+            utilidad_bruta: sumUtilidadVentas,
+            iva_monto: sumIvaVentas
+        });
+        estiloTotales(filaTotMov);
+    }
+
+    ['M', 'N', 'O', 'P', 'Q', 'S', 'T', 'U', 'V', 'W'].forEach((col) => {
         hojaMov.getColumn(col).numFmt = '#,##0.00';
     });
 
+    // =========================================================================
+    // HOJA 2: ARQUEOS DE CAJA
+    // =========================================================================
     const hojaCajas = workbook.addWorksheet('Arqueos de Caja');
     hojaCajas.columns = [
         { header: 'N° Turno', key: 'id', width: 12 },
@@ -2931,9 +4179,12 @@ async function generarReporteExcel(cajaId = null) {
         { header: 'Monto Inicial (Bs)', key: 'monto_inicial', width: 18 },
         { header: 'Efectivo Esperado (Bs)', key: 'efectivo_esperado', width: 22 },
         { header: 'Efectivo Real (Bs)', key: 'efectivo_real', width: 18 },
-        { header: 'Diferencia (Bs)', key: 'diferencia_efectivo', width: 16 },
+        { header: 'Diferencia Efectivo (Bs)', key: 'diferencia_efectivo', width: 22 },
         { header: 'QR Esperado (Bs)', key: 'qr_esperado', width: 17 },
-        { header: 'Reaperturas', key: 'veces_reabierta', width: 13 }
+        { header: 'QR Real Conciliado (Bs)', key: 'qr_real', width: 22 },
+        { header: 'Diferencia QR (Bs)', key: 'diferencia_qr', width: 18 },
+        { header: 'Reaperturas', key: 'veces_reabierta', width: 13 },
+        { header: 'Historial Reaperturas', key: 'historial_reaperturas', width: 32 }
     ];
     estiloCabecera(hojaCajas.getRow(1));
 
@@ -2946,12 +4197,268 @@ async function generarReporteExcel(cajaId = null) {
             efectivo_real: c.efectivo_real !== null ? Number(c.efectivo_real) : null,
             diferencia_efectivo: c.diferencia_efectivo !== null ? Number(c.diferencia_efectivo) : null,
             qr_esperado: Number(c.qr_esperado || 0),
+            qr_real: c.qr_real !== null && c.qr_real !== undefined ? Number(c.qr_real) : null,
+            diferencia_qr: c.diferencia_qr !== null && c.diferencia_qr !== undefined ? Number(c.diferencia_qr) : null,
             veces_reabierta: Number(c.veces_reabierta || 0)
         });
     }
-    ['G', 'H', 'I', 'J', 'K'].forEach((col) => {
+    ['G', 'H', 'I', 'J', 'K', 'L', 'M'].forEach((col) => {
         hojaCajas.getColumn(col).numFmt = '#,##0.00';
     });
+
+    // =========================================================================
+    // HOJA 3: DETALLE DE VENTAS Y COSTO DE MERCADERÍA VENDIDA (CMV)
+    // =========================================================================
+    const hojaDet = workbook.addWorksheet('Detalle Ventas (CMV)');
+    hojaDet.columns = [
+        { header: 'ID Línea', key: 'detalle_id', width: 11 },
+        { header: 'Ticket #', key: 'movimiento_id', width: 11 },
+        { header: 'N° Turno', key: 'caja_id', width: 11 },
+        { header: 'Fecha y Hora', key: 'fecha_hora', width: 20 },
+        { header: 'Operador', key: 'operador', width: 16 },
+        { header: 'Producto / Servicio', key: 'producto_nombre', width: 28 },
+        { header: 'Categoría', key: 'producto_categoria', width: 22 },
+        { header: 'Modalidad Stock', key: 'tipo_inventario', width: 15 },
+        { header: 'Modificadores / Extras', key: 'modificadores_aplicados', width: 26 },
+        { header: 'Cantidad', key: 'cantidad', width: 12 },
+        { header: 'Precio Unit. (Bs)', key: 'precio_unitario', width: 16 },
+        { header: 'Costo Unit. CPP (Bs)', key: 'costo_unitario', width: 18 },
+        { header: 'Subtotal Venta (Bs)', key: 'subtotal', width: 18 },
+        { header: 'Costo Total CMV (Bs)', key: 'costo_total', width: 19 },
+        { header: 'Utilidad Bruta (Bs)', key: 'utilidad_bruta', width: 18 },
+        { header: 'Estado Ticket', key: 'estado', width: 14 }
+    ];
+    estiloCabecera(hojaDet.getRow(1), 'FF0369A1');
+
+    let totCantDet = 0;
+    let totSubDet = 0;
+    let totCmvDet = 0;
+    let totUtilDet = 0;
+
+    for (const d of detallesVentas) {
+        if (d.estado === 'completado') {
+            totCantDet = redondear2(totCantDet + Number(d.cantidad || 0));
+            totSubDet = redondear2(totSubDet + Number(d.subtotal || 0));
+            totCmvDet = redondear2(totCmvDet + Number(d.costo_total || 0));
+            totUtilDet = redondear2(totUtilDet + Number(d.utilidad_bruta || 0));
+        }
+        hojaDet.addRow({
+            ...d,
+            cantidad: Number(d.cantidad || 0),
+            precio_unitario: Number(d.precio_unitario || 0),
+            costo_unitario: Number(d.costo_unitario || 0),
+            subtotal: Number(d.subtotal || 0),
+            costo_total: Number(d.costo_total || 0),
+            utilidad_bruta: Number(d.utilidad_bruta || 0)
+        });
+    }
+
+    if (detallesVentas.length > 0) {
+        const filaTotDet = hojaDet.addRow({
+            detalle_id: 'TOTAL',
+            producto_nombre: 'TOTAL ÍTEMS COMPLETADOS',
+            cantidad: totCantDet,
+            subtotal: totSubDet,
+            costo_total: totCmvDet,
+            utilidad_bruta: totUtilDet
+        });
+        estiloTotales(filaTotDet);
+    }
+    ['J', 'K', 'L', 'M', 'N', 'O'].forEach((col) => {
+        hojaDet.getColumn(col).numFmt = '#,##0.00';
+    });
+
+    // =========================================================================
+    // HOJA 4: COMPRAS A PROVEEDORES Y MERMAS DE INVENTARIO (INSUMOS + DIRECTOS)
+    // =========================================================================
+    const hojaCompras = workbook.addWorksheet('Compras y Mermas');
+    hojaCompras.columns = [
+        { header: 'ID', key: 'id', width: 11 },
+        { header: 'Fecha y Hora', key: 'fecha_hora', width: 20 },
+        { header: 'Origen', key: 'origen', width: 22 },
+        { header: 'Tipo Movimiento', key: 'tipo', width: 16 },
+        { header: 'Insumo / Producto', key: 'item_nombre', width: 26 },
+        { header: 'Unidad', key: 'unidad_medida', width: 12 },
+        { header: 'Cantidad', key: 'cantidad', width: 13 },
+        { header: 'Costo Unit. (Bs)', key: 'costo_unitario', width: 16 },
+        { header: 'Monto Total (Bs)', key: 'monto_total', width: 16 },
+        { header: 'Proveedor / Distribuidora', key: 'proveedor_nombre', width: 24 },
+        { header: 'NIT Proveedor', key: 'proveedor_nit', width: 16 },
+        { header: 'N° Factura', key: 'nro_factura_compra', width: 15 },
+        { header: '¿Con Factura?', key: 'con_factura_txt', width: 14 },
+        { header: 'Crédito Fiscal IVA (Bs)', key: 'credito_fiscal', width: 20 },
+        { header: 'Motivo / Detalle', key: 'motivo', width: 32 }
+    ];
+    estiloCabecera(hojaCompras.getRow(1), 'FF15803D');
+
+    for (const cm of comprasYMermasInsumos) {
+        const montoTotal = Number(cm.monto_total || 0);
+        const tieneFac = Number(cm.con_factura) === 1;
+        const cfIva = (cm.tipo === 'compra' && tieneFac) ? redondear2(montoTotal * (ivaPorc / 100)) : 0;
+        hojaCompras.addRow({
+            ...cm,
+            cantidad: Number(cm.cantidad || 0),
+            costo_unitario: Number(cm.costo_unitario || 0),
+            monto_total: montoTotal,
+            con_factura_txt: tieneFac ? 'SÍ (FACTURA)' : 'NO (RECIBO/INTERNO)',
+            credito_fiscal: cfIva
+        });
+    }
+    ['G', 'H', 'I', 'N'].forEach((col) => {
+        hojaCompras.getColumn(col).numFmt = '#,##0.00';
+    });
+
+    // =========================================================================
+    // HOJA 5: INVENTARIO VALORADO Y RESUMEN KARDEX (NIC 2 - CPP)
+    // =========================================================================
+    const hojaKardex = workbook.addWorksheet('Inventario Kardex');
+    hojaKardex.columns = [
+        { header: 'ID', key: 'id', width: 10 },
+        { header: 'Clase', key: 'clase', width: 18 },
+        { header: 'Nombre Ítem', key: 'nombre', width: 28 },
+        { header: 'Unidad', key: 'unidad_medida', width: 12 },
+        { header: 'Total Entradas (Compras)', key: 'total_compras', width: 22 },
+        { header: 'Total Salidas (Ventas)', key: 'total_consumo_ventas', width: 20 },
+        { header: 'Total Mermas', key: 'total_mermas', width: 15 },
+        { header: 'Stock Actual Físico', key: 'stock_actual', width: 18 },
+        { header: 'Costo Unitario CPP (Bs)', key: 'costo_por_unidad', width: 21 },
+        { header: 'Valor Total Inventario (Bs)', key: 'valor_inventario', width: 24 }
+    ];
+    estiloCabecera(hojaKardex.getRow(1), 'FF4338CA');
+
+    let valorTotalInventario = 0;
+    for (const item of [...insumosKardex, ...productosDirectosKardex]) {
+        const val = Number(item.valor_inventario || 0);
+        valorTotalInventario = redondear2(valorTotalInventario + val);
+        hojaKardex.addRow({
+            ...item,
+            total_compras: Number(item.total_compras || 0),
+            total_consumo_ventas: Number(item.total_consumo_ventas || 0),
+            total_mermas: Number(item.total_mermas || 0),
+            stock_actual: Number(item.stock_actual || 0),
+            costo_por_unidad: Number(item.costo_por_unidad || 0),
+            valor_inventario: val
+        });
+    }
+    const filaTotKardex = hojaKardex.addRow({
+        id: 'TOTAL',
+        nombre: 'VALORIZACIÓN TOTAL DEL INVENTARIO ACTUAL (NIC 2)',
+        valor_inventario: valorTotalInventario
+    });
+    estiloTotales(filaTotKardex);
+    ['E', 'F', 'G', 'H', 'I', 'J'].forEach((col) => {
+        hojaKardex.getColumn(col).numFmt = '#,##0.00';
+    });
+
+    // =========================================================================
+    // HOJA 6: KARDEX PRODUCTOS (HISTORIAL CRONOLÓGICO CON SALDOS Y VALORIZACIÓN)
+    // =========================================================================
+    const hojaKardexProd = workbook.addWorksheet('Kardex Productos');
+    hojaKardexProd.columns = [
+        { header: 'ID Kardex', key: 'id', width: 11 },
+        { header: 'Fecha y Hora', key: 'fecha_hora', width: 20 },
+        { header: 'Producto Directo', key: 'producto_nombre', width: 28 },
+        { header: 'Unidad', key: 'unidad_medida', width: 11 },
+        { header: 'Tipo Movimiento', key: 'tipo', width: 18 },
+        { header: 'Ticket #', key: 'movimiento_id', width: 11 },
+        { header: 'Operador', key: 'operador', width: 15 },
+        { header: 'Entrada (+)', key: 'entrada', width: 14 },
+        { header: 'Salida (-)', key: 'salida', width: 14 },
+        { header: 'Saldo Físico', key: 'stock_resultante', width: 14 },
+        { header: 'Costo Unit. Mov (Bs)', key: 'costo_unitario', width: 19 },
+        { header: 'Importe Mov (Bs)', key: 'monto_total', width: 17 },
+        { header: 'CPP Resultante (Bs)', key: 'costo_promedio_resultante', width: 19 },
+        { header: 'Valor Saldo (Bs)', key: 'valor_saldo', width: 18 },
+        { header: 'Motivo / Respaldo', key: 'motivo', width: 34 }
+    ];
+    estiloCabecera(hojaKardexProd.getRow(1), 'FF6D28D9');
+
+    let totEntradasKardex = 0;
+    let totSalidasKardex = 0;
+    for (const kp of kardexCronologicoProductos) {
+        const cant = Number(kp.cantidad || 0);
+        const esEntrada = ['inventario_inicial', 'compra', 'reingreso_anulacion'].includes(kp.tipo)
+            || (kp.tipo === 'ajuste' && cant >= 0);
+        const entrada = esEntrada ? Math.abs(cant) : 0;
+        const salida = !esEntrada ? Math.abs(cant) : 0;
+        const saldo = Number(kp.stock_resultante || 0);
+        const cppRes = Number(kp.costo_promedio_resultante || kp.costo_unitario || 0);
+        const valorSaldo = redondear2(saldo * cppRes);
+
+        totEntradasKardex = redondear2(totEntradasKardex + entrada);
+        totSalidasKardex = redondear2(totSalidasKardex + salida);
+
+        hojaKardexProd.addRow({
+            id: kp.id,
+            fecha_hora: kp.fecha_hora,
+            producto_nombre: kp.producto_nombre,
+            unidad_medida: kp.unidad_medida,
+            tipo: kp.tipo,
+            movimiento_id: kp.movimiento_id || '—',
+            operador: kp.operador,
+            entrada,
+            salida,
+            stock_resultante: saldo,
+            costo_unitario: Number(kp.costo_unitario || 0),
+            monto_total: Number(kp.monto_total || 0),
+            costo_promedio_resultante: cppRes,
+            valor_saldo: valorSaldo,
+            motivo: kp.motivo || ''
+        });
+    }
+    if (kardexCronologicoProductos.length > 0) {
+        const filaTotKp = hojaKardexProd.addRow({
+            id: 'TOTAL',
+            producto_nombre: 'MOVIMIENTOS DEL PERIODO',
+            entrada: totEntradasKardex,
+            salida: totSalidasKardex
+        });
+        estiloTotales(filaTotKp);
+    }
+    ['H', 'I', 'J', 'K', 'L', 'M', 'N'].forEach((col) => {
+        hojaKardexProd.getColumn(col).numFmt = '#,##0.00';
+    });
+
+    // =========================================================================
+    // HOJA 7: RESUMEN CONTABLE Y ESTADO DE RESULTADOS
+    // =========================================================================
+    const hojaRes = workbook.addWorksheet('Resumen Contable');
+    hojaRes.columns = [
+        { header: 'Concepto / Indicador Contable', key: 'concepto', width: 44 },
+        { header: 'Importe (Bs) / Detalle', key: 'valor', width: 28 }
+    ];
+    estiloCabecera(hojaRes.getRow(1), 'FF0F172A');
+
+    const regimenTexto = negocio?.regimen_tributario === 'regimen_general'
+        ? `Régimen General (IVA ${ivaPorc}% / IT ${itPorc}%)`
+        : 'Control Interno / Régimen Simplificado (Sin IVA)';
+    const periodoTexto = cajaId
+        ? `Turno de Caja #${cajaId}`
+        : (filtros?.desde || filtros?.hasta ? `Desde ${filtros.desde || 'Inicio'} hasta ${filtros.hasta || 'Hoy'}` : 'Histórico Completo');
+
+    hojaRes.addRow({ concepto: 'Nombre del Establecimiento', valor: negocio?.nombre_negocio || 'Mi Negocio' });
+    hojaRes.addRow({ concepto: 'NIT del Establecimiento', valor: negocio?.nit_negocio || 'No registrado' });
+    hojaRes.addRow({ concepto: 'Régimen Configurado', valor: regimenTexto });
+    hojaRes.addRow({ concepto: 'Periodo / Alcance del Reporte', valor: periodoTexto });
+    hojaRes.addRow({ concepto: 'Fecha de Generación (Hora Local Bolivia)', valor: new Date().toLocaleString('es-BO') });
+    hojaRes.addRow({ concepto: '--- ESTADO DE RESULTADOS OPERATIVO ---', valor: '' });
+    hojaRes.addRow({ concepto: '(+) Ventas Brutas de Productos/Servicios', valor: sumSubtotalVentas });
+    hojaRes.addRow({ concepto: '(-) Descuentos Otorgados en Ventas', valor: sumDescuentoVentas });
+    hojaRes.addRow({ concepto: '(=) Ventas Netas Cobradas', valor: sumMontoVentas });
+    hojaRes.addRow({ concepto: '    • Cobrado en Efectivo Físico', valor: sumEfectivoVentas });
+    hojaRes.addRow({ concepto: '    • Cobrado por QR / Banco', valor: sumQrVentas });
+    hojaRes.addRow({ concepto: '(-) Costo de Mercadería Vendida (CMV - NIC 2 CPP)', valor: sumCostoVentas });
+    hojaRes.addRow({ concepto: '(=) UTILIDAD / GANANCIA BRUTA EN VENTAS', valor: sumUtilidadVentas });
+    hojaRes.addRow({ concepto: '(-) Gastos y Egresos Operativos de Caja', valor: sumEgresos });
+    hojaRes.addRow({ concepto: '(=) FLUJO NETO OPERATIVO DEL PERIODO', valor: redondear2(sumUtilidadVentas - sumEgresos) });
+    hojaRes.addRow({ concepto: '(i) Aportes de Cambio / Sencillo (No son ingreso de venta)', valor: sumAportesCambio });
+    hojaRes.addRow({ concepto: '(i) Valor Actual del Inventario en Almacén (NIC 2)', valor: valorTotalInventario });
+
+    if (negocio?.regimen_tributario === 'regimen_general' || sumIvaVentas > 0 || sumItVentas > 0) {
+        hojaRes.addRow({ concepto: '--- ESTIMACIÓN TRIBUTARIA (SEGÚN SNAPSHOT POR VENTA) ---', valor: '' });
+        hojaRes.addRow({ concepto: `Débito Fiscal IVA (según alícuota congelada en cada venta facturada)`, valor: sumIvaVentas });
+        hojaRes.addRow({ concepto: `Impuesto a las Transacciones IT (base: ${negocio?.it_base || 'todas_las_ventas'} - a confirmar con el contador)`, valor: sumItVentas });
+    }
 
     return await workbook.xlsx.writeBuffer();
 }
@@ -2963,11 +4470,13 @@ module.exports = {
     esRolAdministrativo,
     obtenerConfiguracionNegocio,
     guardarConfiguracionNegocio,
+    guardarConfiguracionContable,
     inicializarSistemaPrimeraVez,
     verificarUsuario,
     autenticarUsuarioPorId,
     obtenerUsuarioPorId,
     obtenerUsuarios,
+    actualizarPermisoFiscalUsuario,
     obtenerCajerosParaLogin,
     sistemaEstaInstalado,
     crearUsuario,
@@ -2985,11 +4494,14 @@ module.exports = {
     crearProductoConInsumos,
     crearProducto,
     registrarCompraProductoDirecto,
+    registrarMermaProductoDirecto,
+    verificarIntegridadKardexDirecto,
     obtenerProductos,
     obtenerCajasFisicas,
     crearCajaFisica,
     desactivarCajaFisica,
     reactivarCajaFisica,
+    actualizarPermisoFiscalCajaFisica,
     obtenerCajasAbiertas,
     obtenerCajaAbierta,
     obtenerHistorialCajas,

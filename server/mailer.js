@@ -360,6 +360,7 @@ module.exports = {
     obtenerConfiguracionEmail,
     estaEmailConfigurado,
     verificarEstadoEmail,
+    construirHtmlCierre,
     enviarNotificacionCierreCaja,
     enviarEmailPrueba
 };

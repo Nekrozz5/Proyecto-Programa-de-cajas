@@ -3,12 +3,15 @@ import {
     esRolAdministrativo,
     obtenerConfiguracionNegocio,
     guardarConfiguracionNegocio,
+    guardarConfiguracionContable,
     inicializarSistemaPrimeraVez,
     autenticarUsuarioPorId,
+    obtenerUsuarioPorId,
     obtenerCajasFisicas,
     crearCajaFisica,
     desactivarCajaFisica,
     reactivarCajaFisica,
+    actualizarPermisoFiscalCajaFisica,
     obtenerCajasAbiertas,
     obtenerCajaAbierta,
     obtenerHistorialCajas,
@@ -24,6 +27,7 @@ import {
     obtenerProductos,
     obtenerInsumos,
     obtenerUsuarios,
+    actualizarPermisoFiscalUsuario,
     obtenerCajerosParaLogin,
     sistemaEstaInstalado,
     obtenerPrediccionComprasInsumos,
@@ -36,6 +40,8 @@ import {
     crearProductoConInsumos,
     crearProducto,
     registrarCompraProductoDirecto,
+    registrarMermaProductoDirecto,
+    verificarIntegridadKardexDirecto,
     crearInsumo,
     registrarCompraInsumo,
     registrarMermaInsumo,
@@ -128,7 +134,11 @@ export async function GET(request) {
         // Listado completo de usuarios solo para roles administrativos; un cajero recibe la misma lista mínima pública
         const usuarios = esAdmin ? await obtenerUsuarios() : await obtenerCajerosParaLogin();
 
-        const [cajaUsuario, cajasAbiertas, cajasFisicas, historialCajas, productos, insumos, prediccionInsumos, gruposModificadores] = await Promise.all([
+        const { searchParams } = new URL(request.url);
+        const cajaAuditadaParam = searchParams.get('cajaAuditadaId');
+
+        const [usuarioFresco, cajaUsuario, cajasAbiertas, cajasFisicas, historialCajas, productos, insumos, prediccionInsumos, gruposModificadores] = await Promise.all([
+            obtenerUsuarioPorId(usuarioSesion.id),
             obtenerCajaAbierta(usuarioSesion.id),
             obtenerCajasAbiertas(),
             obtenerCajasFisicas(!esAdmin),
@@ -139,12 +149,17 @@ export async function GET(request) {
             obtenerGruposModificadores(!esAdmin)
         ]);
 
+        const usuarioSesionEnriquecido = usuarioFresco ? { ...usuarioSesion, ...usuarioFresco } : usuarioSesion;
+
         const cajaActiva = cajaUsuario || (cajasAbiertas.length > 0 ? cajasAbiertas[0] : null);
-        const cajaReferencia = cajaActiva || (historialCajas.length > 0 ? historialCajas[0] : null);
+        const cajaElegidaHist = cajaAuditadaParam
+            ? historialCajas.find((c) => Number(c.id) === Number(cajaAuditadaParam))
+            : null;
+        const cajaReferencia = cajaElegidaHist || cajaActiva || (historialCajas.length > 0 ? historialCajas[0] : null);
 
         if (!cajaReferencia) {
             return NextResponse.json({
-                usuarioSesion,
+                usuarioSesion: usuarioSesionEnriquecido,
                 sistemaInstalado,
                 configuracionNegocio,
                 cajasFisicas,
@@ -174,7 +189,7 @@ export async function GET(request) {
         const estadoEmail = esAdmin ? verificarEstadoEmail() : null;
 
         return NextResponse.json({
-            usuarioSesion,
+            usuarioSesion: usuarioSesionEnriquecido,
             sistemaInstalado,
             configuracionNegocio,
             cajasFisicas,
@@ -262,6 +277,24 @@ export async function POST(request) {
             return NextResponse.json({ ok: true });
         }
 
+        if (accion === 'actualizar_permiso_fiscal_caja') {
+            await exigirUsuarioSesion(request, ROLES_ADMIN);
+            await actualizarPermisoFiscalCajaFisica(Number(body.cajaFisicaId), Boolean(body.habilitado), usuarioSesion.id);
+            return NextResponse.json({ ok: true });
+        }
+
+        if (accion === 'actualizar_permiso_fiscal_usuario') {
+            await exigirUsuarioSesion(request, ROLES_ADMIN);
+            await actualizarPermisoFiscalUsuario(usuarioSesion.id, Number(body.usuarioObjetivoId), Boolean(body.habilitado));
+            return NextResponse.json({ ok: true });
+        }
+
+        if (accion === 'guardar_configuracion_contable') {
+            await exigirUsuarioSesion(request, ROLES_ADMIN);
+            const config = await guardarConfiguracionContable(usuarioSesion.id, body);
+            return NextResponse.json({ ok: true, configuracionNegocio: config });
+        }
+
         if (accion === 'reabrir') {
             await exigirUsuarioSesion(request, ROLES_ADMIN);
             await reabrirCajaConPermiso(usuarioSesion.id, Number(body.cajaId), body.motivo);
@@ -276,7 +309,19 @@ export async function POST(request) {
                 body.montoRecibido !== undefined && body.montoRecibido !== null && body.montoRecibido !== '' ? Number(body.montoRecibido) : null,
                 body.descripcion,
                 usuarioSesion.id,
-                body.cambioEntregado !== undefined && body.cambioEntregado !== null && body.cambioEntregado !== '' ? Number(body.cambioEntregado) : null
+                body.cambioEntregado !== undefined && body.cambioEntregado !== null && body.cambioEntregado !== '' ? Number(body.cambioEntregado) : null,
+                {
+                    montoEfectivo: body.montoEfectivo !== undefined && body.montoEfectivo !== null && body.montoEfectivo !== '' ? Number(body.montoEfectivo) : null,
+                    montoQr: body.montoQr !== undefined && body.montoQr !== null && body.montoQr !== '' ? Number(body.montoQr) : null,
+                    referenciaQr: body.referenciaQr || null,
+                    descuento: body.descuento !== undefined && body.descuento !== null && body.descuento !== '' ? Number(body.descuento) : 0,
+                    conFactura: Boolean(body.conFactura),
+                    tipoComprobante: body.tipoComprobante || (body.conFactura ? 'factura' : 'recibo'),
+                    nroFactura: body.nroFactura || null,
+                    cufAutorizacion: body.cufAutorizacion || null,
+                    clienteNitCi: body.clienteNitCi || null,
+                    clienteRazonSocial: body.clienteRazonSocial || null
+                }
             );
             return NextResponse.json({ ok: true, venta: resultado });
         }
@@ -287,7 +332,16 @@ export async function POST(request) {
                 body.monto,
                 body.descripcion,
                 body.metodoPago || 'efectivo',
-                usuarioSesion.id
+                usuarioSesion.id,
+                {
+                    categoriaContable: body.categoriaContable || 'gasto_operativo',
+                    conFactura: Boolean(body.conFactura),
+                    tipoComprobante: body.tipoComprobante || (body.conFactura ? 'factura' : 'recibo'),
+                    nroFactura: body.nroFactura || null,
+                    proveedorNit: body.proveedorNit || null,
+                    proveedorNombre: body.proveedorNombre || null,
+                    referenciaQr: body.referenciaQr || null
+                }
             );
             return NextResponse.json({ ok: true, movimientoId: id });
         }
@@ -303,7 +357,13 @@ export async function POST(request) {
         }
 
         if (accion === 'cerrar') {
-            const arqueo = await cerrarCaja(Number(body.cajaId), body.efectivoReal, usuarioSesion.id);
+            const arqueo = await cerrarCaja(
+                Number(body.cajaId),
+                body.efectivoReal,
+                usuarioSesion.id,
+                body.qrReal !== undefined && body.qrReal !== null && body.qrReal !== '' ? Number(body.qrReal) : null,
+                body.observacionesCierre || ''
+            );
             try {
                 const { enviarNotificacionCierreCaja } = require('../../../server/mailer');
                 enviarNotificacionCierreCaja(Number(body.cajaId)).catch((errEmail) => {
@@ -394,7 +454,14 @@ export async function POST(request) {
                 Number(body.productoId),
                 Number(body.cantidadComprada),
                 Number(body.costoTotalCompra),
-                body.fechaVencimiento || null
+                body.fechaVencimiento || null,
+                {
+                    proveedorNombre: body.proveedorNombre || body.distribuidora || null,
+                    proveedorNit: body.proveedorNit || null,
+                    nroFacturaCompra: body.nroFacturaCompra || null,
+                    conFactura: Boolean(body.conFactura),
+                    usuarioId: usuarioSesion.id
+                }
             );
             return NextResponse.json({ ok: true, compraProducto: res });
         }
@@ -421,7 +488,14 @@ export async function POST(request) {
                 Number(body.cantidadComprada),
                 Number(body.costoTotalCompra),
                 body.motivo,
-                body.distribuidora || null
+                body.distribuidora || null,
+                {
+                    proveedorNombre: body.distribuidora || body.proveedorNombre || null,
+                    proveedorNit: body.proveedorNit || null,
+                    nroFacturaCompra: body.nroFacturaCompra || null,
+                    conFactura: Boolean(body.conFactura),
+                    usuarioId: usuarioSesion.id
+                }
             );
             return NextResponse.json({ ok: true, compra: res });
         }
@@ -434,6 +508,23 @@ export async function POST(request) {
                 body.motivo
             );
             return NextResponse.json({ ok: true, merma: res });
+        }
+
+        if (accion === 'merma_producto_directo') {
+            await exigirUsuarioSesion(request, ROLES_ADMIN);
+            const res = await registrarMermaProductoDirecto(
+                Number(body.productoId),
+                Number(body.cantidadPerdida),
+                body.motivo,
+                usuarioSesion.id
+            );
+            return NextResponse.json({ ok: true, mermaProducto: res });
+        }
+
+        if (accion === 'verificar_integridad_kardex') {
+            await exigirUsuarioSesion(request, ROLES_ADMIN);
+            const res = await verificarIntegridadKardexDirecto();
+            return NextResponse.json({ ok: true, ...res });
         }
 
         if (accion === 'asignar_receta') {

@@ -31,18 +31,33 @@ export default function CajaPage() {
     // Estado para abrir caja
     const [montoInicial, setMontoInicial] = useState('100');
 
+    // Estado de configuración del negocio
+    const [configuracionNegocio, setConfiguracionNegocio] = useState(null);
+
     // Estado del carrito y cobro
     const [carrito, setCarrito] = useState([]);
     const [metodoPago, setMetodoPago] = useState('efectivo');
+    const [montoMixtoEfectivo, setMontoMixtoEfectivo] = useState('');
+    const [montoMixtoQr, setMontoMixtoQr] = useState('');
+    const [referenciaQr, setReferenciaQr] = useState('');
     const [montoRecibido, setMontoRecibido] = useState('');
     const [cambioManual, setCambioManual] = useState('');
     const [descripcionVenta, setDescripcionVenta] = useState('Venta en mostrador');
+    const [conFacturaVenta, setConFacturaVenta] = useState(false);
+    const [nroFacturaVenta, setNroFacturaVenta] = useState('');
+    const [nitClienteVenta, setNitClienteVenta] = useState('');
+    const [razonSocialVenta, setRazonSocialVenta] = useState('');
     const [ultimoTicket, setUltimoTicket] = useState(null);
 
     // Estado para egresos
     const [montoEgreso, setMontoEgreso] = useState('');
     const [motivoEgreso, setMotivoEgreso] = useState('');
     const [metodoEgreso, setMetodoEgreso] = useState('efectivo');
+    const [categoriaEgreso, setCategoriaEgreso] = useState('gasto_operativo');
+    const [tipoComprobanteEgreso, setTipoComprobanteEgreso] = useState('recibo');
+    const [nroFacturaEgreso, setNroFacturaEgreso] = useState('');
+    const [nitProveedorEgreso, setNitProveedorEgreso] = useState('');
+    const [nombreProveedorEgreso, setNombreProveedorEgreso] = useState('');
 
     // Estado para inyección / reposición de efectivo (cambio / sencillo)
     const [montoIngresoEfectivo, setMontoIngresoEfectivo] = useState('');
@@ -72,6 +87,7 @@ export default function CajaPage() {
                 return;
             }
 
+            setConfiguracionNegocio(data.configuracionNegocio);
             setCajaAbierta(data.cajaAbierta);
             setCajasFisicas(data.cajasFisicas || []);
             setHistorialCajas(data.historialCajas || []);
@@ -471,11 +487,26 @@ export default function CajaPage() {
 
     const hayCantidadInvalida = carrito.some((i) => !i.cantidad || Number(i.cantidad) <= 0);
 
+    const montoEfectivoRequerido = metodoPago === 'mixto'
+        ? (montoMixtoEfectivo !== '' ? Number(montoMixtoEfectivo) : 0)
+        : totalCarrito;
+    const montoQrRequerido = metodoPago === 'mixto'
+        ? (montoMixtoQr !== '' ? Number(montoMixtoQr) : 0)
+        : totalCarrito;
+
+    const mixtoDescuadrado = metodoPago === 'mixto' && (
+        montoEfectivoRequerido <= 0 ||
+        montoQrRequerido <= 0 ||
+        Math.abs((montoEfectivoRequerido + montoQrRequerido) - totalCarrito) > 0.01
+    );
+
     const montoRecibidoNum = montoRecibido !== '' ? Number(montoRecibido) : 0;
-    const faltaDineroRecibido = metodoPago === 'efectivo' && montoRecibido !== '' && montoRecibidoNum < totalCarrito;
+    const faltaDineroRecibido = (metodoPago === 'efectivo' || metodoPago === 'mixto')
+        && montoRecibido !== ''
+        && montoRecibidoNum < montoEfectivoRequerido;
     const cambioCalculadoAuto =
-        metodoPago === 'efectivo' && montoRecibido !== '' && montoRecibidoNum >= totalCarrito
-            ? Number((montoRecibidoNum - totalCarrito).toFixed(2))
+        (metodoPago === 'efectivo' || metodoPago === 'mixto') && montoRecibido !== '' && montoRecibidoNum >= montoEfectivoRequerido
+            ? Number((montoRecibidoNum - montoEfectivoRequerido).toFixed(2))
             : 0;
     const cambioQueSaleDeCaja =
         cambioManual !== '' ? Number(cambioManual) : cambioCalculadoAuto;
@@ -484,20 +515,36 @@ export default function CajaPage() {
     useEffect(() => {
         if (montoRecibido !== '') {
             const mNum = Number(montoRecibido);
-            if (mNum >= totalCarrito) {
-                setCambioManual(String(Number((mNum - totalCarrito).toFixed(2))));
+            if (mNum >= montoEfectivoRequerido) {
+                setCambioManual(String(Number((mNum - montoEfectivoRequerido).toFixed(2))));
             } else {
                 setCambioManual('');
             }
         }
-    }, [totalCarrito, montoRecibido]);
+    }, [totalCarrito, montoRecibido, montoEfectivoRequerido]);
 
     function handleChangeMontoRecibido(valor) {
         setMontoRecibido(valor);
-        if (valor !== '' && Number(valor) >= totalCarrito) {
-            setCambioManual(String(Number((Number(valor) - totalCarrito).toFixed(2))));
+        if (valor !== '' && Number(valor) >= montoEfectivoRequerido) {
+            setCambioManual(String(Number((Number(valor) - montoEfectivoRequerido).toFixed(2))));
         } else if (valor === '') {
             setCambioManual('');
+        }
+    }
+
+    function handleChangeMixtoEfectivo(valor) {
+        setMontoMixtoEfectivo(valor);
+        const num = Number(valor);
+        if (valor !== '' && !isNaN(num) && num >= 0 && num <= totalCarrito) {
+            setMontoMixtoQr(String(Number((totalCarrito - num).toFixed(2))));
+        }
+    }
+
+    function handleChangeMixtoQr(valor) {
+        setMontoMixtoQr(valor);
+        const num = Number(valor);
+        if (valor !== '' && !isNaN(num) && num >= 0 && num <= totalCarrito) {
+            setMontoMixtoEfectivo(String(Number((totalCarrito - num).toFixed(2))));
         }
     }
 
@@ -607,6 +654,10 @@ export default function CajaPage() {
             setError(`El producto "${itemInvalido.nombre}" no tiene una cantidad válida. Ingresa un número mayor a 0 o elimínalo del pedido.`);
             return;
         }
+        if (metodoPago === 'mixto' && mixtoDescuadrado) {
+            setError(`En pago mixto, la suma de Efectivo (Bs ${montoEfectivoRequerido.toFixed(2)}) + QR (Bs ${montoQrRequerido.toFixed(2)}) debe ser igual al total a cobrar (Bs ${totalCarrito.toFixed(2)}).`);
+            return;
+        }
         try {
             const res = await fetch('/api/caja', {
                 method: 'POST',
@@ -620,8 +671,16 @@ export default function CajaPage() {
                         modificadores: (i.modificadores || []).map((m) => m.id)
                     })),
                     metodoPago,
-                    montoRecibido: metodoPago === 'efectivo' && montoRecibido !== '' ? Number(montoRecibido) : null,
-                    cambioEntregado: metodoPago === 'efectivo' ? Number(cambioQueSaleDeCaja) : 0,
+                    montoEfectivo: metodoPago === 'mixto' ? Number(montoEfectivoRequerido) : (metodoPago === 'efectivo' ? totalCarrito : 0),
+                    montoQr: metodoPago === 'mixto' ? Number(montoQrRequerido) : (metodoPago === 'qr' ? totalCarrito : 0),
+                    referenciaQr: (metodoPago === 'qr' || metodoPago === 'mixto') && referenciaQr.trim() !== '' ? referenciaQr.trim() : null,
+                    montoRecibido: (metodoPago === 'efectivo' || metodoPago === 'mixto') && montoRecibido !== '' ? Number(montoRecibido) : null,
+                    cambioEntregado: (metodoPago === 'efectivo' || metodoPago === 'mixto') ? Number(cambioQueSaleDeCaja) : 0,
+                    conFactura: conFacturaVenta,
+                    tipoComprobante: conFacturaVenta ? 'factura' : 'recibo',
+                    nroFactura: conFacturaVenta && nroFacturaVenta.trim() !== '' ? nroFacturaVenta.trim() : null,
+                    clienteNitCi: conFacturaVenta && nitClienteVenta.trim() !== '' ? nitClienteVenta.trim() : null,
+                    clienteRazonSocial: conFacturaVenta && razonSocialVenta.trim() !== '' ? razonSocialVenta.trim() : null,
                     descripcion: `${descripcionVenta} (Operador: ${usuarioActual.nombre})`
                 })
             });
@@ -632,6 +691,13 @@ export default function CajaPage() {
             setCarrito([]);
             setMontoRecibido('');
             setCambioManual('');
+            setMontoMixtoEfectivo('');
+            setMontoMixtoQr('');
+            setReferenciaQr('');
+            setConFacturaVenta(false);
+            setNroFacturaVenta('');
+            setNitClienteVenta('');
+            setRazonSocialVenta('');
             setDescripcionVenta('Venta en mostrador');
             setCategoriasSeleccionadas([]);
             setMensaje(`Venta #${data.venta.movimientoId} registrada. Cambio entregado de caja: Bs ${data.venta.cambio.toFixed(2)}`);
@@ -653,7 +719,13 @@ export default function CajaPage() {
                     cajaId: cajaAbierta.id,
                     monto: Number(montoEgreso),
                     descripcion: `${motivoEgreso} (Por: ${usuarioActual.nombre})`,
-                    metodoPago: usuarioActual.rol === 'user' ? 'efectivo' : metodoEgreso
+                    metodoPago: usuarioActual.rol === 'user' ? 'efectivo' : metodoEgreso,
+                    categoriaContable: categoriaEgreso,
+                    tipoComprobante: tipoComprobanteEgreso,
+                    conFactura: tipoComprobanteEgreso === 'factura',
+                    nroFactura: tipoComprobanteEgreso === 'factura' && nroFacturaEgreso.trim() !== '' ? nroFacturaEgreso.trim() : null,
+                    proveedorNit: tipoComprobanteEgreso === 'factura' && nitProveedorEgreso.trim() !== '' ? nitProveedorEgreso.trim() : null,
+                    proveedorNombre: nombreProveedorEgreso.trim() !== '' ? nombreProveedorEgreso.trim() : null
                 })
             });
             const data = await res.json();
@@ -661,6 +733,10 @@ export default function CajaPage() {
 
             setMontoEgreso('');
             setMotivoEgreso('');
+            setNroFacturaEgreso('');
+            setNitProveedorEgreso('');
+            setNombreProveedorEgreso('');
+            setTipoComprobanteEgreso('recibo');
             setMensaje(`Egreso #${data.movimientoId} registrado por ${usuarioActual.nombre}.`);
             await cargarDatos();
         } catch (err) {
@@ -1270,15 +1346,15 @@ export default function CajaPage() {
                                         </div>
 
                                         <div style={{
-                                            background: metodoPago === 'efectivo' ? (faltaDineroRecibido ? '#fef2f2' : '#f0fdf4') : '#f8fafc',
-                                            border: `2px solid ${metodoPago === 'efectivo' ? (faltaDineroRecibido ? '#ef4444' : '#22c55e') : '#cbd5e1'}`,
+                                            background: (metodoPago === 'efectivo' || metodoPago === 'mixto') ? (faltaDineroRecibido ? '#fef2f2' : '#f0fdf4') : '#f8fafc',
+                                            border: `2px solid ${(metodoPago === 'efectivo' || metodoPago === 'mixto') ? (faltaDineroRecibido ? '#ef4444' : '#22c55e') : '#cbd5e1'}`,
                                             borderRadius: '8px',
                                             padding: '0.75rem'
                                         }}>
                                             <div style={{ fontSize: '0.78rem', color: faltaDineroRecibido ? '#b91c1c' : '#15803d', fontWeight: 'bold', textTransform: 'uppercase' }}>
-                                                {metodoPago === 'efectivo' ? 'Cambio que Sale de Caja (Bs)' : 'Pago QR (Sin Cambio)'}
+                                                {(metodoPago === 'efectivo' || metodoPago === 'mixto') ? 'Cambio que Sale de Caja (Bs)' : 'Pago QR (Sin Cambio)'}
                                             </div>
-                                            {metodoPago === 'efectivo' ? (
+                                            {(metodoPago === 'efectivo' || metodoPago === 'mixto') ? (
                                                 <input
                                                     type="number"
                                                     step="0.01"
@@ -1312,31 +1388,107 @@ export default function CajaPage() {
                                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.6rem' }}>
                                             <label style={{ fontSize: '0.88rem', fontWeight: 'bold' }}>
                                                 Método de Pago:
-                                                <select value={metodoPago} onChange={(e) => setMetodoPago(e.target.value)} style={inputStyle}>
+                                                <select
+                                                    value={metodoPago}
+                                                    onChange={(e) => {
+                                                        const nuevoMetodo = e.target.value;
+                                                        setMetodoPago(nuevoMetodo);
+                                                        if (nuevoMetodo === 'mixto' && totalCarrito > 0) {
+                                                            const mitadEf = Number((totalCarrito / 2).toFixed(2));
+                                                            const mitadQr = Number((totalCarrito - mitadEf).toFixed(2));
+                                                            setMontoMixtoEfectivo(String(mitadEf));
+                                                            setMontoMixtoQr(String(mitadQr));
+                                                        }
+                                                    }}
+                                                    style={inputStyle}
+                                                >
                                                     <option value="efectivo">💵 Efectivo Físico</option>
                                                     <option value="qr">📱 Pago por QR</option>
+                                                    <option value="mixto">🔀 Pago Mixto (Efectivo + QR)</option>
                                                 </select>
                                             </label>
 
-                                            {metodoPago === 'efectivo' && (
+                                            {(metodoPago === 'efectivo' || metodoPago === 'mixto') && (
                                                 <label style={{ fontSize: '0.88rem', fontWeight: 'bold' }}>
-                                                    Billete Recibido (Opcional Bs):
+                                                    Billete Recibido Efectivo (Opcional):
                                                     <input
                                                         type="number"
                                                         step="0.01"
-                                                        placeholder={`Ej. ${totalCarrito.toFixed(2)}`}
+                                                        placeholder={`Ej. ${montoEfectivoRequerido.toFixed(2)}`}
                                                         value={montoRecibido}
                                                         onChange={(e) => handleChangeMontoRecibido(e.target.value)}
                                                         style={{ ...inputStyle, fontWeight: 'bold', borderColor: '#0070f3' }}
                                                     />
                                                 </label>
                                             )}
+
+                                            {metodoPago === 'qr' && (
+                                                <label style={{ fontSize: '0.88rem', fontWeight: 'bold' }}>
+                                                    N° Ref. / Comprobante QR (Opcional):
+                                                    <input
+                                                        type="text"
+                                                        placeholder="Ej. 849201"
+                                                        value={referenciaQr}
+                                                        onChange={(e) => setReferenciaQr(e.target.value)}
+                                                        style={inputStyle}
+                                                    />
+                                                </label>
+                                            )}
                                         </div>
 
+                                        {metodoPago === 'mixto' && (
+                                            <div style={{ background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '8px', padding: '0.7rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                                                <div style={{ fontSize: '0.8rem', fontWeight: 'bold', color: '#0f172a' }}>
+                                                    🔀 Desglose de Pago Mixto (Total: Bs {totalCarrito.toFixed(2)})
+                                                </div>
+                                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.6rem' }}>
+                                                    <label style={{ fontSize: '0.82rem', fontWeight: 600 }}>
+                                                        💵 Parte en Efectivo (Bs):
+                                                        <input
+                                                            type="number"
+                                                            step="0.01"
+                                                            min="0.01"
+                                                            required
+                                                            value={montoMixtoEfectivo}
+                                                            onChange={(e) => handleChangeMixtoEfectivo(e.target.value)}
+                                                            style={{ ...inputStyle, borderColor: '#16a34a', fontWeight: 'bold' }}
+                                                        />
+                                                    </label>
+                                                    <label style={{ fontSize: '0.82rem', fontWeight: 600 }}>
+                                                        📱 Parte por QR (Bs):
+                                                        <input
+                                                            type="number"
+                                                            step="0.01"
+                                                            min="0.01"
+                                                            required
+                                                            value={montoMixtoQr}
+                                                            onChange={(e) => handleChangeMixtoQr(e.target.value)}
+                                                            style={{ ...inputStyle, borderColor: '#0284c7', fontWeight: 'bold' }}
+                                                        />
+                                                    </label>
+                                                </div>
+                                                <label style={{ fontSize: '0.8rem' }}>
+                                                    N° Ref. / Comprobante QR (Opcional):
+                                                    <input
+                                                        type="text"
+                                                        placeholder="Código de transacción bancaria QR..."
+                                                        value={referenciaQr}
+                                                        onChange={(e) => setReferenciaQr(e.target.value)}
+                                                        style={inputStyle}
+                                                    />
+                                                </label>
+                                                {mixtoDescuadrado && totalCarrito > 0 && (
+                                                    <div style={{ fontSize: '0.78rem', color: '#b91c1c', fontWeight: 'bold' }}>
+                                                        ⚠️ Efectivo + QR suma Bs {(montoEfectivoRequerido + montoQrRequerido).toFixed(2)} (debe sumar Bs {totalCarrito.toFixed(2)}).
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
+
                                         {/* Botones rápidos de billetes en efectivo */}
-                                        {metodoPago === 'efectivo' && totalCarrito > 0 && (
+                                        {(metodoPago === 'efectivo' || metodoPago === 'mixto') && montoEfectivoRequerido > 0 && (
                                             <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
-                                                <button type="button" onClick={() => handleChangeMontoRecibido(String(totalCarrito))} style={btnBillete}>Exacto</button>
+                                                <button type="button" onClick={() => handleChangeMontoRecibido(String(montoEfectivoRequerido))} style={btnBillete}>Exacto</button>
                                                 {[10, 20, 50, 100, 200].map((billete) => (
                                                     <button
                                                         key={billete}
@@ -1350,14 +1502,55 @@ export default function CajaPage() {
                                             </div>
                                         )}
 
+                                        {/* Bloque modular de Factura / Datos Fiscales del Cliente (solo visible en Régimen General con facturación habilitada) */}
+                                        {configuracionNegocio?.regimen_tributario === 'regimen_general' &&
+                                            (Number(configuracionNegocio?.emite_factura) === 1 ||
+                                                (Number(usuarioActual?.puede_registrar_respaldo_fiscal ?? 1) === 1 && Number(cajaAbierta?.habilita_respaldo_fiscal ?? 1) === 1)) && (
+                                            <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '0.55rem 0.7rem' }}>
+                                                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.84rem', fontWeight: 600, cursor: 'pointer', color: '#1e293b' }}>
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={conFacturaVenta}
+                                                        onChange={(e) => setConFacturaVenta(e.target.checked)}
+                                                    />
+                                                    🧾 Registrar con Factura / Datos Fiscales del Cliente
+                                                </label>
+                                                {conFacturaVenta && (
+                                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', marginTop: '0.5rem' }}>
+                                                        <input
+                                                            type="text"
+                                                            placeholder="NIT / CI del cliente"
+                                                            value={nitClienteVenta}
+                                                            onChange={(e) => setNitClienteVenta(e.target.value)}
+                                                            style={{ ...inputStyle, marginTop: 0, fontSize: '0.82rem', padding: '0.4rem' }}
+                                                        />
+                                                        <input
+                                                            type="text"
+                                                            placeholder="N° Factura (ej. 104)"
+                                                            value={nroFacturaVenta}
+                                                            onChange={(e) => setNroFacturaVenta(e.target.value)}
+                                                            style={{ ...inputStyle, marginTop: 0, fontSize: '0.82rem', padding: '0.4rem' }}
+                                                        />
+                                                        <input
+                                                            type="text"
+                                                            placeholder="Nombre / Razón Social del cliente"
+                                                            value={razonSocialVenta}
+                                                            onChange={(e) => setRazonSocialVenta(e.target.value)}
+                                                            style={{ ...inputStyle, marginTop: 0, fontSize: '0.82rem', padding: '0.4rem', gridColumn: '1 / -1' }}
+                                                        />
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
+
                                         <button
                                             type="submit"
-                                            disabled={carrito.length === 0 || faltaDineroRecibido || hayCantidadInvalida}
+                                            disabled={carrito.length === 0 || faltaDineroRecibido || hayCantidadInvalida || mixtoDescuadrado}
                                             style={{
                                                 ...btnPrimario,
                                                 fontSize: '1rem',
-                                                opacity: (carrito.length === 0 || faltaDineroRecibido || hayCantidadInvalida) ? 0.6 : 1,
-                                                cursor: (carrito.length === 0 || faltaDineroRecibido || hayCantidadInvalida) ? 'not-allowed' : 'pointer'
+                                                opacity: (carrito.length === 0 || faltaDineroRecibido || hayCantidadInvalida || mixtoDescuadrado) ? 0.6 : 1,
+                                                cursor: (carrito.length === 0 || faltaDineroRecibido || hayCantidadInvalida || mixtoDescuadrado) ? 'not-allowed' : 'pointer'
                                             }}
                                         >
                                             Confirmar Cobro ({metodoPago.toUpperCase()})
@@ -1599,6 +1792,57 @@ export default function CajaPage() {
                                                 <option value="qr">Transferencia / QR (Solo Admin)</option>
                                             </select>
                                         </label>
+                                    )}
+                                    <label>
+                                        Categoría Contable de la Salida:
+                                        <select value={categoriaEgreso} onChange={(e) => setCategoriaEgreso(e.target.value)} style={inputStyle}>
+                                            <option value="gasto_operativo">🧹 Gasto Operativo Menor (Hielo, limpieza, transporte...)</option>
+                                            <option value="compra_insumo">🧱 Compra Urgente de Insumo / Mercadería</option>
+                                            <option value="pago_proveedor">🚚 Pago a Proveedor / Distribuidora</option>
+                                            <option value="retiro_dueno">👤 Retiro Personal del Dueño / Socio</option>
+                                            <option value="otro">📋 Otro Egreso Autorizado</option>
+                                        </select>
+                                    </label>
+                                    {(Number(configuracionNegocio?.usa_respaldo_compras_egresos ?? 1) === 1 &&
+                                        Number(usuarioActual?.puede_registrar_respaldo_fiscal ?? 1) === 1 &&
+                                        Number(cajaAbierta?.habilita_respaldo_fiscal ?? 1) === 1) && (
+                                        <div style={{ background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '8px', padding: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
+                                            <label style={{ fontSize: '0.88rem', fontWeight: 'bold' }}>
+                                                🧾 Tipo de Respaldo Contable:
+                                                <select value={tipoComprobanteEgreso} onChange={(e) => setTipoComprobanteEgreso(e.target.value)} style={inputStyle}>
+                                                    <option value="recibo">Recibo / Nota de Venta Interna</option>
+                                                    <option value="factura">Factura Fiscal (Crédito Fiscal IVA)</option>
+                                                    <option value="sin_respaldo">Sin Comprobante Físico</option>
+                                                </select>
+                                            </label>
+                                            <input
+                                                type="text"
+                                                placeholder="Nombre del Proveedor / Comercio (Opcional)"
+                                                value={nombreProveedorEgreso}
+                                                onChange={(e) => setNombreProveedorEgreso(e.target.value)}
+                                                style={{ ...inputStyle, marginTop: 0 }}
+                                            />
+                                            {tipoComprobanteEgreso === 'factura' && (
+                                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+                                                    <input
+                                                        type="text"
+                                                        required
+                                                        placeholder="NIT del Proveedor"
+                                                        value={nitProveedorEgreso}
+                                                        onChange={(e) => setNitProveedorEgreso(e.target.value)}
+                                                        style={{ ...inputStyle, marginTop: 0 }}
+                                                    />
+                                                    <input
+                                                        type="text"
+                                                        required
+                                                        placeholder="N° de Factura"
+                                                        value={nroFacturaEgreso}
+                                                        onChange={(e) => setNroFacturaEgreso(e.target.value)}
+                                                        style={{ ...inputStyle, marginTop: 0 }}
+                                                    />
+                                                </div>
+                                            )}
+                                        </div>
                                     )}
                                     <label>
                                         Motivo Obligatorio:

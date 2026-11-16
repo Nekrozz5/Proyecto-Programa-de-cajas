@@ -39,6 +39,21 @@ export default function AdminPage() {
     const [cfgUsaVencimiento, setCfgUsaVencimiento] = useState(false);
     const [cfgUsaRecetas, setCfgUsaRecetas] = useState(false);
 
+    // Estado para Configuración Contable y Régimen Tributario Modular
+    const [mostrarPanelContable, setMostrarPanelContable] = useState(false);
+    const [cfgNitNegocio, setCfgNitNegocio] = useState('');
+    const [cfgRegimenTributario, setCfgRegimenTributario] = useState('simplificado_control_interno');
+    const [cfgEmiteFactura, setCfgEmiteFactura] = useState(false);
+    const [cfgIvaPorcentaje, setCfgIvaPorcentaje] = useState('13');
+    const [cfgItPorcentaje, setCfgItPorcentaje] = useState('3');
+    const [cfgItBase, setCfgItBase] = useState('todas_las_ventas');
+    const [cfgUsaRespaldoComprasEgresos, setCfgUsaRespaldoComprasEgresos] = useState(true);
+
+    // Filtros para Exportación Contable (Rango de Fechas y Turno Auditado)
+    const [filtroExportDesde, setFiltroExportDesde] = useState('');
+    const [filtroExportHasta, setFiltroExportHasta] = useState('');
+    const [turnoAuditadoId, setTurnoAuditadoId] = useState(null);
+
     // Apertura de nuevo turno desde Admin
     const [nuevoFondoInicial, setNuevoFondoInicial] = useState('100');
     const [cajaFisicaParaAbrir, setCajaFisicaParaAbrir] = useState('');
@@ -88,6 +103,9 @@ export default function AdminPage() {
     // Compra CPP de Insumo y Receta / Ensamblaje
     const [compraInsumoId, setCompraInsumoId] = useState('');
     const [compraDistribuidora, setCompraDistribuidora] = useState('');
+    const [compraNitProveedor, setCompraNitProveedor] = useState('');
+    const [compraNroFactura, setCompraNroFactura] = useState('');
+    const [compraConFactura, setCompraConFactura] = useState(false);
     const [compraCantidad, setCompraCantidad] = useState('');
     const [compraCostoTotal, setCompraCostoTotal] = useState('');
 
@@ -167,10 +185,11 @@ export default function AdminPage() {
         }
     }
 
-    async function cargarTodo() {
+    async function cargarTodo(cajaAuditadaOpcional = turnoAuditadoId) {
         try {
             setCargando(true);
-            const resCaja = await fetch('/api/caja');
+            const urlCaja = cajaAuditadaOpcional ? `/api/caja?cajaAuditadaId=${cajaAuditadaOpcional}` : '/api/caja';
+            const resCaja = await fetch(urlCaja);
             const dataCaja = await resCaja.json();
 
             if (!resCaja.ok) throw new Error(dataCaja.error || 'Error al consultar /api/caja');
@@ -201,6 +220,13 @@ export default function AdminPage() {
                 setCfgUsaStockDirecto(Boolean(c.usa_stock_directo));
                 setCfgUsaVencimiento(Boolean(c.usa_vencimiento));
                 setCfgUsaRecetas(Boolean(c.usa_recetas_ensamblaje));
+                setCfgNitNegocio(c.nit_negocio || '');
+                setCfgRegimenTributario(c.regimen_tributario || 'simplificado_control_interno');
+                setCfgEmiteFactura(Boolean(c.emite_factura));
+                setCfgIvaPorcentaje(String(c.iva_porcentaje ?? 13));
+                setCfgItPorcentaje(String(c.it_porcentaje ?? 3));
+                setCfgItBase(c.it_base === 'solo_facturadas' ? 'solo_facturadas' : 'todas_las_ventas');
+                setCfgUsaRespaldoComprasEgresos(c.usa_respaldo_compras_egresos !== undefined ? Boolean(c.usa_respaldo_compras_egresos) : true);
             }
 
             if (dataCaja.insumos?.length > 0 && !compraInsumoId) {
@@ -427,6 +453,57 @@ export default function AdminPage() {
             },
             `Estación "${nombre}" desactivada.`
         );
+    }
+
+    async function handleGuardarConfiguracionContable(e) {
+        e.preventDefault();
+        const ok = await ejecutarAccion(
+            {
+                accion: 'guardar_configuracion_contable',
+                nombreNegocio: cfgNombreNegocio,
+                nitNegocio: cfgNitNegocio,
+                regimenTributario: cfgRegimenTributario,
+                emiteFactura: cfgEmiteFactura,
+                ivaPorcentaje: Number(cfgIvaPorcentaje || 13),
+                itPorcentaje: Number(cfgItPorcentaje || 3),
+                itBase: cfgItBase,
+                usaRespaldoComprasEgresos: cfgUsaRespaldoComprasEgresos
+            },
+            `Configuración contable actualizada (${cfgRegimenTributario === 'regimen_general' ? 'Régimen General con Facturación' : 'Control Interno / Régimen Simplificado'}).`
+        );
+        if (ok) {
+            setMostrarPanelContable(false);
+        }
+    }
+
+    async function handleTogglePermisoFiscalCaja(cajaFisicaId, actualHabilitado, nombre) {
+        const nuevo = !actualHabilitado;
+        await ejecutarAccion(
+            {
+                accion: 'actualizar_permiso_fiscal_caja',
+                cajaFisicaId,
+                habilitado: nuevo
+            },
+            `Respaldo fiscal en "${nombre}" ${nuevo ? 'HABILITADO' : 'DESHABILITADO'}.`
+        );
+    }
+
+    async function handleTogglePermisoFiscalUsuario(usuarioObjetivoId, actualHabilitado, nombre) {
+        const nuevo = !actualHabilitado;
+        await ejecutarAccion(
+            {
+                accion: 'actualizar_permiso_fiscal_usuario',
+                usuarioObjetivoId,
+                habilitado: nuevo
+            },
+            `Permiso de registro de respaldo fiscal para "${nombre}" ${nuevo ? 'HABILITADO' : 'DESHABILITADO'}.`
+        );
+    }
+
+    async function seleccionarTurnoParaAuditar(cajaId) {
+        setTurnoAuditadoId(cajaId);
+        await cargarTodo(cajaId);
+        setMensaje(`Auditando Turno #${cajaId}. Los indicadores, movimientos y el botón de descarga PDF ahora apuntan a este turno.`);
     }
 
     async function handleReactivarCajaFisica(cajaFisicaId, nombre) {
@@ -757,6 +834,9 @@ export default function AdminPage() {
                 cantidadComprada: compraCantidad,
                 costoTotalCompra: compraCostoTotal,
                 distribuidora: distLimpia,
+                proveedorNit: compraNitProveedor.trim() || null,
+                nroFacturaCompra: compraNroFactura.trim() || null,
+                conFactura: compraConFactura,
                 motivo: motivoCompra
             },
             'Compra registrada con Costo Promedio Ponderado (NIC 2) y costos de ensamblaje/recetas recalculados.'
@@ -765,6 +845,9 @@ export default function AdminPage() {
             setCompraCantidad('');
             setCompraCostoTotal('');
             setCompraDistribuidora('');
+            setCompraNitProveedor('');
+            setCompraNroFactura('');
+            setCompraConFactura(false);
         }
     }
 
@@ -1060,16 +1143,40 @@ export default function AdminPage() {
                     )}
                 </nav>
 
-                {/* Accesos Rápidos Inferiores */}
+                {/* Accesos Rápidos Inferiores y Filtros Contables */}
                 <div style={{ padding: '1rem', borderTop: '1px solid #334155', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                    <a href="/api/reportes?formato=xlsx" style={{ ...btnPrimario, background: '#16a34a', textAlign: 'center', fontSize: '0.84rem' }}>
-                        📊 Descargar Excel (.xlsx)
+                    <div style={{ fontSize: '0.75rem', color: '#94a3b8', fontWeight: 'bold', textTransform: 'uppercase' }}>
+                        📅 Filtro de Fechas (Excel/CSV)
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.35rem' }}>
+                        <input
+                            type="date"
+                            title="Fecha desde"
+                            value={filtroExportDesde}
+                            onChange={(e) => setFiltroExportDesde(e.target.value)}
+                            style={{ padding: '0.3rem', borderRadius: '4px', border: '1px solid #475569', background: '#0f172a', color: '#f8fafc', fontSize: '0.74rem' }}
+                        />
+                        <input
+                            type="date"
+                            title="Fecha hasta"
+                            value={filtroExportHasta}
+                            onChange={(e) => setFiltroExportHasta(e.target.value)}
+                            style={{ padding: '0.3rem', borderRadius: '4px', border: '1px solid #475569', background: '#0f172a', color: '#f8fafc', fontSize: '0.74rem' }}
+                        />
+                    </div>
+                    <a
+                        href={`/api/reportes?formato=xlsx${filtroExportDesde ? `&desde=${filtroExportDesde}` : ''}${filtroExportHasta ? `&hasta=${filtroExportHasta}` : ''}`}
+                        style={{ ...btnPrimario, background: '#16a34a', textAlign: 'center', fontSize: '0.84rem' }}
+                    >
+                        📊 Descargar Excel Contable (.xlsx)
                     </a>
                     <button
                         type="button"
                         onClick={() =>
                             exportarReportePDF({
                                 nombreNegocio: configActual.nombre_negocio,
+                                configuracionNegocio: configActual,
+                                usuarioGenerador: adminAutenticado?.nombre,
                                 cajaAuditada: datos.cajaAuditada,
                                 estadisticas: est,
                                 movimientos: datos.movimientos,
@@ -1080,8 +1187,11 @@ export default function AdminPage() {
                     >
                         📄 Descargar PDF (Turno #{datos.cajaAuditada?.id || '—'})
                     </button>
-                    <a href="/api/reportes?formato=csv" style={{ ...btnPrimario, textAlign: 'center', fontSize: '0.84rem' }}>
-                        📥 Descargar CSV
+                    <a
+                        href={`/api/reportes?formato=csv${filtroExportDesde ? `&desde=${filtroExportDesde}` : ''}${filtroExportHasta ? `&hasta=${filtroExportHasta}` : ''}`}
+                        style={{ ...btnPrimario, textAlign: 'center', fontSize: '0.84rem' }}
+                    >
+                        📥 Descargar CSV Contable
                     </a>
                     <a href="/caja" style={{ ...btnOscuro, background: '#334155', textAlign: 'center', fontSize: '0.84rem' }}>
                         Ir a Punto de Venta
@@ -1257,6 +1367,14 @@ export default function AdminPage() {
                                         <div style={{ display: 'flex', gap: '0.6rem', alignItems: 'center', flexWrap: 'wrap' }}>
                                             <button
                                                 type="button"
+                                                onClick={() => setMostrarPanelContable(!mostrarPanelContable)}
+                                                style={{ ...btnSecundario, fontSize: '0.84rem', padding: '0.45rem 0.8rem', background: mostrarPanelContable ? '#dbeafe' : '#e2e8f0', color: '#0f172a' }}
+                                            >
+                                                🧾 {mostrarPanelContable ? 'Ocultar Régimen Contable' : 'Régimen Contable / Facturación'}
+                                            </button>
+
+                                            <button
+                                                type="button"
                                                 onClick={() => setMostrarPanelCajasFisicas(!mostrarPanelCajasFisicas)}
                                                 style={{ ...btnSecundario, fontSize: '0.84rem', padding: '0.45rem 0.8rem' }}
                                             >
@@ -1348,6 +1466,109 @@ export default function AdminPage() {
                                         )}
                                     </div>
 
+                                    {mostrarPanelContable && (
+                                        <form onSubmit={handleGuardarConfiguracionContable} style={{ background: '#f8fafc', border: '2px solid #0284c7', borderRadius: '8px', padding: '1.1rem', marginBottom: '1.25rem', display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+                                            <div>
+                                                <h4 style={{ margin: 0, color: '#0f172a' }}>🧾 Configuración Contable y Régimen Tributario Modular (Bolivia)</h4>
+                                                <p style={{ margin: '0.2rem 0 0', color: '#475569', fontSize: '0.84rem' }}>
+                                                    Adapta el sistema según el régimen del cliente: <strong>Control Interno / Régimen Simplificado (RTS)</strong> o <strong>Régimen General (Con Facturación IVA / IT)</strong>. Todos los reportes Excel, CSV y PDF se ajustan automáticamente.
+                                                </p>
+                                            </div>
+                                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '0.75rem' }}>
+                                                <label style={{ fontSize: '0.85rem', fontWeight: 600 }}>
+                                                    Régimen del Negocio:
+                                                    <select
+                                                        value={cfgRegimenTributario}
+                                                        onChange={(e) => {
+                                                            const val = e.target.value;
+                                                            setCfgRegimenTributario(val);
+                                                            setCfgEmiteFactura(val === 'regimen_general');
+                                                        }}
+                                                        style={inputStyle}
+                                                    >
+                                                        <option value="simplificado_control_interno">📋 Control Interno / Régimen Simplificado (Sin IVA)</option>
+                                                        <option value="regimen_general">🏛️ Régimen General (Facturación IVA / IT)</option>
+                                                    </select>
+                                                </label>
+                                                <label style={{ fontSize: '0.85rem', fontWeight: 600 }}>
+                                                    NIT del Establecimiento (Opcional):
+                                                    <input
+                                                        type="text"
+                                                        placeholder="Ej. 1029384015"
+                                                        value={cfgNitNegocio}
+                                                        onChange={(e) => setCfgNitNegocio(e.target.value)}
+                                                        style={inputStyle}
+                                                    />
+                                                </label>
+                                                {cfgRegimenTributario === 'regimen_general' && (
+                                                    <>
+                                                        <label style={{ fontSize: '0.85rem', fontWeight: 600 }}>
+                                                            Alícuota IVA (%):
+                                                            <input
+                                                                type="number"
+                                                                step="0.01"
+                                                                min="0"
+                                                                value={cfgIvaPorcentaje}
+                                                                onChange={(e) => setCfgIvaPorcentaje(e.target.value)}
+                                                                style={inputStyle}
+                                                            />
+                                                        </label>
+                                                        <label style={{ fontSize: '0.85rem', fontWeight: 600 }}>
+                                                            Alícuota IT (%):
+                                                            <input
+                                                                type="number"
+                                                                step="0.01"
+                                                                min="0"
+                                                                value={cfgItPorcentaje}
+                                                                onChange={(e) => setCfgItPorcentaje(e.target.value)}
+                                                                style={inputStyle}
+                                                            />
+                                                        </label>
+                                                        <label style={{ fontSize: '0.85rem', fontWeight: 600 }}>
+                                                            Base Imponible IT (a confirmar con el contador):
+                                                            <select
+                                                                value={cfgItBase}
+                                                                onChange={(e) => setCfgItBase(e.target.value)}
+                                                                style={inputStyle}
+                                                            >
+                                                                <option value="todas_las_ventas">Todas las ventas del turno (por defecto)</option>
+                                                                <option value="solo_facturadas">Solo ventas con factura emitida</option>
+                                                            </select>
+                                                        </label>
+                                                    </>
+                                                )}
+                                            </div>
+                                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1.25rem', fontSize: '0.85rem' }}>
+                                                {cfgRegimenTributario === 'regimen_general' && (
+                                                    <label style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', cursor: 'pointer' }}>
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={cfgEmiteFactura}
+                                                            onChange={(e) => setCfgEmiteFactura(e.target.checked)}
+                                                        />
+                                                        <span>Habilitar captura de <strong>N° Factura, NIT/CI y Razón Social</strong> en ventas</span>
+                                                    </label>
+                                                )}
+                                                <label style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', cursor: 'pointer' }}>
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={cfgUsaRespaldoComprasEgresos}
+                                                        onChange={(e) => setCfgUsaRespaldoComprasEgresos(e.target.checked)}
+                                                    />
+                                                    <span>Habilitar registro de <strong>Factura / NIT Proveedor</strong> en compras y egresos de caja</span>
+                                                </label>
+                                            </div>
+                                            <div style={{ display: 'flex', gap: '0.5rem' }}>
+                                                <button type="submit" style={{ ...btnPrimario, fontSize: '0.85rem', padding: '0.45rem 0.9rem' }}>
+                                                    Guardar Configuración Contable
+                                                </button>
+                                                <button type="button" onClick={() => setMostrarPanelContable(false)} style={{ ...btnSecundario, fontSize: '0.85rem', padding: '0.45rem 0.9rem', border: 'none', cursor: 'pointer' }}>
+                                                    Cerrar
+                                                </button>
+                                            </div>
+                                        </form>
+                                    )}
+
                                     {mostrarPanelCajasFisicas && (
                                         <div style={{ background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '8px', padding: '1rem', marginBottom: '1.25rem' }}>
                                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem', marginBottom: '0.75rem' }}>
@@ -1414,7 +1635,24 @@ export default function AdminPage() {
                                                                     <span>⚪ Sin turno abierto actualmente</span>
                                                                 )}
                                                             </div>
-                                                            <div style={{ marginTop: '0.3rem', display: 'flex', gap: '0.4rem' }}>
+                                                            <div style={{ marginTop: '0.3rem', display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => handleTogglePermisoFiscalCaja(cf.id, Number(cf.habilita_respaldo_fiscal ?? 1) === 1, cf.nombre)}
+                                                                    style={{
+                                                                        fontSize: '0.73rem',
+                                                                        padding: '0.25rem 0.55rem',
+                                                                        borderRadius: '4px',
+                                                                        border: `1px solid ${Number(cf.habilita_respaldo_fiscal ?? 1) === 1 ? '#38bdf8' : '#cbd5e1'}`,
+                                                                        background: Number(cf.habilita_respaldo_fiscal ?? 1) === 1 ? '#e0f2fe' : '#f1f5f9',
+                                                                        color: Number(cf.habilita_respaldo_fiscal ?? 1) === 1 ? '#0369a1' : '#64748b',
+                                                                        cursor: 'pointer',
+                                                                        fontWeight: '600'
+                                                                    }}
+                                                                    title="Habilitar o deshabilitar el registro de factura/respaldo en ventas y egresos de esta estación"
+                                                                >
+                                                                    🧾 Respaldo Fiscal: {Number(cf.habilita_respaldo_fiscal ?? 1) === 1 ? 'SÍ' : 'NO'}
+                                                                </button>
                                                                 {esActiva ? (
                                                                     <button
                                                                         type="button"
@@ -1554,7 +1792,39 @@ export default function AdminPage() {
                                                             </td>
                                                             <td style={thTd}>Bs {Number(c.qr_esperado || 0).toFixed(2)}</td>
                                                         <td style={thTd}>
-                                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', minWidth: '160px' }}>
+                                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', minWidth: '170px' }}>
+                                                                <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => seleccionarTurnoParaAuditar(c.id)}
+                                                                        style={{
+                                                                            padding: '0.3rem 0.55rem',
+                                                                            background: Number(datos.cajaAuditada?.id) === Number(c.id) ? '#0f172a' : '#e2e8f0',
+                                                                            color: Number(datos.cajaAuditada?.id) === Number(c.id) ? '#fff' : '#0f172a',
+                                                                            border: 'none',
+                                                                            borderRadius: '4px',
+                                                                            cursor: 'pointer',
+                                                                            fontSize: '0.75rem',
+                                                                            fontWeight: '600'
+                                                                        }}
+                                                                    >
+                                                                        {Number(datos.cajaAuditada?.id) === Number(c.id) ? '👁️ Auditando' : '🔍 Auditar / PDF'}
+                                                                    </button>
+                                                                    <a
+                                                                        href={`/api/reportes?formato=xlsx&cajaId=${c.id}`}
+                                                                        style={{
+                                                                            padding: '0.3rem 0.55rem',
+                                                                            background: '#dcfce7',
+                                                                            color: '#166534',
+                                                                            borderRadius: '4px',
+                                                                            fontSize: '0.75rem',
+                                                                            fontWeight: '600',
+                                                                            textDecoration: 'none'
+                                                                        }}
+                                                                    >
+                                                                        📊 Excel
+                                                                    </a>
+                                                                </div>
                                                                 {c.estado === 'cerrada' && !datos.cajaAbierta && (
                                                                     cajaAReabrirId === c.id ? (
                                                                         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', minWidth: '200px' }}>
@@ -3044,6 +3314,39 @@ export default function AdminPage() {
                                                     style={inputStyle}
                                                 />
                                             </label>
+                                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+                                                <label style={{ fontSize: '0.82rem', color: '#334155' }}>
+                                                    NIT Proveedor (Opcional):
+                                                    <input
+                                                        type="text"
+                                                        placeholder="NIT del proveedor"
+                                                        value={compraNitProveedor}
+                                                        onChange={(e) => setCompraNitProveedor(e.target.value)}
+                                                        style={inputStyle}
+                                                    />
+                                                </label>
+                                                <label style={{ fontSize: '0.82rem', color: '#334155' }}>
+                                                    N° Factura (Opcional):
+                                                    <input
+                                                        type="text"
+                                                        placeholder="N° de factura"
+                                                        value={compraNroFactura}
+                                                        onChange={(e) => {
+                                                            setCompraNroFactura(e.target.value);
+                                                            if (e.target.value.trim() !== '') setCompraConFactura(true);
+                                                        }}
+                                                        style={inputStyle}
+                                                    />
+                                                </label>
+                                            </div>
+                                            <label style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', fontSize: '0.84rem', color: '#1e293b', cursor: 'pointer' }}>
+                                                <input
+                                                    type="checkbox"
+                                                    checked={compraConFactura}
+                                                    onChange={(e) => setCompraConFactura(e.target.checked)}
+                                                />
+                                                <span>🧾 Compra con Factura Fiscal (Genera Crédito Fiscal IVA)</span>
+                                            </label>
                                             <label style={{ fontSize: '0.85rem', color: '#334155' }}>
                                                 Cantidad Comprada (según su unidad de medida):
                                                 <input type="number" step="0.01" placeholder="Ej. 10" required value={compraCantidad} onChange={(e) => setCompraCantidad(e.target.value)} style={inputStyle} />
@@ -3191,7 +3494,24 @@ export default function AdminPage() {
                                                         </span>{' '}
                                                         <small style={{ color: '#6b7280' }}>ID #{u.id}</small>
                                                     </div>
-                                                    <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
+                                                    <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handleTogglePermisoFiscalUsuario(u.id, Number(u.puede_registrar_respaldo_fiscal ?? 1) === 1, u.nombre)}
+                                                            style={{
+                                                                padding: '0.3rem 0.55rem',
+                                                                background: Number(u.puede_registrar_respaldo_fiscal ?? 1) === 1 ? '#dcfce7' : '#f1f5f9',
+                                                                color: Number(u.puede_registrar_respaldo_fiscal ?? 1) === 1 ? '#166534' : '#64748b',
+                                                                border: `1px solid ${Number(u.puede_registrar_respaldo_fiscal ?? 1) === 1 ? '#86efac' : '#cbd5e1'}`,
+                                                                borderRadius: '4px',
+                                                                cursor: 'pointer',
+                                                                fontSize: '0.76rem',
+                                                                fontWeight: 'bold'
+                                                            }}
+                                                            title="Habilitar o deshabilitar que este usuario pueda registrar datos de factura/respaldo en ventas y egresos"
+                                                        >
+                                                            🧾 Respaldo Fiscal: {Number(u.puede_registrar_respaldo_fiscal ?? 1) === 1 ? 'SÍ' : 'NO'}
+                                                        </button>
                                                         {(esMismoUsuario || esInferior) ? (
                                                             <button
                                                                 type="button"
