@@ -6,16 +6,21 @@ const ROLES_ADMIN = ['admin', 'superadmin', 'developer'];
 
 export async function GET(request) {
     try {
-        await exigirUsuarioSesion(request, ROLES_ADMIN);
+        const usuarioSesion = await exigirUsuarioSesion(request, ROLES_ADMIN);
 
         const { searchParams } = new URL(request.url);
         const formato = searchParams.get('formato');
         const cajaId = searchParams.get('cajaId');
         const desde = searchParams.get('desde');
         const hasta = searchParams.get('hasta');
+        const usuarioId = searchParams.get('usuarioId');
+        const cajaFisicaId = searchParams.get('cajaFisicaId');
         const filtros = {
             desde: desde || null,
-            hasta: hasta || null
+            hasta: hasta || null,
+            usuarioId: usuarioId ? Number(usuarioId) : null,
+            cajaFisicaId: cajaFisicaId ? Number(cajaFisicaId) : null,
+            usuarioGenerador: `${usuarioSesion.nombre} (${usuarioSesion.rol})`
         };
 
         if (formato === 'xlsx') {

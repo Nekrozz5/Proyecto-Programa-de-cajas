@@ -681,33 +681,49 @@ async function inicializarSistemaPrimeraVez(datos = {}) {
 // ==========================================
 // 2. INSUMOS (MATERIA PRIMA) Y RECETAS (ESCANDALLO / BOM)
 // ==========================================
-async function crearInsumo(nombre, unidadMedida, stockInicial = 0, costoPorUnidad = 0, stockSeguridad = 0, tiempoEntregaDias = 1, fechaVencimiento = null, proveedor = null) {
+async function crearInsumo(nombre, unidadMedida, stockInicial = 0, costoPorUnidad = 0, stockSeguridad = 0, tiempoEntregaDias = 1, fechaVencimiento = null, proveedor = null, usuarioId = null) {
     if (!nombre || String(nombre).trim() === '') {
         throw new Error('El nombre del insumo es obligatorio.');
     }
-    const stockInicialValidado = redondear2(numeroNoNegativo(stockInicial ?? 0, 'El stock inicial del insumo'));
-    const costoPorUnidadValidado = redondear2(numeroNoNegativo(costoPorUnidad ?? 0, 'El costo por unidad del insumo'));
-    const stockSeguridadValidado = redondear2(numeroNoNegativo(stockSeguridad ?? 0, 'El stock de seguridad'));
+    const stockInicialValidado = Number(numeroNoNegativo(stockInicial ?? 0, 'El stock inicial del insumo').toFixed(4));
+    const costoPorUnidadValidado = Number(numeroNoNegativo(costoPorUnidad ?? 0, 'El costo por unidad del insumo').toFixed(6));
+    const stockSeguridadValidado = Number(numeroNoNegativo(stockSeguridad ?? 0, 'El stock de seguridad').toFixed(4));
     const tiempoEntregaValidado = numeroNoNegativo(tiempoEntregaDias ?? 1, 'El tiempo de entrega en días');
 
-    const res = await runQuery(
-        `INSERT INTO insumos (nombre, unidad_medida, stock_actual, costo_por_unidad, stock_seguridad, tiempo_entrega_dias, fecha_vencimiento)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [nombre.trim(), unidadMedida || 'unidades', stockInicialValidado, costoPorUnidadValidado, stockSeguridadValidado, tiempoEntregaValidado, fechaVencimiento || null]
-    );
-    const insumoId = res.lastID;
-
-    if (stockInicialValidado > 0) {
-        const motivoInicial = proveedor && String(proveedor).trim() !== ''
-            ? `Inventario inicial (Proveedor: ${String(proveedor).trim()})`
-            : 'Inventario inicial';
-        await runQuery(
-            `INSERT INTO movimientos_insumos (insumo_id, tipo, cantidad, costo_unitario, motivo)
-             VALUES (?, 'compra', ?, ?, ?)`,
-            [insumoId, stockInicialValidado, costoPorUnidadValidado, motivoInicial]
+    return await enTransaccion(async () => {
+        const res = await runQuery(
+            `INSERT INTO insumos (nombre, unidad_medida, stock_actual, costo_por_unidad, stock_seguridad, tiempo_entrega_dias, fecha_vencimiento)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            [nombre.trim(), unidadMedida || 'unidades', stockInicialValidado, costoPorUnidadValidado, stockSeguridadValidado, tiempoEntregaValidado, fechaVencimiento || null]
         );
-    }
-    return insumoId;
+        const insumoId = res.lastID;
+
+        if (stockInicialValidado > 0) {
+            const provNombre = proveedor && String(proveedor).trim() !== '' ? String(proveedor).trim() : null;
+            const motivoInicial = provNombre
+                ? `Inventario inicial (Proveedor: ${provNombre})`
+                : 'Inventario inicial';
+            await runQuery(
+                `INSERT INTO movimientos_insumos (
+                    insumo_id, usuario_id, tipo, cantidad, stock_resultante,
+                    costo_unitario, costo_promedio_resultante, monto_total_compra, proveedor_nombre, motivo
+                 )
+                 VALUES (?, ?, 'inventario_inicial', ?, ?, ?, ?, ?, ?, ?)`,
+                [
+                    insumoId,
+                    usuarioId ? Number(usuarioId) : null,
+                    stockInicialValidado,
+                    stockInicialValidado,
+                    costoPorUnidadValidado,
+                    costoPorUnidadValidado,
+                    redondear2(stockInicialValidado * costoPorUnidadValidado),
+                    provNombre,
+                    motivoInicial
+                ]
+            );
+        }
+        return insumoId;
+    });
 }
 
 async function obtenerInsumos() {
@@ -755,78 +771,84 @@ async function recalcularCostoCombosQueContienenProducto(productoId) {
 
 // Compra de insumo con Costo Promedio Ponderado (CPP) y actualización en cascada de recetas
 async function registrarCompraInsumo(insumoId, cantidadComprada, costoTotalCompra, motivo = 'Compra a proveedor', distribuidora = null, datosFiscales = {}) {
-    const cantValidada = numeroPositivo(cantidadComprada, 'La cantidad comprada');
+    const cantValidada = Number(numeroPositivo(cantidadComprada, 'La cantidad comprada').toFixed(4));
     const costoValidado = redondear2(numeroNoNegativo(costoTotalCompra, 'El costo total de compra'));
 
-    const insumo = await getQuery(`SELECT * FROM insumos WHERE id = ? AND activo = 1`, [insumoId]);
-    if (!insumo) throw new Error('Insumo no encontrado.');
+    return await enTransaccion(async () => {
+        const insumo = await getQuery(`SELECT * FROM insumos WHERE id = ? AND activo = 1`, [insumoId]);
+        if (!insumo) throw new Error('Insumo no encontrado.');
 
-    const stockAnterior = Math.max(0, insumo.stock_actual);
-    const valorAnterior = stockAnterior * insumo.costo_por_unidad;
-    const nuevoStock = insumo.stock_actual + cantValidada;
+        const stockAnterior = Math.max(0, Number(insumo.stock_actual || 0));
+        const valorAnterior = stockAnterior * Number(insumo.costo_por_unidad || 0);
+        const nuevoStock = Number((Number(insumo.stock_actual || 0) + cantValidada).toFixed(4));
 
-    // Fórmula de Costo Promedio Ponderado (NIC 2)
-    const nuevoCostoUnitario = nuevoStock > 0
-        ? (valorAnterior + costoValidado) / (stockAnterior + cantValidada)
-        : (costoValidado / cantValidada);
+        // Fórmula de Costo Promedio Ponderado (NIC 2) con precisión de 6 decimales para unidades métricas (g / ml)
+        const nuevoCostoUnitario = nuevoStock > 0
+            ? (valorAnterior + costoValidado) / (stockAnterior + cantValidada)
+            : (costoValidado / cantValidada);
+        const cppResultante = Number(nuevoCostoUnitario.toFixed(6));
+        const costoUnitCompra = Number((costoValidado / cantValidada).toFixed(6));
 
-    await runQuery(
-        `UPDATE insumos SET stock_actual = ?, costo_por_unidad = ? WHERE id = ?`,
-        [Number(nuevoStock.toFixed(4)), Number(nuevoCostoUnitario.toFixed(4)), insumoId]
-    );
+        await runQuery(
+            `UPDATE insumos SET stock_actual = ?, costo_por_unidad = ? WHERE id = ?`,
+            [nuevoStock, cppResultante, insumoId]
+        );
 
-    const provNombre = distribuidora && String(distribuidora).trim() !== ''
-        ? String(distribuidora).trim()
-        : (datosFiscales?.proveedorNombre ? String(datosFiscales.proveedorNombre).trim() : null);
-    const provNit = datosFiscales?.proveedorNit ? String(datosFiscales.proveedorNit).trim() : null;
-    const nroFac = datosFiscales?.nroFacturaCompra ? String(datosFiscales.nroFacturaCompra).trim() : null;
-    const conFac = datosFiscales?.conFactura || nroFac ? 1 : 0;
-    const usuarioId = datosFiscales?.usuarioId ? Number(datosFiscales.usuarioId) : null;
+        const provNombre = distribuidora && String(distribuidora).trim() !== ''
+            ? String(distribuidora).trim()
+            : (datosFiscales?.proveedorNombre ? String(datosFiscales.proveedorNombre).trim() : null);
+        const provNit = datosFiscales?.proveedorNit ? String(datosFiscales.proveedorNit).trim() : null;
+        const nroFac = datosFiscales?.nroFacturaCompra ? String(datosFiscales.nroFacturaCompra).trim() : null;
+        const conFac = datosFiscales?.conFactura || nroFac ? 1 : 0;
+        const usuarioId = datosFiscales?.usuarioId ? Number(datosFiscales.usuarioId) : null;
 
-    let motivoFinal = provNombre
-        ? `Compra a distribuidora: ${provNombre}`
-        : (motivo || 'Compra a proveedor');
-    if (nroFac) {
-        motivoFinal += ` [Fact. #${nroFac}${provNit ? ` | NIT: ${provNit}` : ''}]`;
-    }
+        let motivoFinal = provNombre
+            ? `Compra a distribuidora: ${provNombre}`
+            : (motivo || 'Compra a proveedor');
+        if (nroFac) {
+            motivoFinal += ` [Fact. #${nroFac}${provNit ? ` | NIT: ${provNit}` : ''}]`;
+        }
 
-    await runQuery(
-        `INSERT INTO movimientos_insumos (
-            insumo_id, tipo, cantidad, costo_unitario, motivo,
-            proveedor_nombre, proveedor_nit, nro_factura_compra, con_factura, monto_total_compra, usuario_id
-         )
-         VALUES (?, 'compra', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-            insumoId,
-            cantValidada,
-            Number((costoValidado / cantValidada).toFixed(4)),
-            motivoFinal,
-            provNombre,
-            provNit,
-            nroFac,
-            conFac,
-            costoValidado,
-            usuarioId
-        ]
-    );
+        await runQuery(
+            `INSERT INTO movimientos_insumos (
+                insumo_id, tipo, cantidad, stock_resultante, costo_unitario, costo_promedio_resultante, motivo,
+                proveedor_nombre, proveedor_nit, nro_factura_compra, con_factura, monto_total_compra, usuario_id
+             )
+             VALUES (?, 'compra', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+                insumoId,
+                cantValidada,
+                nuevoStock,
+                costoUnitCompra,
+                cppResultante,
+                motivoFinal,
+                provNombre,
+                provNit,
+                nroFac,
+                conFac,
+                costoValidado,
+                usuarioId
+            ]
+        );
 
-    // Actualizar en cascada el costo de todos los productos que usan este insumo
-    const productosAfectados = await allQuery(`SELECT DISTINCT producto_id FROM recetas WHERE insumo_id = ?`, [insumoId]);
-    for (const prod of productosAfectados) {
-        await recalcularCostoProductoPorReceta(prod.producto_id);
-    }
+        // Actualizar en cascada el costo de todos los productos que usan este insumo
+        const productosAfectados = await allQuery(`SELECT DISTINCT producto_id FROM recetas WHERE insumo_id = ?`, [insumoId]);
+        for (const prod of productosAfectados) {
+            await recalcularCostoProductoPorReceta(prod.producto_id);
+        }
 
-    return {
-        insumoId,
-        nuevoStock: Number(nuevoStock.toFixed(4)),
-        nuevoCostoUnitario: Number(nuevoCostoUnitario.toFixed(4))
-    };
+        return {
+            insumoId: Number(insumoId),
+            nuevoStock,
+            nuevoCostoUnitario: cppResultante
+        };
+    });
 }
 
 // Registrar merma o desperdicio físico (leche cortada, recorte de madera dañado, etc.)
-async function registrarMermaInsumo(insumoId, cantidadPerdida, motivo) {
-    const cantValidada = numeroPositivo(cantidadPerdida, 'La cantidad de merma');
-    if (!motivo || motivo.trim() === '') {
+async function registrarMermaInsumo(insumoId, cantidadPerdida, motivo, usuarioId = null) {
+    const cantValidada = Number(numeroPositivo(cantidadPerdida, 'La cantidad de merma').toFixed(4));
+    if (!motivo || String(motivo).trim() === '') {
         throw new Error('Debes especificar el motivo de la merma (ej. Leche derramada, corte defectuoso).');
     }
 
@@ -842,19 +864,34 @@ async function registrarMermaInsumo(insumoId, cantidadPerdida, motivo) {
             throw new Error(`Stock insuficiente para descontar ${cantValidada} ${insumo.unidad_medida} de ${insumo.nombre}. Stock actual: ${insumo.stock_actual}`);
         }
 
-        const insumoActualizado = await getQuery(`SELECT stock_actual FROM insumos WHERE id = ?`, [insumoId]);
-        const nuevoStock = insumoActualizado ? insumoActualizado.stock_actual : Number((insumo.stock_actual - cantValidada).toFixed(4));
+        const insumoActualizado = await getQuery(`SELECT stock_actual, costo_por_unidad FROM insumos WHERE id = ?`, [insumoId]);
+        const nuevoStock = insumoActualizado ? Number(insumoActualizado.stock_actual) : Number((insumo.stock_actual - cantValidada).toFixed(4));
+        const costoCpp = Number(insumoActualizado?.costo_por_unidad ?? insumo.costo_por_unidad ?? 0);
+        const costoPerdida = redondear2(cantValidada * costoCpp);
 
         await runQuery(
-            `INSERT INTO movimientos_insumos (insumo_id, tipo, cantidad, costo_unitario, motivo)
-             VALUES (?, 'merma', ?, ?, ?)`,
-            [insumoId, cantValidada, insumo.costo_por_unidad, motivo.trim()]
+            `INSERT INTO movimientos_insumos (
+                insumo_id, usuario_id, tipo, cantidad, stock_resultante,
+                costo_unitario, costo_promedio_resultante, monto_total_compra, motivo
+             )
+             VALUES (?, ?, 'merma', ?, ?, ?, ?, ?, ?)`,
+            [
+                insumoId,
+                usuarioId ? Number(usuarioId) : null,
+                cantValidada,
+                nuevoStock,
+                costoCpp,
+                costoCpp,
+                costoPerdida,
+                String(motivo).trim()
+            ]
         );
 
         return {
-            insumoId,
+            insumoId: Number(insumoId),
             stockRestante: nuevoStock,
-            costoPerdida: redondear2(cantValidada * insumo.costo_por_unidad)
+            costoUnitario: costoCpp,
+            costoPerdida
         };
     });
 }
@@ -1205,6 +1242,48 @@ async function crearProductoConInsumos({
                 tipo_inventario: 'combo'
             };
 
+        } else if (tipoComposicion === 'directo') {
+            const stockInicial = arguments[0].stockInicial !== undefined && arguments[0].stockInicial !== null && arguments[0].stockInicial !== ''
+                ? Number(numeroNoNegativo(arguments[0].stockInicial, 'El stock inicial del producto').toFixed(4))
+                : 0;
+            const costoInicial = arguments[0].costoInicial !== undefined && arguments[0].costoInicial !== null && arguments[0].costoInicial !== ''
+                ? Number(numeroNoNegativo(arguments[0].costoInicial, 'El costo unitario inicial').toFixed(4))
+                : 0;
+            const stockMinimo = arguments[0].stockMinimo !== undefined && arguments[0].stockMinimo !== null && arguments[0].stockMinimo !== ''
+                ? Number(numeroNoNegativo(arguments[0].stockMinimo, 'El stock mínimo').toFixed(4))
+                : 0;
+            const unidadMedida = arguments[0].unidadMedida && String(arguments[0].unidadMedida).trim() !== ''
+                ? String(arguments[0].unidadMedida).trim()
+                : 'unidades';
+            const fechaVenc = arguments[0].fechaVencimiento && String(arguments[0].fechaVencimiento).trim() !== ''
+                ? String(arguments[0].fechaVencimiento).trim()
+                : null;
+            const usuarioId = arguments[0].usuarioId ? Number(arguments[0].usuarioId) : null;
+
+            const resProd = await runQuery(
+                `INSERT INTO productos (nombre, precio, costo, categoria, unidad_medida, tipo_inventario, stock, stock_minimo, fecha_vencimiento)
+                 VALUES (?, ?, ?, ?, ?, 'directo', ?, ?, ?)`,
+                [nombre.trim(), precioValidado, costoInicial, catFinal, unidadMedida, stockInicial, stockMinimo, fechaVenc]
+            );
+            const productoId = resProd.lastID;
+
+            await runQuery(
+                `INSERT INTO movimientos_productos_directos (
+                    producto_id, usuario_id, tipo, cantidad, stock_resultante, costo_unitario, costo_promedio_resultante, monto_total, motivo
+                 ) VALUES (?, ?, 'inventario_inicial', ?, ?, ?, ?, ?, 'Inventario inicial de creación')`,
+                [productoId, usuarioId, stockInicial, stockInicial, costoInicial, costoInicial, redondear2(stockInicial * costoInicial)]
+            );
+
+            return {
+                id: productoId,
+                nombre: nombre.trim(),
+                precio: precioValidado,
+                costo: costoInicial,
+                categoria: catFinal,
+                tipo_inventario: 'directo',
+                stock: stockInicial
+            };
+
         } else {
             // Venta libre / servicio sin insumo
             const resProd = await runQuery(
@@ -1444,6 +1523,167 @@ async function verificarIntegridadKardexDirecto() {
         totalDescuadres: descuadres.length,
         descuadres,
         detalles
+    };
+}
+
+// Consulta de control de integridad para Insumos: verifica que el saldo del Kardex de insumos coincida con insumos.stock_actual
+async function verificarIntegridadKardexInsumos() {
+    const filas = await allQuery(
+        `SELECT i.id as insumo_id,
+                i.nombre,
+                i.unidad_medida,
+                ROUND(COALESCE(i.stock_actual, 0), 4) as stock_insumo,
+                ROUND(COALESCE((
+                    SELECT SUM(CASE
+                        WHEN mi.tipo IN ('inventario_inicial', 'compra', 'reingreso_anulacion') THEN mi.cantidad
+                        WHEN mi.tipo IN ('consumo_venta', 'merma') THEN -mi.cantidad
+                        WHEN mi.tipo = 'ajuste' THEN mi.cantidad
+                        ELSE 0
+                    END)
+                    FROM movimientos_insumos mi
+                    WHERE mi.insumo_id = i.id
+                ), 0), 4) as saldo_calculado_kardex,
+                (
+                    SELECT mi2.stock_resultante
+                    FROM movimientos_insumos mi2
+                    WHERE mi2.insumo_id = i.id
+                    ORDER BY mi2.id DESC
+                    LIMIT 1
+                ) as ultimo_stock_resultante,
+                (
+                    SELECT COUNT(*)
+                    FROM movimientos_insumos mi3
+                    WHERE mi3.insumo_id = i.id
+                ) as cantidad_movimientos
+         FROM insumos i
+         WHERE i.activo = 1
+         ORDER BY i.id ASC`
+    );
+
+    const detalles = filas.map((f) => {
+        const stockIns = Number(f.stock_insumo || 0);
+        const saldoCalc = Number(f.saldo_calculado_kardex || 0);
+        const ultResult = f.ultimo_stock_resultante !== null && f.ultimo_stock_resultante !== undefined
+            ? Number(f.ultimo_stock_resultante)
+            : 0;
+        const difCalculado = Number((stockIns - saldoCalc).toFixed(4));
+        const difUltimo = Number((stockIns - ultResult).toFixed(4));
+        const cuadra = Math.abs(difCalculado) < 0.001 && Math.abs(difUltimo) < 0.001;
+        return {
+            insumoId: f.insumo_id,
+            nombre: f.nombre,
+            unidadMedida: f.unidad_medida,
+            stockInsumo: stockIns,
+            saldoCalculadoKardex: saldoCalc,
+            ultimoStockResultante: ultResult,
+            cantidadMovimientos: Number(f.cantidad_movimientos || 0),
+            diferencia: difCalculado,
+            cuadra
+        };
+    });
+
+    const descuadres = detalles.filter((d) => !d.cuadra);
+    return {
+        integridadOk: descuadres.length === 0,
+        totalInsumos: detalles.length,
+        totalDescuadres: descuadres.length,
+        descuadres,
+        detalles
+    };
+}
+
+// Obtiene el Kardex cronológico de Productos Directos y/o Insumos para auditoría en pantalla y reportes
+async function obtenerKardexDetallado({ productoId = null, insumoId = null, desde = null, hasta = null, limite = 200 } = {}) {
+    const condProd = [];
+    const paramsProd = [];
+    if (productoId) {
+        condProd.push(`mpd.producto_id = ?`);
+        paramsProd.push(Number(productoId));
+    }
+    if (desde && /^\d{4}-\d{2}-\d{2}$/.test(String(desde).trim())) {
+        condProd.push(`date(mpd.fecha_hora, 'localtime') >= ?`);
+        paramsProd.push(String(desde).trim());
+    }
+    if (hasta && /^\d{4}-\d{2}-\d{2}$/.test(String(hasta).trim())) {
+        condProd.push(`date(mpd.fecha_hora, 'localtime') <= ?`);
+        paramsProd.push(String(hasta).trim());
+    }
+    const whereProd = condProd.length > 0 ? `WHERE ${condProd.join(' AND ')}` : '';
+
+    const condIns = [];
+    const paramsIns = [];
+    if (insumoId) {
+        condIns.push(`mi.insumo_id = ?`);
+        paramsIns.push(Number(insumoId));
+    }
+    if (desde && /^\d{4}-\d{2}-\d{2}$/.test(String(desde).trim())) {
+        condIns.push(`date(mi.fecha_hora, 'localtime') >= ?`);
+        paramsIns.push(String(desde).trim());
+    }
+    if (hasta && /^\d{4}-\d{2}-\d{2}$/.test(String(hasta).trim())) {
+        condIns.push(`date(mi.fecha_hora, 'localtime') <= ?`);
+        paramsIns.push(String(hasta).trim());
+    }
+    const whereIns = condIns.length > 0 ? `WHERE ${condIns.join(' AND ')}` : '';
+
+    const lim = Math.min(2000, Math.max(10, Number(limite) || 200));
+
+    const [kardexProductosDirectos, kardexInsumos] = await Promise.all([
+        allQuery(
+            `SELECT mpd.id,
+                    mpd.producto_id,
+                    p.nombre as item_nombre,
+                    COALESCE(p.unidad_medida, 'unidades') as unidad_medida,
+                    mpd.movimiento_id,
+                    COALESCE(u.nombre, 'Sistema') as operador,
+                    mpd.tipo,
+                    datetime(mpd.fecha_hora, 'localtime') as fecha_hora,
+                    mpd.cantidad,
+                    mpd.stock_resultante,
+                    mpd.costo_unitario,
+                    COALESCE(NULLIF(mpd.costo_promedio_resultante, 0), mpd.costo_unitario, p.costo, 0) as costo_promedio_resultante,
+                    COALESCE(mpd.monto_total, ROUND(mpd.cantidad * mpd.costo_unitario, 2)) as monto_total,
+                    COALESCE(mpd.proveedor_nombre, '') as proveedor_nombre,
+                    COALESCE(mpd.nro_factura_compra, '') as nro_factura_compra,
+                    mpd.motivo
+             FROM movimientos_productos_directos mpd
+             INNER JOIN productos p ON mpd.producto_id = p.id
+             LEFT JOIN usuarios u ON mpd.usuario_id = u.id
+             ${whereProd}
+             ORDER BY mpd.id DESC
+             LIMIT ${lim}`,
+            paramsProd
+        ),
+        allQuery(
+            `SELECT mi.id,
+                    mi.insumo_id,
+                    i.nombre as item_nombre,
+                    i.unidad_medida,
+                    mi.movimiento_id,
+                    COALESCE(u.nombre, 'Sistema') as operador,
+                    mi.tipo,
+                    datetime(mi.fecha_hora, 'localtime') as fecha_hora,
+                    mi.cantidad,
+                    mi.stock_resultante,
+                    mi.costo_unitario,
+                    COALESCE(NULLIF(mi.costo_promedio_resultante, 0), mi.costo_unitario, i.costo_por_unidad, 0) as costo_promedio_resultante,
+                    COALESCE(mi.monto_total_compra, ROUND(mi.cantidad * mi.costo_unitario, 2)) as monto_total,
+                    COALESCE(mi.proveedor_nombre, '') as proveedor_nombre,
+                    COALESCE(mi.nro_factura_compra, '') as nro_factura_compra,
+                    mi.motivo
+             FROM movimientos_insumos mi
+             INNER JOIN insumos i ON mi.insumo_id = i.id
+             LEFT JOIN usuarios u ON mi.usuario_id = u.id
+             ${whereIns}
+             ORDER BY mi.id DESC
+             LIMIT ${lim}`,
+            paramsIns
+        )
+    ]);
+
+    return {
+        kardexProductosDirectos,
+        kardexInsumos
     };
 }
 
@@ -2019,102 +2259,130 @@ async function abrirCaja(usuarioId, montoInicial, cajaFisicaId = null) {
         throw new Error('El usuario que abre la caja es obligatorio.');
     }
 
-    const usuario = await obtenerUsuarioPorId(usuarioId);
-    if (!usuario) {
-        throw new Error('Usuario no válido o inactivo.');
-    }
-
-    // Resolver caja física asignada
-    let cajaFisica = null;
-    if (cajaFisicaId) {
-        cajaFisica = await getQuery(`SELECT * FROM cajas_fisicas WHERE id = ? AND activa = 1`, [cajaFisicaId]);
-        if (!cajaFisica) {
-            throw new Error('La caja física seleccionada no existe o está inactiva.');
+    return await enTransaccion(async () => {
+        const usuario = await obtenerUsuarioPorId(usuarioId);
+        if (!usuario) {
+            throw new Error('Usuario no válido o inactivo.');
         }
-    } else {
-        cajaFisica = await getQuery(`SELECT * FROM cajas_fisicas WHERE activa = 1 ORDER BY id ASC LIMIT 1`);
-        if (!cajaFisica) {
-            throw new Error('No hay ninguna caja física activa en el sistema para abrir turno.');
+
+        // Resolver caja física asignada
+        let cajaFisica = null;
+        if (cajaFisicaId) {
+            cajaFisica = await getQuery(`SELECT * FROM cajas_fisicas WHERE id = ? AND activa = 1`, [cajaFisicaId]);
+            if (!cajaFisica) {
+                throw new Error('La caja física seleccionada no existe o está inactiva.');
+            }
+        } else {
+            cajaFisica = await getQuery(`SELECT * FROM cajas_fisicas WHERE activa = 1 ORDER BY id ASC LIMIT 1`);
+            if (!cajaFisica) {
+                throw new Error('No hay ninguna caja física activa en el sistema para abrir turno.');
+            }
         }
-    }
 
-    // Validar que la estación física no tenga ya un turno abierto
-    const turnoAbiertoEstacion = await getQuery(
-        `SELECT c.id, u.nombre as operador
-         FROM cajas c
-         LEFT JOIN usuarios u ON c.usuario_id = u.id
-         WHERE c.caja_fisica_id = ? AND c.estado = 'abierta'`,
-        [cajaFisica.id]
-    );
-    if (turnoAbiertoEstacion) {
-        throw new Error(
-            `La ${cajaFisica.nombre} ya tiene un turno abierto (Turno #${turnoAbiertoEstacion.id} a cargo de ${turnoAbiertoEstacion.operador || 'otro cajero'}). Debe cerrarse antes de iniciar uno nuevo en esta misma estación.`
+        // Validar que la estación física no tenga ya un turno abierto
+        const turnoAbiertoEstacion = await getQuery(
+            `SELECT c.id, u.nombre as operador
+             FROM cajas c
+             LEFT JOIN usuarios u ON c.usuario_id = u.id
+             WHERE c.caja_fisica_id = ? AND c.estado = 'abierta'`,
+            [cajaFisica.id]
         );
-    }
+        if (turnoAbiertoEstacion) {
+            throw new Error(
+                `La ${cajaFisica.nombre} ya tiene un turno abierto (Turno #${turnoAbiertoEstacion.id} a cargo de ${turnoAbiertoEstacion.operador || 'otro cajero'}). Debe cerrarse antes de iniciar uno nuevo en esta misma estación.`
+            );
+        }
 
-    // Validar que el usuario no tenga otro turno abierto en otra caja simultáneamente
-    const turnoAbiertoUsuario = await getQuery(
-        `SELECT c.id, cf.nombre as caja_nombre
-         FROM cajas c
-         LEFT JOIN cajas_fisicas cf ON c.caja_fisica_id = cf.id
-         WHERE c.usuario_id = ? AND c.estado = 'abierta'`,
-        [usuario.id]
-    );
-    if (turnoAbiertoUsuario) {
-        throw new Error(
-            `El usuario ${usuario.nombre} ya tiene activo el Turno #${turnoAbiertoUsuario.id} en ${turnoAbiertoUsuario.caja_nombre || 'otra caja'}. Debe cerrar su turno anterior antes de abrir uno nuevo.`
+        // Validar que el usuario no tenga otro turno abierto en otra caja simultáneamente
+        const turnoAbiertoUsuario = await getQuery(
+            `SELECT c.id, cf.nombre as caja_nombre
+             FROM cajas c
+             LEFT JOIN cajas_fisicas cf ON c.caja_fisica_id = cf.id
+             WHERE c.usuario_id = ? AND c.estado = 'abierta'`,
+            [usuario.id]
         );
-    }
+        if (turnoAbiertoUsuario) {
+            throw new Error(
+                `El usuario ${usuario.nombre} ya tiene activo el Turno #${turnoAbiertoUsuario.id} en ${turnoAbiertoUsuario.caja_nombre || 'otra caja'}. Debe cerrar su turno anterior antes de abrir uno nuevo.`
+            );
+        }
 
-    const res = await runQuery(
-        `INSERT INTO cajas (caja_fisica_id, usuario_id, monto_inicial, estado) VALUES (?, ?, ?, 'abierta')`,
-        [cajaFisica.id, usuario.id, montoInicialValidado]
-    );
-    return res.lastID;
+        const res = await runQuery(
+            `INSERT INTO cajas (caja_fisica_id, usuario_id, monto_inicial, estado) VALUES (?, ?, ?, 'abierta')`,
+            [cajaFisica.id, usuario.id, montoInicialValidado]
+        );
+        return res.lastID;
+    });
 }
 
 async function reabrirCajaConPermiso(adminId, cajaId, motivo = 'Revisión administrativa') {
-    const ejecutor = await obtenerUsuarioPorId(adminId);
-    if (!ejecutor || !esRolAdministrativo(ejecutor.rol)) {
-        throw new Error('Permiso denegado: solo el Administrador puede reabrir un turno cerrado.');
+    if (!motivo || String(motivo).trim() === '') {
+        throw new Error('Debes indicar el motivo de la reapertura de caja.');
     }
 
-    const caja = await getQuery(`SELECT * FROM cajas WHERE id = ?`, [cajaId]);
-    if (!caja) throw new Error('Turno de caja no encontrado.');
+    return await enTransaccion(async () => {
+        const ejecutor = await obtenerUsuarioPorId(adminId);
+        if (!ejecutor || !esRolAdministrativo(ejecutor.rol)) {
+            throw new Error('Permiso denegado: solo el Administrador puede reabrir un turno cerrado.');
+        }
 
-    // Verificar si la caja física correspondiente ya tiene otro turno abierto
-    const turnoAbierto = await getQuery(
-        `SELECT c.id, cf.nombre as caja_nombre
-         FROM cajas c
-         LEFT JOIN cajas_fisicas cf ON c.caja_fisica_id = cf.id
-         WHERE c.caja_fisica_id = ? AND c.estado = 'abierta'`,
-        [caja.caja_fisica_id]
-    );
-    if (turnoAbierto) {
-        throw new Error(
-            `No se puede reabrir el Turno #${cajaId}: la estación "${turnoAbierto.caja_nombre || 'Caja'}" ya tiene el Turno #${turnoAbierto.id} abierto actualmente.`
+        const caja = await getQuery(`SELECT * FROM cajas WHERE id = ?`, [cajaId]);
+        if (!caja) throw new Error('Turno de caja no encontrado.');
+        if (caja.estado === 'abierta') {
+            throw new Error(`El Turno #${cajaId} ya se encuentra abierto.`);
+        }
+
+        // Verificar si la caja física correspondiente ya tiene otro turno abierto
+        const turnoAbierto = await getQuery(
+            `SELECT c.id, cf.nombre as caja_nombre
+             FROM cajas c
+             LEFT JOIN cajas_fisicas cf ON c.caja_fisica_id = cf.id
+             WHERE c.caja_fisica_id = ? AND c.estado = 'abierta'`,
+            [caja.caja_fisica_id]
         );
-    }
+        if (turnoAbierto) {
+            throw new Error(
+                `No se puede reabrir el Turno #${cajaId}: la estación "${turnoAbierto.caja_nombre || 'Caja'}" ya tiene el Turno #${turnoAbierto.id} abierto actualmente.`
+            );
+        }
 
-    const numReapertura = (Number(caja.veces_reabierta) || 0) + 1;
-    const notaPrevia = `Reapertura #${numReapertura} por ${ejecutor.nombre} (${motivo || 'Sin motivo'}) — Arqueo previo: Esperado Bs ${Number(caja.efectivo_esperado || 0).toFixed(2)}, Real Bs ${Number(caja.efectivo_real || 0).toFixed(2)}, Dif: Bs ${Number(caja.diferencia_efectivo || 0).toFixed(2)}`;
-    const nuevoHistorial = caja.historial_reaperturas
-        ? `${caja.historial_reaperturas} | ${notaPrevia}`
-        : notaPrevia;
+        // Verificar que el cajero titular del turno no tenga otro turno abierto en otra estación
+        const turnoAbiertoTitular = await getQuery(
+            `SELECT c.id, cf.nombre as caja_nombre
+             FROM cajas c
+             LEFT JOIN cajas_fisicas cf ON c.caja_fisica_id = cf.id
+             WHERE c.usuario_id = ? AND c.estado = 'abierta'`,
+            [caja.usuario_id]
+        );
+        if (turnoAbiertoTitular) {
+            throw new Error(
+                `No se puede reabrir el Turno #${cajaId}: su operador titular ya tiene abierto el Turno #${turnoAbiertoTitular.id} en "${turnoAbiertoTitular.caja_nombre || 'otra estación'}".`
+            );
+        }
 
-    await runQuery(
-        `UPDATE cajas
-         SET estado = 'abierta',
-             veces_reabierta = ?,
-             historial_reaperturas = ?,
-             efectivo_esperado = NULL,
-             efectivo_real = NULL,
-             diferencia_efectivo = NULL,
-             fecha_cierre = NULL
-         WHERE id = ?`,
-        [numReapertura, nuevoHistorial, cajaId]
-    );
-    return true;
+        const numReapertura = (Number(caja.veces_reabierta) || 0) + 1;
+        const notaPrevia = `Reapertura #${numReapertura} por ${ejecutor.nombre} (${String(motivo).trim()}) — Arqueo previo: Esperado Bs ${Number(caja.efectivo_esperado || 0).toFixed(2)}, Real Bs ${Number(caja.efectivo_real || 0).toFixed(2)}, Dif: Bs ${Number(caja.diferencia_efectivo || 0).toFixed(2)}`;
+        const nuevoHistorial = caja.historial_reaperturas
+            ? `${caja.historial_reaperturas} | ${notaPrevia}`
+            : notaPrevia;
+
+        await runQuery(
+            `UPDATE cajas
+             SET estado = 'abierta',
+                 veces_reabierta = ?,
+                 historial_reaperturas = ?,
+                 efectivo_esperado = NULL,
+                 efectivo_real = NULL,
+                 diferencia_efectivo = NULL,
+                 qr_esperado = 0,
+                 qr_real = NULL,
+                 diferencia_qr = NULL,
+                 fecha_cierre = NULL
+             WHERE id = ?`,
+            [numReapertura, nuevoHistorial, cajaId]
+        );
+        return true;
+    });
 }
 
 async function registrarVentaCompleta(cajaId, items, metodoPago, montoRecibido = null, descripcion = 'Venta en mostrador', usuarioId = null, cambioEntregado = null, opcionesExtra = {}) {
@@ -2169,7 +2437,15 @@ async function registrarVentaCompleta(cajaId, items, metodoPago, montoRecibido =
         }
 
         // 2. Verificar que la caja exista, esté abierta y quien vende sea el dueño de la caja o un administrador
-        const caja = await getQuery(`SELECT id, usuario_id, estado FROM cajas WHERE id = ?`, [cajaId]);
+        const caja = await getQuery(
+            `SELECT c.id, c.usuario_id, c.estado, c.caja_fisica_id,
+                    COALESCE(cf.nombre, 'Caja Principal') as caja_fisica_nombre,
+                    COALESCE(cf.habilita_respaldo_fiscal, 1) as habilita_respaldo_fiscal
+             FROM cajas c
+             LEFT JOIN cajas_fisicas cf ON c.caja_fisica_id = cf.id
+             WHERE c.id = ?`,
+            [cajaId]
+        );
         if (!caja) {
             throw new Error('La caja indicada no existe.');
         }
@@ -2500,17 +2776,34 @@ async function registrarVentaCompleta(cajaId, items, metodoPago, montoRecibido =
             }
         }
 
-        // Datos de facturación y snapshot tributario congelado al momento de la venta
+        // Datos de facturación, validación de permisos en backend y snapshot tributario congelado al momento de la venta
         const configNegocio = await obtenerConfiguracionNegocio();
         const regimenSnapshot = configNegocio?.regimen_tributario === 'regimen_general'
             ? 'regimen_general'
             : 'simplificado_control_interno';
 
         const conFactura = opcionesExtra?.tipoComprobante === 'factura' || Boolean(opcionesExtra?.conFactura);
-        if (regimenSnapshot === 'simplificado_control_interno' && conFactura) {
-            throw new Error(
-                'Operación no permitida: El negocio opera en Régimen Simplificado / Control Interno y no puede emitir ni registrar ventas con factura fiscal.'
-            );
+        if (conFactura) {
+            if (regimenSnapshot === 'simplificado_control_interno') {
+                throw new Error(
+                    'Operación no permitida: El negocio opera en Régimen Simplificado / Control Interno y no puede emitir ni registrar ventas con factura fiscal.'
+                );
+            }
+            if (Number(configNegocio?.emite_factura ?? 1) !== 1) {
+                throw new Error(
+                    'Operación no permitida: La emisión/registro de facturas en ventas está deshabilitada en la configuración contable del negocio.'
+                );
+            }
+            if (Number(operador.puede_registrar_respaldo_fiscal ?? 1) !== 1) {
+                throw new Error(
+                    `Permiso denegado: El usuario "${operador.nombre}" no tiene autorización para registrar ventas con factura fiscal.`
+                );
+            }
+            if (Number(caja.habilita_respaldo_fiscal ?? 1) !== 1) {
+                throw new Error(
+                    `Operación no permitida: La estación "${caja.caja_fisica_nombre}" tiene deshabilitado el registro de respaldo fiscal.`
+                );
+            }
         }
 
         const tipoComprobante = conFactura ? 'factura' : 'recibo';
@@ -2585,7 +2878,7 @@ async function registrarVentaCompleta(cajaId, items, metodoPago, montoRecibido =
         );
         const movimientoId = movRes.lastID;
 
-        // Registrar desglose en tabla movimientos_pagos
+        // Registrar desglose en tabla movimientos_pagos (fuente de verdad del dinero)
         if (montoEfectivo > 0) {
             await runQuery(
                 `INSERT INTO movimientos_pagos (movimiento_id, metodo_pago, monto, referencia) VALUES (?, 'efectivo', ?, NULL)`,
@@ -2718,7 +3011,7 @@ async function registrarVentaCompleta(cajaId, items, metodoPago, montoRecibido =
             );
         }
 
-        // 5. Descuento atómico de stock_actual en insumos (recetas y modificadores) y registro con movimiento_id
+        // 5. Descuento atómico de stock_actual en insumos (recetas y modificadores) y registro con movimiento_id y saldo resultante
         for (const insumoId in consumoAcumuladoInsumos) {
             const info = consumoAcumuladoInsumos[insumoId];
             const r = await runQuery(
@@ -2730,15 +3023,24 @@ async function registrarVentaCompleta(cajaId, items, metodoPago, montoRecibido =
                     `Insumo insuficiente (${info.nombre}): el pedido requiere ${info.cantidadTotalRequerida} ${info.unidad}.`
                 );
             }
+            const insAct = await getQuery(`SELECT stock_actual, costo_por_unidad FROM insumos WHERE id = ?`, [info.insumoId]);
+            const stockResIns = Number(insAct?.stock_actual || 0);
+            const cppResIns = Number(insAct?.costo_por_unidad ?? info.costoUnitario);
+
             await runQuery(
-                `INSERT INTO movimientos_insumos (insumo_id, movimiento_id, usuario_id, tipo, cantidad, costo_unitario, monto_total_compra, motivo)
-                 VALUES (?, ?, ?, 'consumo_venta', ?, ?, ?, ?)`,
+                `INSERT INTO movimientos_insumos (
+                    insumo_id, movimiento_id, usuario_id, tipo, cantidad, stock_resultante,
+                    costo_unitario, costo_promedio_resultante, monto_total_compra, motivo
+                 )
+                 VALUES (?, ?, ?, 'consumo_venta', ?, ?, ?, ?, ?, ?)`,
                 [
                     info.insumoId,
                     movimientoId,
                     operador.id,
                     info.cantidadTotalRequerida,
+                    stockResIns,
                     info.costoUnitario,
+                    cppResIns,
                     redondear2(info.cantidadTotalRequerida * info.costoUnitario),
                     `Venta Ticket #${movimientoId}`
                 ]
@@ -2788,56 +3090,81 @@ async function registrarEgreso(cajaId, monto, descripcion, metodoPago = 'efectiv
         throw new Error('El usuario que registra el egreso es obligatorio.');
     }
 
-    const ejecutor = await obtenerUsuarioPorId(usuarioId);
-    if (!ejecutor) {
-        throw new Error('El usuario que intenta registrar el egreso no existe o está inactivo.');
+    if (!['efectivo', 'qr'].includes(metodoPago)) {
+        throw new Error("Método de pago de egreso inválido. Debe ser 'efectivo' o 'qr'.");
     }
-
-    if (!esRolAdministrativo(ejecutor.rol) && metodoPago !== 'efectivo') {
-        throw new Error('Permiso denegado: un cajero solo puede registrar egresos de efectivo físico del cajón.');
-    }
-
-    const caja = await getQuery(`SELECT id, usuario_id, estado FROM cajas WHERE id = ?`, [cajaId]);
-    if (!caja) {
-        throw new Error('La caja indicada no existe.');
-    }
-    if (caja.estado !== 'abierta') {
-        throw new Error('No se puede registrar un egreso porque la caja no está abierta.');
-    }
-    if (Number(caja.usuario_id) !== Number(ejecutor.id) && !esRolAdministrativo(ejecutor.rol)) {
-        throw new Error('Permiso denegado: solo el cajero titular de la caja abierta o un Administrador puede registrar egresos en este turno.');
-    }
-
-    const CATEGORIAS_EGRESO_VALIDAS = ['gasto_operativo', 'compra_insumo', 'pago_proveedor', 'retiro_dueno', 'otro'];
-    const categoriaContable = CATEGORIAS_EGRESO_VALIDAS.includes(opcionesFiscales?.categoriaContable)
-        ? opcionesFiscales.categoriaContable
-        : 'gasto_operativo';
-
-    const conFactura = opcionesFiscales?.tipoComprobante === 'factura' || Boolean(opcionesFiscales?.conFactura);
-    const tipoComprobante = conFactura
-        ? 'factura'
-        : (opcionesFiscales?.tipoComprobante === 'sin_respaldo' ? 'sin_respaldo' : 'recibo');
-    const nroFactura = opcionesFiscales?.nroFactura && String(opcionesFiscales.nroFactura).trim() !== ''
-        ? String(opcionesFiscales.nroFactura).trim()
-        : null;
-    const proveedorNit = opcionesFiscales?.proveedorNit && String(opcionesFiscales.proveedorNit).trim() !== ''
-        ? String(opcionesFiscales.proveedorNit).trim()
-        : null;
-    const proveedorNombre = opcionesFiscales?.proveedorNombre && String(opcionesFiscales.proveedorNombre).trim() !== ''
-        ? String(opcionesFiscales.proveedorNombre).trim()
-        : null;
-    const referenciaQr = opcionesFiscales?.referenciaQr && String(opcionesFiscales.referenciaQr).trim() !== ''
-        ? String(opcionesFiscales.referenciaQr).trim()
-        : null;
-
-    const montoEfectivo = metodoPago === 'efectivo' ? montoValidado : 0;
-    const montoQr = metodoPago === 'qr' ? montoValidado : 0;
 
     return await enTransaccion(async () => {
+        const ejecutor = await obtenerUsuarioPorId(usuarioId);
+        if (!ejecutor) {
+            throw new Error('El usuario que intenta registrar el egreso no existe o está inactivo.');
+        }
+
+        if (!esRolAdministrativo(ejecutor.rol) && metodoPago !== 'efectivo') {
+            throw new Error('Permiso denegado: un cajero solo puede registrar egresos de efectivo físico del cajón.');
+        }
+
+        const caja = await getQuery(
+            `SELECT c.id, c.usuario_id, c.estado, c.caja_fisica_id,
+                    COALESCE(cf.nombre, 'Caja Principal') as caja_fisica_nombre,
+                    COALESCE(cf.habilita_respaldo_fiscal, 1) as habilita_respaldo_fiscal
+             FROM cajas c
+             LEFT JOIN cajas_fisicas cf ON c.caja_fisica_id = cf.id
+             WHERE c.id = ?`,
+            [cajaId]
+        );
+        if (!caja) {
+            throw new Error('La caja indicada no existe.');
+        }
+        if (caja.estado !== 'abierta') {
+            throw new Error('No se puede registrar un egreso porque la caja no está abierta.');
+        }
+        if (Number(caja.usuario_id) !== Number(ejecutor.id) && !esRolAdministrativo(ejecutor.rol)) {
+            throw new Error('Permiso denegado: solo el cajero titular de la caja abierta o un Administrador puede registrar egresos en este turno.');
+        }
+
         const configNegocio = await obtenerConfiguracionNegocio();
         const regimenSnapshot = configNegocio?.regimen_tributario === 'regimen_general'
             ? 'regimen_general'
             : 'simplificado_control_interno';
+
+        const CATEGORIAS_EGRESO_VALIDAS = ['gasto_operativo', 'compra_insumo', 'pago_proveedor', 'retiro_dueno', 'otro'];
+        const categoriaContable = CATEGORIAS_EGRESO_VALIDAS.includes(opcionesFiscales?.categoriaContable)
+            ? opcionesFiscales.categoriaContable
+            : 'gasto_operativo';
+
+        const conFactura = opcionesFiscales?.tipoComprobante === 'factura' || Boolean(opcionesFiscales?.conFactura);
+        if (conFactura) {
+            if (Number(configNegocio?.usa_respaldo_compras_egresos ?? 1) !== 1) {
+                throw new Error('Operación no permitida: El registro de respaldo fiscal en compras y egresos está deshabilitado en la configuración del negocio.');
+            }
+            if (Number(ejecutor.puede_registrar_respaldo_fiscal ?? 1) !== 1) {
+                throw new Error(`Permiso denegado: El usuario "${ejecutor.nombre}" no tiene autorización para registrar facturas en egresos.`);
+            }
+            if (Number(caja.habilita_respaldo_fiscal ?? 1) !== 1) {
+                throw new Error(`Operación no permitida: La estación "${caja.caja_fisica_nombre}" tiene deshabilitado el registro de respaldo fiscal.`);
+            }
+        }
+
+        const tipoComprobante = conFactura
+            ? 'factura'
+            : (opcionesFiscales?.tipoComprobante === 'sin_respaldo' ? 'sin_respaldo' : 'recibo');
+        const nroFactura = opcionesFiscales?.nroFactura && String(opcionesFiscales.nroFactura).trim() !== ''
+            ? String(opcionesFiscales.nroFactura).trim()
+            : null;
+        const proveedorNit = opcionesFiscales?.proveedorNit && String(opcionesFiscales.proveedorNit).trim() !== ''
+            ? String(opcionesFiscales.proveedorNit).trim()
+            : null;
+        const proveedorNombre = opcionesFiscales?.proveedorNombre && String(opcionesFiscales.proveedorNombre).trim() !== ''
+            ? String(opcionesFiscales.proveedorNombre).trim()
+            : null;
+        const referenciaQr = opcionesFiscales?.referenciaQr && String(opcionesFiscales.referenciaQr).trim() !== ''
+            ? String(opcionesFiscales.referenciaQr).trim()
+            : null;
+
+        const montoEfectivo = metodoPago === 'efectivo' ? montoValidado : 0;
+        const montoQr = metodoPago === 'qr' ? montoValidado : 0;
+
         const ivaPorcCfg = Number(configNegocio?.iva_porcentaje ?? 13);
         const ivaPorcSnapshot = (regimenSnapshot === 'regimen_general' && tipoComprobante === 'factura')
             ? ivaPorcCfg
@@ -2897,24 +3224,24 @@ async function registrarIngresoEfectivo(cajaId, monto, motivo, usuarioId = null)
         throw new Error('El usuario que registra el ingreso de efectivo es obligatorio.');
     }
 
-    const ejecutor = await obtenerUsuarioPorId(usuarioId);
-    if (!ejecutor) {
-        throw new Error('El usuario que intenta registrar el ingreso no existe o está inactivo.');
-    }
-
-    const caja = await getQuery(`SELECT id, usuario_id, estado FROM cajas WHERE id = ?`, [cajaId]);
-    if (!caja) {
-        throw new Error('La caja indicada no existe.');
-    }
-    if (caja.estado !== 'abierta') {
-        throw new Error('No se puede ingresar efectivo porque la caja no está abierta.');
-    }
-    if (Number(caja.usuario_id) !== Number(ejecutor.id) && !esRolAdministrativo(ejecutor.rol)) {
-        throw new Error('Permiso denegado: solo el cajero titular o un Administrador puede ingresar efectivo en este turno.');
-    }
-
     const descripcionFinal = `[REPOSICIÓN DE EFECTIVO] ${String(motivo).trim()}`;
     return await enTransaccion(async () => {
+        const ejecutor = await obtenerUsuarioPorId(usuarioId);
+        if (!ejecutor) {
+            throw new Error('El usuario que intenta registrar el ingreso no existe o está inactivo.');
+        }
+
+        const caja = await getQuery(`SELECT id, usuario_id, estado FROM cajas WHERE id = ?`, [cajaId]);
+        if (!caja) {
+            throw new Error('La caja indicada no existe.');
+        }
+        if (caja.estado !== 'abierta') {
+            throw new Error('No se puede ingresar efectivo porque la caja no está abierta.');
+        }
+        if (Number(caja.usuario_id) !== Number(ejecutor.id) && !esRolAdministrativo(ejecutor.rol)) {
+            throw new Error('Permiso denegado: solo el cajero titular o un Administrador puede ingresar efectivo en este turno.');
+        }
+
         const configNegocio = await obtenerConfiguracionNegocio();
         const regimenSnapshot = configNegocio?.regimen_tributario === 'regimen_general'
             ? 'regimen_general'
@@ -3072,15 +3399,24 @@ async function anularMovimientoConPermiso(adminId, movimientoId, motivoAnulacion
                 `UPDATE insumos SET stock_actual = ROUND(stock_actual + ?, 4) WHERE id = ?`,
                 [cantidadDevolver, cons.insumo_id]
             );
+            const insAct = await getQuery(`SELECT stock_actual, costo_por_unidad FROM insumos WHERE id = ?`, [cons.insumo_id]);
+            const stockResIns = Number(insAct?.stock_actual || 0);
+            const cppResIns = Number(insAct?.costo_por_unidad ?? costoOriginal);
+
             await runQuery(
-                `INSERT INTO movimientos_insumos (insumo_id, movimiento_id, usuario_id, tipo, cantidad, costo_unitario, monto_total_compra, motivo)
-                 VALUES (?, ?, ?, 'reingreso_anulacion', ?, ?, ?, ?)`,
+                `INSERT INTO movimientos_insumos (
+                    insumo_id, movimiento_id, usuario_id, tipo, cantidad, stock_resultante,
+                    costo_unitario, costo_promedio_resultante, monto_total_compra, motivo
+                 )
+                 VALUES (?, ?, ?, 'reingreso_anulacion', ?, ?, ?, ?, ?, ?)`,
                 [
                     cons.insumo_id,
                     movimientoId,
                     ejecutor.id,
                     cantidadDevolver,
+                    stockResIns,
                     costoOriginal,
+                    cppResIns,
                     redondear2(cantidadDevolver * costoOriginal),
                     `Anulación Ticket #${movimientoId}`
                 ]
@@ -3144,15 +3480,17 @@ async function cerrarCaja(cajaId, efectivoRealFisico, usuarioId = null, qrRealCo
             throw new Error('Permiso denegado: solo el cajero titular de la caja o un Administrador puede cerrarla.');
         }
 
+        // Fuente de verdad del dinero: tabla movimientos_pagos vinculada a movimientos completados
         const resumen = await allQuery(
             `SELECT
-                tipo,
-                COALESCE(categoria_contable, CASE WHEN tipo = 'egreso' THEN 'gasto_operativo' ELSE 'venta' END) as cat,
-                COALESCE(SUM(CASE WHEN metodo_pago = 'mixto' THEN monto_efectivo WHEN metodo_pago = 'efectivo' THEN monto ELSE 0 END), 0) as total_efectivo,
-                COALESCE(SUM(CASE WHEN metodo_pago = 'mixto' THEN monto_qr WHEN metodo_pago = 'qr' THEN monto ELSE 0 END), 0) as total_qr
-             FROM movimientos
-             WHERE caja_id = ? AND estado = 'completado'
-             GROUP BY tipo, cat`,
+                m.tipo,
+                COALESCE(m.categoria_contable, CASE WHEN m.tipo = 'egreso' THEN 'gasto_operativo' ELSE 'venta' END) as cat,
+                COALESCE(SUM(CASE WHEN mp.metodo_pago = 'efectivo' THEN mp.monto ELSE 0 END), 0) as total_efectivo,
+                COALESCE(SUM(CASE WHEN mp.metodo_pago = 'qr' THEN mp.monto ELSE 0 END), 0) as total_qr
+             FROM movimientos m
+             INNER JOIN movimientos_pagos mp ON mp.movimiento_id = m.id
+             WHERE m.caja_id = ? AND m.estado = 'completado'
+             GROUP BY m.tipo, cat`,
             [cajaId]
         );
 
@@ -3231,6 +3569,7 @@ async function obtenerDatosCierreParaNotificacion(cajaId) {
     const caja = await getQuery(
         `SELECT c.id, c.monto_inicial, c.efectivo_esperado, c.efectivo_real,
                 c.diferencia_efectivo, c.qr_esperado, c.qr_real, c.diferencia_qr, c.veces_reabierta,
+                COALESCE(c.observaciones_cierre, '') as observaciones_cierre,
                 datetime(c.fecha_apertura, 'localtime') as fecha_apertura,
                 datetime(c.fecha_cierre, 'localtime') as fecha_cierre,
                 c.estado,
@@ -3248,44 +3587,52 @@ async function obtenerDatosCierreParaNotificacion(cajaId) {
     const negocio = await obtenerConfiguracionNegocio();
 
     const movimientos = await allQuery(
-        `SELECT id, tipo, categoria_contable, metodo_pago, monto, monto_efectivo, monto_qr,
-                descripcion, datetime(fecha_hora, 'localtime') as fecha_hora
-         FROM movimientos
-         WHERE caja_id = ? AND estado = 'completado'
-         ORDER BY id ASC`,
+        `SELECT m.id, m.tipo, m.categoria_contable, m.metodo_pago, m.monto,
+                COALESCE(m.descuento_total, 0) as descuento_total,
+                COALESCE((SELECT SUM(mp.monto) FROM movimientos_pagos mp WHERE mp.movimiento_id = m.id AND mp.metodo_pago = 'efectivo'), m.monto_efectivo, 0) as pagado_efectivo,
+                COALESCE((SELECT SUM(mp.monto) FROM movimientos_pagos mp WHERE mp.movimiento_id = m.id AND mp.metodo_pago = 'qr'), m.monto_qr, 0) as pagado_qr,
+                m.descripcion, datetime(m.fecha_hora, 'localtime') as fecha_hora
+         FROM movimientos m
+         WHERE m.caja_id = ? AND m.estado = 'completado'
+         ORDER BY m.id ASC`,
         [cajaId]
     );
 
     let totalVentasEfectivo = 0;
     let totalVentasQR = 0;
+    let totalDescuentos = 0;
     let totalInyeccionSencillo = 0;
+    let totalEgresosEfectivo = 0;
+    let totalEgresosQR = 0;
     let totalEgresos = 0;
     let cantidadVentas = 0;
+    let cantidadVentasMixtas = 0;
     let cantidadEgresos = 0;
 
     for (const m of movimientos) {
         const monto = Number(m.monto || 0);
+        const ef = Number(m.pagado_efectivo || 0);
+        const qr = Number(m.pagado_qr || 0);
+
         if (m.tipo === 'ingreso') {
             const desc = (m.descripcion || '').toLowerCase();
             const esAporteCambio = m.categoria_contable === 'aporte_cambio'
                 || desc.startsWith('inyección')
                 || desc.startsWith('[reposición');
             if (esAporteCambio) {
-                totalInyeccionSencillo += monto;
+                totalInyeccionSencillo = redondear2(totalInyeccionSencillo + ef);
             } else {
                 cantidadVentas++;
-                if (m.metodo_pago === 'mixto') {
-                    totalVentasEfectivo += Number(m.monto_efectivo || 0);
-                    totalVentasQR += Number(m.monto_qr || 0);
-                } else if (m.metodo_pago === 'efectivo') {
-                    totalVentasEfectivo += monto;
-                } else if (m.metodo_pago === 'qr') {
-                    totalVentasQR += monto;
-                }
+                if (m.metodo_pago === 'mixto') cantidadVentasMixtas++;
+                totalVentasEfectivo = redondear2(totalVentasEfectivo + ef);
+                totalVentasQR = redondear2(totalVentasQR + qr);
+                totalDescuentos = redondear2(totalDescuentos + Number(m.descuento_total || 0));
             }
         } else if (m.tipo === 'egreso') {
             cantidadEgresos++;
-            totalEgresos += monto;
+            totalEgresosEfectivo = redondear2(totalEgresosEfectivo + ef);
+            totalEgresosQR = redondear2(totalEgresosQR + qr);
+            totalEgresos = redondear2(totalEgresos + monto);
         }
     }
 
@@ -3297,7 +3644,10 @@ async function obtenerDatosCierreParaNotificacion(cajaId) {
             totalVentas: redondear2(totalVentasEfectivo + totalVentasQR),
             totalVentasEfectivo: redondear2(totalVentasEfectivo),
             totalVentasQR: redondear2(totalVentasQR),
+            totalDescuentos: redondear2(totalDescuentos),
             totalInyeccionSencillo: redondear2(totalInyeccionSencillo),
+            totalEgresosEfectivo: redondear2(totalEgresosEfectivo),
+            totalEgresosQR: redondear2(totalEgresosQR),
             totalEgresos: redondear2(totalEgresos),
             efectivoEsperado: caja.efectivo_esperado !== null ? Number(caja.efectivo_esperado) : 0,
             efectivoReal: caja.efectivo_real !== null ? Number(caja.efectivo_real) : 0,
@@ -3305,7 +3655,9 @@ async function obtenerDatosCierreParaNotificacion(cajaId) {
             qrEsperado: Number(caja.qr_esperado || 0),
             qrReal: caja.qr_real !== null && caja.qr_real !== undefined ? Number(caja.qr_real) : null,
             diferenciaQr: caja.diferencia_qr !== null && caja.diferencia_qr !== undefined ? Number(caja.diferencia_qr) : null,
+            observacionesCierre: caja.observaciones_cierre || '',
             cantidadVentas,
+            cantidadVentasMixtas,
             cantidadEgresos
         }
     };
@@ -3568,52 +3920,33 @@ async function obtenerEstadisticasCaja(cajaId) {
 // 7. TENDENCIAS HORARIAS, MÉTODOS DE PAGO Y EXPORTACIONES CONTABLES (CSV / EXCEL)
 // ==========================================
 async function obtenerDesgloseMetodosPago(cajaId) {
-    // Excluye estrictamente reposiciones de cambio y desglosa pagos mixtos en sus canales reales (efectivo vs qr)
-    const ventas = await allQuery(
-        `SELECT m.metodo_pago, m.monto, m.monto_efectivo, m.monto_qr
-         FROM movimientos m
+    // Fuente de verdad del dinero: tabla movimientos_pagos vinculada a ventas comerciales completadas
+    const pagosVentas = await allQuery(
+        `SELECT mp.metodo_pago,
+                COUNT(DISTINCT m.id) as transacciones,
+                COALESCE(SUM(mp.monto), 0) as total
+         FROM movimientos_pagos mp
+         INNER JOIN movimientos m ON mp.movimiento_id = m.id
          WHERE m.caja_id = ?
            AND m.tipo = 'ingreso'
            AND m.estado = 'completado'
            AND COALESCE(m.categoria_contable, 'venta') = 'venta'
-           AND EXISTS (SELECT 1 FROM detalle_movimientos d WHERE d.movimiento_id = m.id)`,
+           AND EXISTS (SELECT 1 FROM detalle_movimientos d WHERE d.movimiento_id = m.id)
+         GROUP BY mp.metodo_pago`,
         [cajaId]
     );
 
-    const acumulador = {
-        efectivo: { metodoPago: 'efectivo', transacciones: 0, total: 0 },
-        qr: { metodoPago: 'qr', transacciones: 0, total: 0 }
-    };
+    const orden = { efectivo: 1, qr: 2 };
+    const filasActivas = pagosVentas
+        .filter((f) => Number(f.total || 0) > 0)
+        .sort((a, b) => (orden[a.metodo_pago] || 99) - (orden[b.metodo_pago] || 99));
+    const sumaTotal = filasActivas.reduce((acc, f) => acc + Number(f.total || 0), 0);
 
-    for (const v of ventas) {
-        if (v.metodo_pago === 'mixto') {
-            const ef = Number(v.monto_efectivo || 0);
-            const qr = Number(v.monto_qr || 0);
-            if (ef > 0) {
-                acumulador.efectivo.transacciones += 1;
-                acumulador.efectivo.total = redondear2(acumulador.efectivo.total + ef);
-            }
-            if (qr > 0) {
-                acumulador.qr.transacciones += 1;
-                acumulador.qr.total = redondear2(acumulador.qr.total + qr);
-            }
-        } else if (v.metodo_pago === 'qr') {
-            acumulador.qr.transacciones += 1;
-            acumulador.qr.total = redondear2(acumulador.qr.total + Number(v.monto || 0));
-        } else {
-            acumulador.efectivo.transacciones += 1;
-            acumulador.efectivo.total = redondear2(acumulador.efectivo.total + Number(v.monto || 0));
-        }
-    }
-
-    const filasActivas = Object.values(acumulador).filter(f => f.total > 0);
-    const sumaTotal = filasActivas.reduce((acc, f) => acc + f.total, 0);
-
-    return filasActivas.map(f => ({
-        metodoPago: f.metodoPago,
-        transacciones: f.transacciones,
+    return filasActivas.map((f) => ({
+        metodoPago: f.metodo_pago,
+        transacciones: Number(f.transacciones || 0),
         montoTotal: redondear2(f.total),
-        porcentaje: sumaTotal > 0 ? Number(((f.total / sumaTotal) * 100).toFixed(1)) : 0
+        porcentaje: sumaTotal > 0 ? Number(((Number(f.total) / sumaTotal) * 100).toFixed(1)) : 0
     }));
 }
 
@@ -3653,7 +3986,7 @@ function sanitizarTextoCSV(valor) {
     return `"${protegido.replace(/"/g, '""')}"`;
 }
 
-function construirClausulaFiltroMovimientos(cajaId = null, filtros = {}, aliasMov = 'm') {
+function construirClausulaFiltroMovimientos(cajaId = null, filtros = {}, aliasMov = 'm', aliasCaja = 'c') {
     const condiciones = [];
     const params = [];
 
@@ -3669,6 +4002,14 @@ function construirClausulaFiltroMovimientos(cajaId = null, filtros = {}, aliasMo
         condiciones.push(`date(${aliasMov}.fecha_hora, 'localtime') <= ?`);
         params.push(String(filtros.hasta).trim());
     }
+    if (filtros?.usuarioId && Number.isFinite(Number(filtros.usuarioId)) && Number(filtros.usuarioId) > 0) {
+        condiciones.push(`${aliasMov}.usuario_id = ?`);
+        params.push(Number(filtros.usuarioId));
+    }
+    if (filtros?.cajaFisicaId && Number.isFinite(Number(filtros.cajaFisicaId)) && Number(filtros.cajaFisicaId) > 0 && aliasCaja) {
+        condiciones.push(`${aliasCaja}.caja_fisica_id = ?`);
+        params.push(Number(filtros.cajaFisicaId));
+    }
 
     return {
         whereSql: condiciones.length > 0 ? `WHERE ${condiciones.join(' AND ')}` : '',
@@ -3677,7 +4018,10 @@ function construirClausulaFiltroMovimientos(cajaId = null, filtros = {}, aliasMo
 }
 
 async function generarReporteCSV(cajaId = null, filtros = {}) {
-    const { whereSql, params } = construirClausulaFiltroMovimientos(cajaId, filtros, 'm');
+    const negocio = await obtenerConfiguracionNegocio();
+    const ivaPorc = Number(negocio?.iva_porcentaje ?? 13);
+    const itPorc = Number(negocio?.it_porcentaje ?? 3);
+    const { whereSql, params } = construirClausulaFiltroMovimientos(cajaId, filtros, 'm', 'c');
 
     const filas = await allQuery(
         `SELECT m.id,
@@ -3695,11 +4039,14 @@ async function generarReporteCSV(cajaId = null, filtros = {}) {
                 COALESCE(m.subtotal_bruto, m.monto) as subtotal_bruto,
                 COALESCE(m.descuento_total, 0) as descuento_total,
                 m.monto,
-                COALESCE(m.monto_efectivo, CASE WHEN m.metodo_pago = 'efectivo' THEN m.monto ELSE 0 END) as monto_efectivo,
-                COALESCE(m.monto_qr, CASE WHEN m.metodo_pago = 'qr' THEN m.monto ELSE 0 END) as monto_qr,
+                COALESCE((SELECT SUM(mp.monto) FROM movimientos_pagos mp WHERE mp.movimiento_id = m.id AND mp.metodo_pago = 'efectivo'), m.monto_efectivo, CASE WHEN m.metodo_pago = 'efectivo' THEN m.monto ELSE 0 END) as monto_efectivo,
+                COALESCE((SELECT SUM(mp.monto) FROM movimientos_pagos mp WHERE mp.movimiento_id = m.id AND mp.metodo_pago = 'qr'), m.monto_qr, CASE WHEN m.metodo_pago = 'qr' THEN m.monto ELSE 0 END) as monto_qr,
                 COALESCE(m.referencia_qr, '') as referencia_qr,
                 COALESCE(m.monto_recibido, 0) as monto_recibido,
                 COALESCE(m.cambio, 0) as cambio,
+                m.regimen_tributario,
+                m.iva_monto,
+                m.it_monto,
                 COALESCE((SELECT ROUND(SUM(d.cantidad * d.costo_unitario), 2) FROM detalle_movimientos d WHERE d.movimiento_id = m.id), 0) as costo_cmv,
                 m.estado,
                 COALESCE(ua.nombre, '') as anulado_por_nombre,
@@ -3722,13 +4069,28 @@ async function generarReporteCSV(cajaId = null, filtros = {}) {
         'NIT_CI', 'Razon_Social', 'Subtotal_Bs', 'Descuento_Bs', 'Monto_Bs',
         'Monto_Efectivo_Bs', 'Monto_QR_Bs', 'Referencia_QR',
         'Recibido_Bs', 'Cambio_Bs', 'Costo_CMV_Bs', 'Utilidad_Bruta_Bs',
+        'IVA_Bs', 'IT_Bs', 'Regimen_Tributario',
         'Estado', 'Anulado_Por', 'Fecha_Anulacion', 'Motivo_Anulacion', 'Descripcion'
     ].join(';');
 
-    const lineas = filas.map(r => {
-        const esVentaCompletada = r.tipo === 'ingreso' && r.categoria_contable === 'venta' && r.estado === 'completado';
+    const lineas = filas.map((r) => {
+        const esCompletado = r.estado === 'completado';
+        const esVenta = r.tipo === 'ingreso' && r.categoria_contable === 'venta';
+        const esVentaCompletada = esCompletado && esVenta;
+        const montoNum = Number(r.monto || 0);
         const costoCmv = esVentaCompletada ? redondear2(r.costo_cmv) : 0;
-        const utilidadBruta = esVentaCompletada ? redondear2(Number(r.monto || 0) - costoCmv) : 0;
+        const utilidadBruta = esVentaCompletada ? redondear2(montoNum - costoCmv) : 0;
+        const tieneSnapshot = r.regimen_tributario !== null && r.regimen_tributario !== undefined;
+        const ivaNum = esCompletado
+            ? (tieneSnapshot
+                ? redondear2(r.iva_monto || 0)
+                : (r.tipo_comprobante === 'factura' ? redondear2(montoNum * (ivaPorc / 100)) : 0))
+            : 0;
+        const itNum = esVentaCompletada
+            ? (tieneSnapshot
+                ? redondear2(r.it_monto || 0)
+                : (r.tipo_comprobante === 'factura' ? redondear2(montoNum * (itPorc / 100)) : 0))
+            : 0;
 
         return [
             r.id,
@@ -3745,7 +4107,7 @@ async function generarReporteCSV(cajaId = null, filtros = {}) {
             sanitizarTextoCSV(r.cliente_razon_social),
             Number(r.subtotal_bruto || 0).toFixed(2),
             Number(r.descuento_total || 0).toFixed(2),
-            Number(r.monto || 0).toFixed(2),
+            montoNum.toFixed(2),
             Number(r.monto_efectivo || 0).toFixed(2),
             Number(r.monto_qr || 0).toFixed(2),
             sanitizarTextoCSV(r.referencia_qr),
@@ -3753,6 +4115,9 @@ async function generarReporteCSV(cajaId = null, filtros = {}) {
             Number(r.cambio || 0).toFixed(2),
             costoCmv.toFixed(2),
             utilidadBruta.toFixed(2),
+            ivaNum.toFixed(2),
+            itNum.toFixed(2),
+            r.regimen_tributario || negocio?.regimen_tributario || 'simplificado_control_interno',
             r.estado,
             sanitizarTextoCSV(r.anulado_por_nombre),
             r.fecha_anulacion,
@@ -3761,8 +4126,19 @@ async function generarReporteCSV(cajaId = null, filtros = {}) {
         ].join(';');
     });
 
+    const usuarioGenerador = filtros?.usuarioGenerador || 'Administrador / Sistema';
+    const periodoTexto = [
+        cajaId ? `Turno #${cajaId}` : 'Todos los turnos',
+        filtros?.desde || filtros?.hasta ? `Fechas: ${filtros?.desde || 'inicio'} a ${filtros?.hasta || 'hoy'}` : 'Histórico completo'
+    ].join(' | ');
+    const metaCsv = [
+        `# Reporte Contable POS - ${sanitizarTextoCSV(negocio?.nombre_negocio || 'Mi Negocio')} (NIT: ${sanitizarTextoCSV(negocio?.nit_negocio || 'S/N')})`,
+        `# Regimen: ${negocio?.regimen_tributario || 'simplificado_control_interno'} | Periodo: ${periodoTexto}`,
+        `# Usuario Generador: ${sanitizarTextoCSV(usuarioGenerador)} | Moneda: Bs (Bolivianos)`
+    ];
+
     // BOM UTF-8 (\uFEFF) para que Microsoft Excel en español abra tildes y símbolos directamente
-    return '\uFEFF' + [cabeceras, ...lineas].join('\n');
+    return '\uFEFF' + [...metaCsv, cabeceras, ...lineas].join('\n');
 }
 
 async function generarReporteExcel(cajaId = null, filtros = {}) {
@@ -3770,8 +4146,9 @@ async function generarReporteExcel(cajaId = null, filtros = {}) {
     const negocio = await obtenerConfiguracionNegocio();
     const ivaPorc = Number(negocio?.iva_porcentaje ?? 13);
     const itPorc = Number(negocio?.it_porcentaje ?? 3);
+    const usuarioGenerador = filtros?.usuarioGenerador || 'Administrador / Sistema';
 
-    const { whereSql: whereMov, params: paramsMov } = construirClausulaFiltroMovimientos(cajaId, filtros, 'm');
+    const { whereSql: whereMov, params: paramsMov } = construirClausulaFiltroMovimientos(cajaId, filtros, 'm', 'c');
 
     const movimientos = await allQuery(
         `SELECT m.id,
@@ -3789,8 +4166,8 @@ async function generarReporteExcel(cajaId = null, filtros = {}) {
                 COALESCE(m.subtotal_bruto, m.monto) as subtotal_bruto,
                 COALESCE(m.descuento_total, 0) as descuento_total,
                 m.monto,
-                COALESCE(m.monto_efectivo, CASE WHEN m.metodo_pago = 'efectivo' THEN m.monto ELSE 0 END) as monto_efectivo,
-                COALESCE(m.monto_qr, CASE WHEN m.metodo_pago = 'qr' THEN m.monto ELSE 0 END) as monto_qr,
+                COALESCE((SELECT SUM(mp.monto) FROM movimientos_pagos mp WHERE mp.movimiento_id = m.id AND mp.metodo_pago = 'efectivo'), m.monto_efectivo, CASE WHEN m.metodo_pago = 'efectivo' THEN m.monto ELSE 0 END) as monto_efectivo,
+                COALESCE((SELECT SUM(mp.monto) FROM movimientos_pagos mp WHERE mp.movimiento_id = m.id AND mp.metodo_pago = 'qr'), m.monto_qr, CASE WHEN m.metodo_pago = 'qr' THEN m.monto ELSE 0 END) as monto_qr,
                 COALESCE(m.referencia_qr, '') as referencia_qr,
                 COALESCE(m.monto_recibido, 0) as monto_recibido,
                 COALESCE(m.cambio, 0) as cambio,
@@ -3829,6 +4206,14 @@ async function generarReporteExcel(cajaId = null, filtros = {}) {
         condCajas.push(`date(c.fecha_apertura, 'localtime') <= ?`);
         paramsCajas.push(String(filtros.hasta).trim());
     }
+    if (filtros?.usuarioId && Number.isFinite(Number(filtros.usuarioId)) && Number(filtros.usuarioId) > 0) {
+        condCajas.push(`c.usuario_id = ?`);
+        paramsCajas.push(Number(filtros.usuarioId));
+    }
+    if (filtros?.cajaFisicaId && Number.isFinite(Number(filtros.cajaFisicaId)) && Number(filtros.cajaFisicaId) > 0) {
+        condCajas.push(`c.caja_fisica_id = ?`);
+        paramsCajas.push(Number(filtros.cajaFisicaId));
+    }
     const whereCajas = condCajas.length > 0 ? `WHERE ${condCajas.join(' AND ')}` : '';
 
     const cajas = await allQuery(
@@ -3845,6 +4230,7 @@ async function generarReporteExcel(cajaId = null, filtros = {}) {
                 c.qr_esperado,
                 c.qr_real,
                 c.diferencia_qr,
+                COALESCE(c.observaciones_cierre, '') as observaciones_cierre,
                 c.veces_reabierta,
                 COALESCE(c.historial_reaperturas, '') as historial_reaperturas
          FROM cajas c
@@ -3855,12 +4241,13 @@ async function generarReporteExcel(cajaId = null, filtros = {}) {
         paramsCajas
     );
 
-    const detallesVentas = await allQuery(
+    const detallesVentasRaw = await allQuery(
         `SELECT d.id as detalle_id,
                 m.id as movimiento_id,
                 m.caja_id,
                 datetime(m.fecha_hora, 'localtime') as fecha_hora,
                 COALESCE(u.nombre, '—') as operador,
+                d.producto_id,
                 p.nombre as producto_nombre,
                 p.categoria as producto_categoria,
                 p.tipo_inventario,
@@ -3868,8 +4255,9 @@ async function generarReporteExcel(cajaId = null, filtros = {}) {
                 d.precio_unitario,
                 d.costo_unitario,
                 d.subtotal,
-                ROUND(d.cantidad * d.costo_unitario, 2) as costo_total,
-                ROUND(d.subtotal - (d.cantidad * d.costo_unitario), 2) as utilidad_bruta,
+                COALESCE(m.subtotal_bruto, m.monto) as subtotal_bruto_mov,
+                COALESCE(m.descuento_total, 0) as descuento_total_mov,
+                m.monto as monto_neto_mov,
                 m.metodo_pago,
                 m.estado,
                 COALESCE((
@@ -3879,12 +4267,86 @@ async function generarReporteExcel(cajaId = null, filtros = {}) {
                 ), '') as modificadores_aplicados
          FROM detalle_movimientos d
          INNER JOIN movimientos m ON d.movimiento_id = m.id
+         LEFT JOIN cajas c ON m.caja_id = c.id
          INNER JOIN productos p ON d.producto_id = p.id
          LEFT JOIN usuarios u ON m.usuario_id = u.id
          ${whereMov}
-         ORDER BY d.id DESC`,
+         ORDER BY m.id ASC, d.id ASC`,
         paramsMov
     );
+
+    // Prorrateo exacto de descuentos por ticket (con ajuste de centavo residual en la última línea)
+    // para garantizar que SUM(ingreso_neto) === Ventas Netas y SUM(utilidad_bruta) === Ganancia Bruta
+    const gruposPorTicket = new Map();
+    for (const det of detallesVentasRaw) {
+        if (!gruposPorTicket.has(det.movimiento_id)) gruposPorTicket.set(det.movimiento_id, []);
+        gruposPorTicket.get(det.movimiento_id).push(det);
+    }
+
+    const detallesVentasProcesados = [];
+    const mapaRentabilidadProd = new Map();
+
+    for (const [, lineasTicket] of gruposPorTicket.entries()) {
+        const subBrutoMov = Number(lineasTicket[0].subtotal_bruto_mov || 0);
+        const descMov = Number(lineasTicket[0].descuento_total_mov || 0);
+        const montoNetoMov = redondear2(lineasTicket[0].monto_neto_mov);
+        let acumuladoNeto = 0;
+
+        for (let i = 0; i < lineasTicket.length; i++) {
+            const lin = lineasTicket[i];
+            const subLinea = redondear2(lin.subtotal || 0);
+            let ingresoNetoLinea;
+            if (descMov <= 0 || subBrutoMov <= 0) {
+                ingresoNetoLinea = subLinea;
+            } else if (i === lineasTicket.length - 1) {
+                ingresoNetoLinea = redondear2(montoNetoMov - acumuladoNeto);
+            } else {
+                const descLin = redondear2(descMov * (subLinea / subBrutoMov));
+                ingresoNetoLinea = redondear2(subLinea - descLin);
+                acumuladoNeto = redondear2(acumuladoNeto + ingresoNetoLinea);
+            }
+
+            const descuentoProrrateado = redondear2(subLinea - ingresoNetoLinea);
+            const costoTotalLinea = redondear2(Number(lin.cantidad || 0) * Number(lin.costo_unitario || 0));
+            const utilidadBrutaNeta = redondear2(ingresoNetoLinea - costoTotalLinea);
+
+            detallesVentasProcesados.push({
+                ...lin,
+                subtotal: subLinea,
+                descuento_prorrateado: descuentoProrrateado,
+                ingreso_neto: ingresoNetoLinea,
+                costo_total: costoTotalLinea,
+                utilidad_bruta: utilidadBrutaNeta
+            });
+
+            if (lin.estado === 'completado') {
+                if (!mapaRentabilidadProd.has(lin.producto_id)) {
+                    mapaRentabilidadProd.set(lin.producto_id, {
+                        producto_id: lin.producto_id,
+                        producto_nombre: lin.producto_nombre,
+                        categoria: lin.producto_categoria || 'Sin categoría',
+                        tipo_inventario: lin.tipo_inventario,
+                        unidades_vendidas: 0,
+                        subtotal_bruto: 0,
+                        descuento_prorrateado: 0,
+                        ingreso_neto: 0,
+                        costo_cmv: 0,
+                        ganancia_bruta: 0
+                    });
+                }
+                const accP = mapaRentabilidadProd.get(lin.producto_id);
+                accP.unidades_vendidas = Number((accP.unidades_vendidas + Number(lin.cantidad || 0)).toFixed(4));
+                accP.subtotal_bruto = redondear2(accP.subtotal_bruto + subLinea);
+                accP.descuento_prorrateado = redondear2(accP.descuento_prorrateado + descuentoProrrateado);
+                accP.ingreso_neto = redondear2(accP.ingreso_neto + ingresoNetoLinea);
+                accP.costo_cmv = redondear2(accP.costo_cmv + costoTotalLinea);
+                accP.ganancia_bruta = redondear2(accP.ganancia_bruta + utilidadBrutaNeta);
+            }
+        }
+    }
+
+    const detallesVentas = detallesVentasProcesados.sort((a, b) => b.detalle_id - a.detalle_id);
+    const rentabilidadPorProducto = Array.from(mapaRentabilidadProd.values()).sort((a, b) => b.ingreso_neto - a.ingreso_neto);
 
     const condInsumos = [`mi.tipo IN ('compra', 'merma')`];
     const paramsIns = [];
@@ -3914,7 +4376,7 @@ async function generarReporteExcel(cajaId = null, filtros = {}) {
                    mi.fecha_hora as fecha_orden,
                    mi.cantidad,
                    mi.costo_unitario,
-                   ROUND(mi.cantidad * mi.costo_unitario, 2) as monto_total,
+                   ROUND(COALESCE(NULLIF(mi.monto_total_compra, 0), mi.cantidad * mi.costo_unitario), 2) as monto_total,
                    COALESCE(mi.proveedor_nombre, '') as proveedor_nombre,
                    COALESCE(mi.proveedor_nit, '') as proveedor_nit,
                    COALESCE(mi.nro_factura_compra, '') as nro_factura_compra,
@@ -3989,6 +4451,48 @@ async function generarReporteExcel(cajaId = null, filtros = {}) {
         paramsKardexCrono
     );
 
+    const condKardexIns = [];
+    const paramsKardexIns = [];
+    if (cajaId) {
+        condKardexIns.push(`(mi.movimiento_id IS NULL OR m.caja_id = ?)`);
+        paramsKardexIns.push(Number(cajaId));
+    }
+    if (filtros?.desde && /^\d{4}-\d{2}-\d{2}$/.test(String(filtros.desde).trim())) {
+        condKardexIns.push(`date(mi.fecha_hora, 'localtime') >= ?`);
+        paramsKardexIns.push(String(filtros.desde).trim());
+    }
+    if (filtros?.hasta && /^\d{4}-\d{2}-\d{2}$/.test(String(filtros.hasta).trim())) {
+        condKardexIns.push(`date(mi.fecha_hora, 'localtime') <= ?`);
+        paramsKardexIns.push(String(filtros.hasta).trim());
+    }
+    const whereKardexIns = condKardexIns.length > 0 ? `WHERE ${condKardexIns.join(' AND ')}` : '';
+
+    const kardexCronologicoInsumos = await allQuery(
+        `SELECT mi.id,
+                mi.insumo_id,
+                i.nombre as insumo_nombre,
+                i.unidad_medida,
+                mi.movimiento_id,
+                COALESCE(u.nombre, 'Sistema') as operador,
+                mi.tipo,
+                datetime(mi.fecha_hora, 'localtime') as fecha_hora,
+                mi.cantidad,
+                mi.stock_resultante,
+                mi.costo_unitario,
+                COALESCE(NULLIF(mi.costo_promedio_resultante, 0), mi.costo_unitario, i.costo_por_unidad, 0) as costo_promedio_resultante,
+                COALESCE(mi.monto_total_compra, ROUND(mi.cantidad * mi.costo_unitario, 2)) as monto_total,
+                COALESCE(mi.proveedor_nombre, '') as proveedor_nombre,
+                COALESCE(mi.nro_factura_compra, '') as nro_factura_compra,
+                mi.motivo
+         FROM movimientos_insumos mi
+         INNER JOIN insumos i ON mi.insumo_id = i.id
+         LEFT JOIN usuarios u ON mi.usuario_id = u.id
+         LEFT JOIN movimientos m ON mi.movimiento_id = m.id
+         ${whereKardexIns}
+         ORDER BY mi.id ASC`,
+        paramsKardexIns
+    );
+
     const insumosKardex = await allQuery(
         `SELECT i.id,
                 i.nombre,
@@ -3997,7 +4501,7 @@ async function generarReporteExcel(cajaId = null, filtros = {}) {
                 i.stock_actual,
                 i.costo_por_unidad,
                 ROUND(i.stock_actual * i.costo_por_unidad, 2) as valor_inventario,
-                COALESCE((SELECT SUM(cantidad) FROM movimientos_insumos mi WHERE mi.insumo_id = i.id AND mi.tipo = 'compra'), 0) as total_compras,
+                COALESCE((SELECT SUM(cantidad) FROM movimientos_insumos mi WHERE mi.insumo_id = i.id AND mi.tipo IN ('inventario_inicial', 'compra')), 0) as total_compras,
                 COALESCE((
                     SELECT MAX(0, SUM(CASE WHEN mi.tipo = 'consumo_venta' THEN mi.cantidad WHEN mi.tipo = 'reingreso_anulacion' THEN -mi.cantidad ELSE 0 END))
                     FROM movimientos_insumos mi WHERE mi.insumo_id = i.id
@@ -4070,6 +4574,8 @@ async function generarReporteExcel(cajaId = null, filtros = {}) {
         { header: 'Costo CMV (Bs)', key: 'costo_cmv', width: 15 },
         { header: 'Utilidad Bruta (Bs)', key: 'utilidad_bruta', width: 17 },
         { header: 'IVA (Bs)', key: 'iva_monto', width: 13 },
+        { header: 'IT (Bs)', key: 'it_monto', width: 13 },
+        { header: 'Régimen Snapshot', key: 'regimen_tributario', width: 18 },
         { header: 'Estado', key: 'estado', width: 13 },
         { header: 'Anulado Por', key: 'anulado_por_nombre', width: 15 },
         { header: 'Fecha Anulación', key: 'fecha_anulacion', width: 19 },
@@ -4088,6 +4594,7 @@ async function generarReporteExcel(cajaId = null, filtros = {}) {
     let sumIvaVentas = 0;
     let sumItVentas = 0;
     let sumEgresos = 0;
+    let sumCfIvaEgresos = 0;
     let sumAportesCambio = 0;
 
     for (const m of movimientos) {
@@ -4127,6 +4634,7 @@ async function generarReporteExcel(cajaId = null, filtros = {}) {
                 sumAportesCambio = redondear2(sumAportesCambio + montoNum);
             } else if (m.tipo === 'egreso') {
                 sumEgresos = redondear2(sumEgresos + montoNum);
+                sumCfIvaEgresos = redondear2(sumCfIvaEgresos + ivaNum);
             }
         }
 
@@ -4141,7 +4649,9 @@ async function generarReporteExcel(cajaId = null, filtros = {}) {
             cambio: Number(m.cambio || 0),
             costo_cmv: cmvNum,
             utilidad_bruta: utilNum,
-            iva_monto: ivaNum
+            iva_monto: ivaNum,
+            it_monto: itNum,
+            regimen_tributario: m.regimen_tributario || negocio?.regimen_tributario || 'simplificado_control_interno'
         });
     }
 
@@ -4156,12 +4666,13 @@ async function generarReporteExcel(cajaId = null, filtros = {}) {
             monto_qr: sumQrVentas,
             costo_cmv: sumCostoVentas,
             utilidad_bruta: sumUtilidadVentas,
-            iva_monto: sumIvaVentas
+            iva_monto: sumIvaVentas,
+            it_monto: sumItVentas
         });
         estiloTotales(filaTotMov);
     }
 
-    ['M', 'N', 'O', 'P', 'Q', 'S', 'T', 'U', 'V', 'W'].forEach((col) => {
+    ['M', 'N', 'O', 'P', 'Q', 'S', 'T', 'U', 'V', 'W', 'X'].forEach((col) => {
         hojaMov.getColumn(col).numFmt = '#,##0.00';
     });
 
@@ -4183,6 +4694,7 @@ async function generarReporteExcel(cajaId = null, filtros = {}) {
         { header: 'QR Esperado (Bs)', key: 'qr_esperado', width: 17 },
         { header: 'QR Real Conciliado (Bs)', key: 'qr_real', width: 22 },
         { header: 'Diferencia QR (Bs)', key: 'diferencia_qr', width: 18 },
+        { header: 'Observaciones Cierre', key: 'observaciones_cierre', width: 26 },
         { header: 'Reaperturas', key: 'veces_reabierta', width: 13 },
         { header: 'Historial Reaperturas', key: 'historial_reaperturas', width: 32 }
     ];
@@ -4199,6 +4711,7 @@ async function generarReporteExcel(cajaId = null, filtros = {}) {
             qr_esperado: Number(c.qr_esperado || 0),
             qr_real: c.qr_real !== null && c.qr_real !== undefined ? Number(c.qr_real) : null,
             diferencia_qr: c.diferencia_qr !== null && c.diferencia_qr !== undefined ? Number(c.diferencia_qr) : null,
+            observaciones_cierre: c.observaciones_cierre || '',
             veces_reabierta: Number(c.veces_reabierta || 0)
         });
     }
@@ -4223,7 +4736,9 @@ async function generarReporteExcel(cajaId = null, filtros = {}) {
         { header: 'Cantidad', key: 'cantidad', width: 12 },
         { header: 'Precio Unit. (Bs)', key: 'precio_unitario', width: 16 },
         { header: 'Costo Unit. CPP (Bs)', key: 'costo_unitario', width: 18 },
-        { header: 'Subtotal Venta (Bs)', key: 'subtotal', width: 18 },
+        { header: 'Subtotal Bruto (Bs)', key: 'subtotal', width: 18 },
+        { header: 'Descuento Prorr. (Bs)', key: 'descuento_prorrateado', width: 19 },
+        { header: 'Ingreso Neto (Bs)', key: 'ingreso_neto', width: 18 },
         { header: 'Costo Total CMV (Bs)', key: 'costo_total', width: 19 },
         { header: 'Utilidad Bruta (Bs)', key: 'utilidad_bruta', width: 18 },
         { header: 'Estado Ticket', key: 'estado', width: 14 }
@@ -4232,6 +4747,8 @@ async function generarReporteExcel(cajaId = null, filtros = {}) {
 
     let totCantDet = 0;
     let totSubDet = 0;
+    let totDescDet = 0;
+    let totNetoDet = 0;
     let totCmvDet = 0;
     let totUtilDet = 0;
 
@@ -4239,6 +4756,8 @@ async function generarReporteExcel(cajaId = null, filtros = {}) {
         if (d.estado === 'completado') {
             totCantDet = redondear2(totCantDet + Number(d.cantidad || 0));
             totSubDet = redondear2(totSubDet + Number(d.subtotal || 0));
+            totDescDet = redondear2(totDescDet + Number(d.descuento_prorrateado || 0));
+            totNetoDet = redondear2(totNetoDet + Number(d.ingreso_neto || 0));
             totCmvDet = redondear2(totCmvDet + Number(d.costo_total || 0));
             totUtilDet = redondear2(totUtilDet + Number(d.utilidad_bruta || 0));
         }
@@ -4248,6 +4767,8 @@ async function generarReporteExcel(cajaId = null, filtros = {}) {
             precio_unitario: Number(d.precio_unitario || 0),
             costo_unitario: Number(d.costo_unitario || 0),
             subtotal: Number(d.subtotal || 0),
+            descuento_prorrateado: Number(d.descuento_prorrateado || 0),
+            ingreso_neto: Number(d.ingreso_neto || 0),
             costo_total: Number(d.costo_total || 0),
             utilidad_bruta: Number(d.utilidad_bruta || 0)
         });
@@ -4259,17 +4780,64 @@ async function generarReporteExcel(cajaId = null, filtros = {}) {
             producto_nombre: 'TOTAL ÍTEMS COMPLETADOS',
             cantidad: totCantDet,
             subtotal: totSubDet,
+            descuento_prorrateado: totDescDet,
+            ingreso_neto: totNetoDet,
             costo_total: totCmvDet,
             utilidad_bruta: totUtilDet
         });
         estiloTotales(filaTotDet);
     }
-    ['J', 'K', 'L', 'M', 'N', 'O'].forEach((col) => {
+    ['J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q'].forEach((col) => {
         hojaDet.getColumn(col).numFmt = '#,##0.00';
     });
 
     // =========================================================================
-    // HOJA 4: COMPRAS A PROVEEDORES Y MERMAS DE INVENTARIO (INSUMOS + DIRECTOS)
+    // HOJA 4: RENTABILIDAD POR PRODUCTO (DESCUENTOS PRORRATEADOS)
+    // =========================================================================
+    const hojaRent = workbook.addWorksheet('Rentabilidad por Producto');
+    hojaRent.columns = [
+        { header: 'ID Producto', key: 'producto_id', width: 13 },
+        { header: 'Producto / Servicio', key: 'producto_nombre', width: 30 },
+        { header: 'Categoría', key: 'categoria', width: 22 },
+        { header: 'Modalidad', key: 'tipo_inventario', width: 15 },
+        { header: 'Unidades Vendidas', key: 'unidades_vendidas', width: 18 },
+        { header: 'Subtotal Bruto (Bs)', key: 'subtotal_bruto', width: 18 },
+        { header: 'Descuento Prorr. (Bs)', key: 'descuento_prorrateado', width: 20 },
+        { header: 'Ingreso Neto (Bs)', key: 'ingreso_neto', width: 18 },
+        { header: 'Costo Total CMV (Bs)', key: 'costo_cmv', width: 20 },
+        { header: 'Ganancia Bruta (Bs)', key: 'ganancia_bruta', width: 19 },
+        { header: 'Margen Neto (%)', key: 'margen_porcentaje', width: 16 }
+    ];
+    estiloCabecera(hojaRent.getRow(1), 'FF0F766E');
+
+    for (const rp of rentabilidadPorProducto) {
+        const margen = rp.ingreso_neto > 0 ? redondear2((rp.ganancia_bruta / rp.ingreso_neto) * 100) : 0;
+        hojaRent.addRow({
+            ...rp,
+            margen_porcentaje: margen
+        });
+    }
+    if (rentabilidadPorProducto.length > 0) {
+        const margenTotal = totNetoDet > 0 ? redondear2((totUtilDet / totNetoDet) * 100) : 0;
+        const filaTotRent = hojaRent.addRow({
+            producto_id: 'TOTAL',
+            producto_nombre: 'TOTAL RENTABILIDAD PRODUCTOS VENDIDOS',
+            unidades_vendidas: totCantDet,
+            subtotal_bruto: totSubDet,
+            descuento_prorrateado: totDescDet,
+            ingreso_neto: totNetoDet,
+            costo_cmv: totCmvDet,
+            ganancia_bruta: totUtilDet,
+            margen_porcentaje: margenTotal
+        });
+        estiloTotales(filaTotRent);
+    }
+    ['E', 'F', 'G', 'H', 'I', 'J', 'K'].forEach((col) => {
+        hojaRent.getColumn(col).numFmt = '#,##0.00';
+    });
+
+    // =========================================================================
+    // HOJA 5: COMPRAS A PROVEEDORES Y MERMAS DE INVENTARIO (INSUMOS + DIRECTOS)
     // =========================================================================
     const hojaCompras = workbook.addWorksheet('Compras y Mermas');
     hojaCompras.columns = [
@@ -4291,10 +4859,20 @@ async function generarReporteExcel(cajaId = null, filtros = {}) {
     ];
     estiloCabecera(hojaCompras.getRow(1), 'FF15803D');
 
+    let sumMontoCompras = 0;
+    let sumMontoMermas = 0;
+    let sumCfIvaCompras = 0;
+
     for (const cm of comprasYMermasInsumos) {
         const montoTotal = Number(cm.monto_total || 0);
         const tieneFac = Number(cm.con_factura) === 1;
         const cfIva = (cm.tipo === 'compra' && tieneFac) ? redondear2(montoTotal * (ivaPorc / 100)) : 0;
+        if (cm.tipo === 'compra') {
+            sumMontoCompras = redondear2(sumMontoCompras + montoTotal);
+            sumCfIvaCompras = redondear2(sumCfIvaCompras + cfIva);
+        } else if (cm.tipo === 'merma') {
+            sumMontoMermas = redondear2(sumMontoMermas + montoTotal);
+        }
         hojaCompras.addRow({
             ...cm,
             cantidad: Number(cm.cantidad || 0),
@@ -4304,12 +4882,21 @@ async function generarReporteExcel(cajaId = null, filtros = {}) {
             credito_fiscal: cfIva
         });
     }
+    if (comprasYMermasInsumos.length > 0) {
+        const filaTotComp = hojaCompras.addRow({
+            id: 'TOTAL',
+            item_nombre: `Compras: Bs ${sumMontoCompras.toFixed(2)} | Mermas: Bs ${sumMontoMermas.toFixed(2)}`,
+            monto_total: redondear2(sumMontoCompras + sumMontoMermas),
+            credito_fiscal: sumCfIvaCompras
+        });
+        estiloTotales(filaTotComp);
+    }
     ['G', 'H', 'I', 'N'].forEach((col) => {
         hojaCompras.getColumn(col).numFmt = '#,##0.00';
     });
 
     // =========================================================================
-    // HOJA 5: INVENTARIO VALORADO Y RESUMEN KARDEX (NIC 2 - CPP)
+    // HOJA 6: INVENTARIO VALORADO Y RESUMEN KARDEX (NIC 2 - CPP)
     // =========================================================================
     const hojaKardex = workbook.addWorksheet('Inventario Kardex');
     hojaKardex.columns = [
@@ -4351,7 +4938,7 @@ async function generarReporteExcel(cajaId = null, filtros = {}) {
     });
 
     // =========================================================================
-    // HOJA 6: KARDEX PRODUCTOS (HISTORIAL CRONOLÓGICO CON SALDOS Y VALORIZACIÓN)
+    // HOJA 7: KARDEX PRODUCTOS (HISTORIAL CRONOLÓGICO CON SALDOS Y VALORIZACIÓN)
     // =========================================================================
     const hojaKardexProd = workbook.addWorksheet('Kardex Productos');
     hojaKardexProd.columns = [
@@ -4420,12 +5007,143 @@ async function generarReporteExcel(cajaId = null, filtros = {}) {
     });
 
     // =========================================================================
-    // HOJA 7: RESUMEN CONTABLE Y ESTADO DE RESULTADOS
+    // HOJA 8: KARDEX INSUMOS (HISTORIAL CRONOLÓGICO CON SALDOS Y VALORIZACIÓN)
+    // =========================================================================
+    const hojaKardexIns = workbook.addWorksheet('Kardex Insumos');
+    hojaKardexIns.columns = [
+        { header: 'ID Kardex', key: 'id', width: 11 },
+        { header: 'Fecha y Hora', key: 'fecha_hora', width: 20 },
+        { header: 'Insumo / Material', key: 'insumo_nombre', width: 28 },
+        { header: 'Unidad', key: 'unidad_medida', width: 11 },
+        { header: 'Tipo Movimiento', key: 'tipo', width: 18 },
+        { header: 'Ticket #', key: 'movimiento_id', width: 11 },
+        { header: 'Operador', key: 'operador', width: 15 },
+        { header: 'Entrada (+)', key: 'entrada', width: 14 },
+        { header: 'Salida (-)', key: 'salida', width: 14 },
+        { header: 'Saldo Físico', key: 'stock_resultante', width: 14 },
+        { header: 'Costo Unit. Mov (Bs)', key: 'costo_unitario', width: 19 },
+        { header: 'Importe Mov (Bs)', key: 'monto_total', width: 17 },
+        { header: 'CPP Resultante (Bs)', key: 'costo_promedio_resultante', width: 19 },
+        { header: 'Valor Saldo (Bs)', key: 'valor_saldo', width: 18 },
+        { header: 'Motivo / Respaldo', key: 'motivo', width: 34 }
+    ];
+    estiloCabecera(hojaKardexIns.getRow(1), 'FF4F46E5');
+
+    let totEntradasKardexIns = 0;
+    let totSalidasKardexIns = 0;
+    for (const ki of kardexCronologicoInsumos) {
+        const cant = Number(ki.cantidad || 0);
+        const esEntrada = ['inventario_inicial', 'compra', 'reingreso_anulacion'].includes(ki.tipo)
+            || (ki.tipo === 'ajuste' && cant >= 0);
+        const entrada = esEntrada ? Math.abs(cant) : 0;
+        const salida = !esEntrada ? Math.abs(cant) : 0;
+        const saldo = Number(ki.stock_resultante || 0);
+        const cppRes = Number(ki.costo_promedio_resultante || ki.costo_unitario || 0);
+        const valorSaldo = redondear2(saldo * cppRes);
+
+        totEntradasKardexIns = redondear2(totEntradasKardexIns + entrada);
+        totSalidasKardexIns = redondear2(totSalidasKardexIns + salida);
+
+        hojaKardexIns.addRow({
+            id: ki.id,
+            fecha_hora: ki.fecha_hora,
+            insumo_nombre: ki.insumo_nombre,
+            unidad_medida: ki.unidad_medida,
+            tipo: ki.tipo,
+            movimiento_id: ki.movimiento_id || '—',
+            operador: ki.operador,
+            entrada,
+            salida,
+            stock_resultante: saldo,
+            costo_unitario: Number(ki.costo_unitario || 0),
+            monto_total: Number(ki.monto_total || 0),
+            costo_promedio_resultante: cppRes,
+            valor_saldo: valorSaldo,
+            motivo: ki.motivo || ''
+        });
+    }
+    if (kardexCronologicoInsumos.length > 0) {
+        const filaTotKi = hojaKardexIns.addRow({
+            id: 'TOTAL',
+            insumo_nombre: 'MOVIMIENTOS DE INSUMOS DEL PERIODO',
+            entrada: totEntradasKardexIns,
+            salida: totSalidasKardexIns
+        });
+        estiloTotales(filaTotKi);
+    }
+    ['H', 'I', 'J', 'K', 'L', 'M', 'N'].forEach((col) => {
+        hojaKardexIns.getColumn(col).numFmt = '#,##0.00';
+    });
+
+    // =========================================================================
+    // HOJA 9: HISTORIAL DE ANULACIONES AUDITADAS
+    // =========================================================================
+    const hojaAnul = workbook.addWorksheet('Historial Anulaciones');
+    hojaAnul.columns = [
+        { header: 'ID Mov.', key: 'id', width: 11 },
+        { header: 'N° Turno', key: 'caja_id', width: 11 },
+        { header: 'Estación / Caja', key: 'caja_nombre', width: 20 },
+        { header: 'Fecha Original', key: 'fecha_hora', width: 20 },
+        { header: 'Operador Original', key: 'operador', width: 17 },
+        { header: 'Categoría', key: 'categoria_contable', width: 16 },
+        { header: 'Método Pago', key: 'metodo_pago', width: 14 },
+        { header: 'Monto Revertido (Bs)', key: 'monto', width: 20 },
+        { header: 'Efectivo Revertido (Bs)', key: 'monto_efectivo', width: 21 },
+        { header: 'QR Revertido (Bs)', key: 'monto_qr', width: 18 },
+        { header: 'Anulado Por', key: 'anulado_por_nombre', width: 17 },
+        { header: 'Fecha Anulación', key: 'fecha_anulacion', width: 20 },
+        { header: 'Motivo de Anulación', key: 'motivo_anulacion', width: 32 }
+    ];
+    estiloCabecera(hojaAnul.getRow(1), 'FFDC2626');
+
+    const movimientosAnulados = movimientos.filter((m) => m.estado === 'anulado');
+    let sumMontoAnulado = 0;
+    let sumEfAnulado = 0;
+    let sumQrAnulado = 0;
+    for (const ma of movimientosAnulados) {
+        const mNum = Number(ma.monto || 0);
+        const efNum = Number(ma.monto_efectivo || 0);
+        const qrNum = Number(ma.monto_qr || 0);
+        sumMontoAnulado = redondear2(sumMontoAnulado + mNum);
+        sumEfAnulado = redondear2(sumEfAnulado + efNum);
+        sumQrAnulado = redondear2(sumQrAnulado + qrNum);
+        hojaAnul.addRow({
+            id: ma.id,
+            caja_id: ma.caja_id,
+            caja_nombre: ma.caja_nombre || 'Caja Principal',
+            fecha_hora: ma.fecha_hora,
+            operador: ma.operador,
+            categoria_contable: ma.categoria_contable,
+            metodo_pago: ma.metodo_pago,
+            monto: mNum,
+            monto_efectivo: efNum,
+            monto_qr: qrNum,
+            anulado_por_nombre: ma.anulado_por_nombre || 'Administrador',
+            fecha_anulacion: ma.fecha_anulacion || '—',
+            motivo_anulacion: ma.motivo_anulacion || '—'
+        });
+    }
+    if (movimientosAnulados.length > 0) {
+        const filaTotAnul = hojaAnul.addRow({
+            id: 'TOTAL',
+            caja_nombre: `${movimientosAnulados.length} anulación(es)`,
+            monto: sumMontoAnulado,
+            monto_efectivo: sumEfAnulado,
+            monto_qr: sumQrAnulado
+        });
+        estiloTotales(filaTotAnul);
+    }
+    ['H', 'I', 'J'].forEach((col) => {
+        hojaAnul.getColumn(col).numFmt = '#,##0.00';
+    });
+
+    // =========================================================================
+    // HOJA 10: RESUMEN CONTABLE, ESTADO DE RESULTADOS Y RESUMEN DE IMPUESTOS
     // =========================================================================
     const hojaRes = workbook.addWorksheet('Resumen Contable');
     hojaRes.columns = [
-        { header: 'Concepto / Indicador Contable', key: 'concepto', width: 44 },
-        { header: 'Importe (Bs) / Detalle', key: 'valor', width: 28 }
+        { header: 'Concepto / Indicador Contable', key: 'concepto', width: 48 },
+        { header: 'Importe (Bs) / Detalle', key: 'valor', width: 30 }
     ];
     estiloCabecera(hojaRes.getRow(1), 'FF0F172A');
 
@@ -4440,24 +5158,31 @@ async function generarReporteExcel(cajaId = null, filtros = {}) {
     hojaRes.addRow({ concepto: 'NIT del Establecimiento', valor: negocio?.nit_negocio || 'No registrado' });
     hojaRes.addRow({ concepto: 'Régimen Configurado', valor: regimenTexto });
     hojaRes.addRow({ concepto: 'Periodo / Alcance del Reporte', valor: periodoTexto });
+    hojaRes.addRow({ concepto: 'Generado por Usuario', valor: usuarioGenerador });
     hojaRes.addRow({ concepto: 'Fecha de Generación (Hora Local Bolivia)', valor: new Date().toLocaleString('es-BO') });
     hojaRes.addRow({ concepto: '--- ESTADO DE RESULTADOS OPERATIVO ---', valor: '' });
     hojaRes.addRow({ concepto: '(+) Ventas Brutas de Productos/Servicios', valor: sumSubtotalVentas });
     hojaRes.addRow({ concepto: '(-) Descuentos Otorgados en Ventas', valor: sumDescuentoVentas });
     hojaRes.addRow({ concepto: '(=) Ventas Netas Cobradas', valor: sumMontoVentas });
-    hojaRes.addRow({ concepto: '    • Cobrado en Efectivo Físico', valor: sumEfectivoVentas });
-    hojaRes.addRow({ concepto: '    • Cobrado por QR / Banco', valor: sumQrVentas });
+    hojaRes.addRow({ concepto: '    • Cobrado en Efectivo Físico (movimientos_pagos)', valor: sumEfectivoVentas });
+    hojaRes.addRow({ concepto: '    • Cobrado por QR / Banco (movimientos_pagos)', valor: sumQrVentas });
     hojaRes.addRow({ concepto: '(-) Costo de Mercadería Vendida (CMV - NIC 2 CPP)', valor: sumCostoVentas });
     hojaRes.addRow({ concepto: '(=) UTILIDAD / GANANCIA BRUTA EN VENTAS', valor: sumUtilidadVentas });
     hojaRes.addRow({ concepto: '(-) Gastos y Egresos Operativos de Caja', valor: sumEgresos });
     hojaRes.addRow({ concepto: '(=) FLUJO NETO OPERATIVO DEL PERIODO', valor: redondear2(sumUtilidadVentas - sumEgresos) });
     hojaRes.addRow({ concepto: '(i) Aportes de Cambio / Sencillo (No son ingreso de venta)', valor: sumAportesCambio });
+    hojaRes.addRow({ concepto: '(i) Compras de Inventario del Periodo (Insumos + Directos)', valor: sumMontoCompras });
+    hojaRes.addRow({ concepto: '(i) Mermas de Inventario del Periodo (Insumos + Directos)', valor: sumMontoMermas });
     hojaRes.addRow({ concepto: '(i) Valor Actual del Inventario en Almacén (NIC 2)', valor: valorTotalInventario });
 
-    if (negocio?.regimen_tributario === 'regimen_general' || sumIvaVentas > 0 || sumItVentas > 0) {
-        hojaRes.addRow({ concepto: '--- ESTIMACIÓN TRIBUTARIA (SEGÚN SNAPSHOT POR VENTA) ---', valor: '' });
-        hojaRes.addRow({ concepto: `Débito Fiscal IVA (según alícuota congelada en cada venta facturada)`, valor: sumIvaVentas });
+    if (negocio?.regimen_tributario === 'regimen_general' || sumIvaVentas > 0 || sumItVentas > 0 || sumCfIvaCompras > 0 || sumCfIvaEgresos > 0) {
+        const creditoFiscalTotal = redondear2(sumCfIvaCompras + sumCfIvaEgresos);
+        hojaRes.addRow({ concepto: '--- RESUMEN DE IMPUESTOS (SNAPSHOT FISCAL CONGELADO) ---', valor: '' });
+        hojaRes.addRow({ concepto: `Débito Fiscal IVA en Ventas Facturadas`, valor: sumIvaVentas });
         hojaRes.addRow({ concepto: `Impuesto a las Transacciones IT (base: ${negocio?.it_base || 'todas_las_ventas'} - a confirmar con el contador)`, valor: sumItVentas });
+        hojaRes.addRow({ concepto: `Crédito Fiscal IVA en Compras Facturadas de Inventario`, valor: sumCfIvaCompras });
+        hojaRes.addRow({ concepto: `Crédito Fiscal IVA en Egresos Operativos Facturados`, valor: sumCfIvaEgresos });
+        hojaRes.addRow({ concepto: `(=) Posición Neta IVA Estimada (Débito - Crédito Fiscal)`, valor: redondear2(sumIvaVentas - creditoFiscalTotal) });
     }
 
     return await workbook.xlsx.writeBuffer();
@@ -4496,6 +5221,8 @@ module.exports = {
     registrarCompraProductoDirecto,
     registrarMermaProductoDirecto,
     verificarIntegridadKardexDirecto,
+    verificarIntegridadKardexInsumos,
+    obtenerKardexDetallado,
     obtenerProductos,
     obtenerCajasFisicas,
     crearCajaFisica,

@@ -3,6 +3,12 @@
 // ==========================================
 const nodemailer = require('nodemailer');
 
+let transporterOverride = null;
+
+function configurarTransporterPrueba(transporter = null) {
+    transporterOverride = transporter;
+}
+
 function obtenerConfiguracionEmail() {
     const host = process.env.SMTP_HOST || 'smtp.gmail.com';
     const port = Number(process.env.SMTP_PORT) || 465;
@@ -18,6 +24,7 @@ function obtenerConfiguracionEmail() {
 }
 
 function estaEmailConfigurado() {
+    if (transporterOverride) return true;
     const cfg = obtenerConfiguracionEmail();
     return Boolean(cfg.user && cfg.pass && cfg.destinatarios);
 }
@@ -39,18 +46,20 @@ function enmascararEmail(emailStr) {
 
 function verificarEstadoEmail() {
     const cfg = obtenerConfiguracionEmail();
-    const configurado = Boolean(cfg.user && cfg.pass && cfg.destinatarios);
+    const configurado = Boolean((cfg.user && cfg.pass && cfg.destinatarios) || transporterOverride);
     return {
         configurado,
         host: cfg.host,
         port: cfg.port,
         user: cfg.user ? enmascararEmail(cfg.user) : '',
-        destinatarios: cfg.destinatarios ? enmascararEmail(cfg.destinatarios) : '',
-        destinatariosCompletos: configurado ? cfg.destinatarios : ''
+        destinatarios: cfg.destinatarios ? enmascararEmail(cfg.destinatarios) : ''
     };
 }
 
 function crearTransporter() {
+    if (transporterOverride) {
+        return transporterOverride;
+    }
     const cfg = obtenerConfiguracionEmail();
     if (!cfg.user || !cfg.pass) {
         throw new Error('Credenciales SMTP no configuradas. Verifica SMTP_USER y SMTP_PASS en .env.local');
@@ -85,7 +94,13 @@ function construirHtmlCierre({ caja, negocio, metricas }) {
     const cajero = caja.cajero_nombre || 'Operador';
     const fechaApertura = caja.fecha_apertura || '—';
     const fechaCierre = caja.fecha_cierre || new Date().toLocaleString();
-    const dif = metricas.diferenciaEfectivo;
+    const dif = Number(metricas.diferenciaEfectivo || 0);
+    const egresosEf = metricas.totalEgresosEfectivo !== undefined ? Number(metricas.totalEgresosEfectivo) : Number(metricas.totalEgresos || 0);
+    const egresosQr = Number(metricas.totalEgresosQR || 0);
+    const qrEsp = Number(metricas.qrEsperado || 0);
+    const qrReal = metricas.qrReal !== null && metricas.qrReal !== undefined ? Number(metricas.qrReal) : null;
+    const difQr = metricas.diferenciaQr !== null && metricas.diferenciaQr !== undefined ? Number(metricas.diferenciaQr) : null;
+    const obsCierre = metricas.observacionesCierre || caja.observaciones_cierre || '';
 
     let bannerBg = '#dcfce7';
     let bannerBorder = '#22c55e';
@@ -174,6 +189,11 @@ function construirHtmlCierre({ caja, negocio, metricas }) {
             <td style="color:#64748b;">🔒 Cierre:</td>
             <td style="color:#0f172a; font-weight:600;">${fechaCierre}</td>
           </tr>
+          ${obsCierre ? `
+          <tr>
+            <td style="color:#64748b;">📝 Observaciones:</td>
+            <td style="color:#0f172a;">${obsCierre}</td>
+          </tr>` : ''}
         </table>
       </td>
     </tr>
@@ -182,19 +202,29 @@ function construirHtmlCierre({ caja, negocio, metricas }) {
     <tr>
       <td style="padding:15px 28px 5px 28px;">
         <h3 style="margin:0 0 10px 0; font-size:15px; color:#0f172a; border-bottom:1px solid #e2e8f0; padding-bottom:6px;">
-          📊 Resumen de Ventas
+          📊 Resumen de Ventas Comerciales
         </h3>
         <table width="100%" cellspacing="0" cellpadding="8" style="font-size:13px;">
           <tr>
-            <td style="color:#475569;">💵 Ventas en Efectivo:</td>
+            <td style="color:#475569;">💵 Cobrado en Efectivo:</td>
             <td align="right" style="font-weight:600; color:#0f172a;">${formatoMoneda(metricas.totalVentasEfectivo)}</td>
           </tr>
           <tr>
-            <td style="color:#475569;">📱 Ventas por QR / Banco:</td>
+            <td style="color:#475569;">📱 Cobrado por QR / Banco:</td>
             <td align="right" style="font-weight:600; color:#0f172a;">${formatoMoneda(metricas.totalVentasQR)}</td>
           </tr>
+          ${Number(metricas.cantidadVentasMixtas || 0) > 0 ? `
+          <tr>
+            <td style="color:#64748b; font-size:12px;">🔀 Incluye ${metricas.cantidadVentasMixtas} venta(s) con pago mixto (Efectivo + QR)</td>
+            <td align="right" style="color:#64748b; font-size:12px;">Desglosadas en su canal</td>
+          </tr>` : ''}
+          ${Number(metricas.totalDescuentos || 0) > 0 ? `
+          <tr>
+            <td style="color:#475569;">🏷️ Descuentos Aplicados:</td>
+            <td align="right" style="color:#0369a1; font-weight:600;">-${formatoMoneda(metricas.totalDescuentos)}</td>
+          </tr>` : ''}
           <tr style="background:#f8fafc; font-size:14px; font-weight:700;">
-            <td style="color:#0f172a; padding:10px 8px;">📈 VENTAS TOTALES (${metricas.cantidadVentas} transacciones):</td>
+            <td style="color:#0f172a; padding:10px 8px;">📈 VENTAS TOTALES NETAS (${metricas.cantidadVentas} transacciones):</td>
             <td align="right" style="color:#0f172a; padding:10px 8px;">${formatoMoneda(metricas.totalVentas)}</td>
           </tr>
         </table>
@@ -221,10 +251,10 @@ function construirHtmlCierre({ caja, negocio, metricas }) {
             <td style="color:#475569;">(+) Aportes de Cambio / Sencillo:</td>
             <td align="right" style="color:#15803d; font-weight:600;">+${formatoMoneda(metricas.totalInyeccionSencillo)}</td>
           </tr>` : ''}
-          ${metricas.totalEgresos > 0 ? `
+          ${egresosEf > 0 ? `
           <tr>
-            <td style="color:#475569;">(-) Egresos / Gastos de Caja:</td>
-            <td align="right" style="color:#b91c1c; font-weight:600;">-${formatoMoneda(metricas.totalEgresos)}</td>
+            <td style="color:#475569;">(-) Egresos de Efectivo del Cajón:</td>
+            <td align="right" style="color:#b91c1c; font-weight:600;">-${formatoMoneda(egresosEf)}</td>
           </tr>` : ''}
           <tr style="border-top:1px dashed #cbd5e1;">
             <td style="color:#0f172a; font-weight:600; padding-top:8px;">(=) Efectivo Físico Esperado:</td>
@@ -240,6 +270,35 @@ function construirHtmlCierre({ caja, negocio, metricas }) {
               ${dif > 0 ? '+' : ''}${formatoMoneda(dif)}
             </td>
           </tr>
+        </table>
+      </td>
+    </tr>
+
+    <!-- CONCILIACIÓN QR / BANCO -->
+    <tr>
+      <td style="padding:5px 28px 15px 28px;">
+        <h3 style="margin:0 0 10px 0; font-size:15px; color:#0f172a; border-bottom:1px solid #e2e8f0; padding-bottom:6px;">
+          📱 Conciliación de Cobros por QR / Banco
+        </h3>
+        <table width="100%" cellspacing="0" cellpadding="6" style="font-size:13px;">
+          <tr>
+            <td style="color:#475569;">(+) Ingresos por Ventas QR:</td>
+            <td align="right" style="color:#0f172a;">${formatoMoneda(metricas.totalVentasQR)}</td>
+          </tr>
+          ${egresosQr > 0 ? `
+          <tr>
+            <td style="color:#475569;">(-) Egresos por Transferencia / QR:</td>
+            <td align="right" style="color:#b91c1c; font-weight:600;">-${formatoMoneda(egresosQr)}</td>
+          </tr>` : ''}
+          <tr style="border-top:1px dashed #cbd5e1;">
+            <td style="color:#0f172a; font-weight:600;">(=) Total QR Esperado en Banco:</td>
+            <td align="right" style="color:#0f172a; font-weight:600;">${formatoMoneda(qrEsp)}</td>
+          </tr>
+          ${qrReal !== null ? `
+          <tr>
+            <td style="color:#0f172a; font-weight:600;">🏦 QR Conciliado en Extracto:</td>
+            <td align="right" style="color:#0f172a; font-weight:600;">${formatoMoneda(qrReal)} (Dif: ${difQr > 0 ? '+' : ''}${formatoMoneda(difQr)})</td>
+          </tr>` : ''}
         </table>
       </td>
     </tr>
@@ -277,13 +336,14 @@ async function enviarNotificacionCierreCaja(cajaId) {
             return { enviado: false, motivo: 'caja_no_encontrada' };
         }
 
-        const bufferExcel = await generarReporteExcel(cajaId);
+        const bufferExcel = await generarReporteExcel(cajaId, { usuarioGenerador: datos.caja.cajero_nombre || 'Sistema Cierre' });
         const cfg = obtenerConfiguracionEmail();
         const transporter = crearTransporter();
 
         const nombreNegocio = datos.negocio?.nombre_negocio || 'POS';
         const asunto = `📊 Cierre de Caja - Turno #${datos.caja.id} (${datos.caja.caja_nombre}) - ${nombreNegocio}`;
-        const remitente = cfg.remitente || `"${nombreNegocio}" <${cfg.user}>`;
+        const remitente = cfg.remitente || `"${nombreNegocio}" <${cfg.user || 'pos@local.test'}>`;
+        const destino = cfg.destinatarios || 'auditoria@local.test';
 
         const fechaSufijo = datos.caja.fecha_cierre
             ? datos.caja.fecha_cierre.split(' ')[0].replace(/[^0-9-]/g, '')
@@ -291,7 +351,7 @@ async function enviarNotificacionCierreCaja(cajaId) {
 
         const info = await transporter.sendMail({
             from: remitente,
-            to: cfg.destinatarios,
+            to: destino,
             subject: asunto,
             html: construirHtmlCierre(datos),
             attachments: [
@@ -303,8 +363,8 @@ async function enviarNotificacionCierreCaja(cajaId) {
             ]
         });
 
-        console.log(`[Mailer] Correo de cierre de turno #${cajaId} enviado a [${cfg.destinatarios}]. ID: ${info.messageId}`);
-        return { enviado: true, messageId: info.messageId };
+        console.log(`[Mailer] Correo de cierre de turno #${cajaId} enviado a [${enmascararEmail(destino)}]. ID: ${info.messageId}`);
+        return { enviado: true, messageId: info.messageId, info };
     } catch (err) {
         console.error(`[Mailer] Error al enviar correo de cierre para caja #${cajaId}:`, err.message);
         return { enviado: false, error: err.message };
@@ -316,7 +376,7 @@ async function enviarEmailPrueba(destinatarioAlternativo = null) {
         const cfg = obtenerConfiguracionEmail();
         const destino = String(destinatarioAlternativo || cfg.destinatarios || '').trim();
 
-        if (!cfg.user || !cfg.pass) {
+        if (!transporterOverride && (!cfg.user || !cfg.pass)) {
             throw new Error('Debes definir SMTP_USER y SMTP_PASS en el archivo .env.local');
         }
         if (!destino) {
@@ -326,7 +386,7 @@ async function enviarEmailPrueba(destinatarioAlternativo = null) {
         const transporter = crearTransporter();
 
         const info = await transporter.sendMail({
-            from: cfg.remitente || `"Sistema POS" <${cfg.user}>`,
+            from: cfg.remitente || `"Sistema POS" <${cfg.user || 'pos@local.test'}>`,
             to: destino,
             subject: `🧪 Prueba de Notificación de Correo - Sistema POS`,
             html: `
@@ -337,8 +397,8 @@ async function enviarEmailPrueba(destinatarioAlternativo = null) {
               </p>
               <div style="background:#f8fafc; padding:12px; border-radius:6px; font-size:13px; color:#475569; margin:16px 0;">
                 <strong>Servidor SMTP:</strong> ${cfg.host}:${cfg.port}<br>
-                <strong>Cuenta remitente:</strong> ${cfg.user}<br>
-                <strong>Destinatario verificado:</strong> ${destino}<br>
+                <strong>Cuenta remitente:</strong> ${enmascararEmail(cfg.user || 'pos@local.test')}<br>
+                <strong>Destinatario verificado:</strong> ${enmascararEmail(destino)}<br>
                 <strong>Fecha y hora:</strong> ${new Date().toLocaleString()}
               </div>
               <p style="color:#64748b; font-size:12px;">
@@ -348,8 +408,8 @@ async function enviarEmailPrueba(destinatarioAlternativo = null) {
             `
         });
 
-        console.log(`[Mailer] Correo de prueba enviado con éxito a [${destino}]. ID: ${info.messageId}`);
-        return { enviado: true, messageId: info.messageId, destino };
+        console.log(`[Mailer] Correo de prueba enviado con éxito a [${enmascararEmail(destino)}]. ID: ${info.messageId}`);
+        return { enviado: true, messageId: info.messageId, destino: enmascararEmail(destino), info };
     } catch (err) {
         console.error('[Mailer] Error en prueba de correo:', err.message);
         return { enviado: false, error: err.message };
@@ -357,6 +417,7 @@ async function enviarEmailPrueba(destinatarioAlternativo = null) {
 }
 
 module.exports = {
+    configurarTransporterPrueba,
     obtenerConfiguracionEmail,
     estaEmailConfigurado,
     verificarEstadoEmail,

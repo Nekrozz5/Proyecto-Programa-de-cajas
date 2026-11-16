@@ -352,19 +352,41 @@ async function stockIns(id) { return Number((await get('SELECT stock_actual FROM
     cmp('l) Cierre Turno 5', 'efectivoEsperado (100+45-100)', 45, cierre5.efectivoEsperado);
     cmp('l) Cierre Turno 5', 'qrEsperado (10)', 10, cierre5.qrEsperado);
 
-    // ---------- m) Consulta de control: verificarIntegridadKardexDirecto() ----------
+    // ---------- m) Consulta de control: verificarIntegridadKardexDirecto() y verificarIntegridadKardexInsumos() ----------
     const ctrlKardex = await q.verificarIntegridadKardexDirecto();
-    cmp('m) Control Kardex', 'integridadOk en todos los productos directos', true, ctrlKardex.integridadOk);
-    cmp('m) Control Kardex', 'totalDescuadres === 0', 0, ctrlKardex.totalDescuadres);
+    cmp('m) Control Kardex Directo', 'integridadOk en todos los productos directos', true, ctrlKardex.integridadOk);
+    cmp('m) Control Kardex Directo', 'totalDescuadres === 0', 0, ctrlKardex.totalDescuadres);
 
-    // ---------- n) Exportación Excel (.xlsx), CSV, PDF y HTML de Correo de Cierre ----------
-    const bufferExcel = await q.generarReporteExcel(null, { desde: '2020-01-01', hasta: '2099-12-31' });
+    // Prueba de insumo métrico con 4 decimales (0.0015 Bs/ml) + compra + merma + integridad Kardex Insumos
+    const insMetrico = await q.crearInsumo('Esencia Vainilla Premium', 'ml', 1000, 0.0015, 100, 1, null, 'Aromas SRL', adminId);
+    const insMetricoRow = await get('SELECT costo_por_unidad, stock_actual FROM insumos WHERE id = ?', [insMetrico]);
+    cmp('m) Insumo Métrico', 'preserva 4 decimales (0.0015 Bs/ml)', 0.0015, Number(insMetricoRow.costo_por_unidad));
+    const mermaInsRes = await q.registrarMermaInsumo(insMetrico, 200, 'Frasco roto en barra', adminId);
+    cmp('m) Merma Insumo', 'stockRestante (1000-200)', 800, mermaInsRes.stockRestante);
+    cmp('m) Merma Insumo', 'costoPerdida (200 × 0.0015 = 0.30)', 0.3, mermaInsRes.costoPerdida);
+
+    const ctrlKardexIns = await q.verificarIntegridadKardexInsumos();
+    cmp('m) Control Kardex Insumos', 'integridadOk en todos los insumos', true, ctrlKardexIns.integridadOk);
+    cmp('m) Control Kardex Insumos', 'totalDescuadres === 0', 0, ctrlKardexIns.totalDescuadres);
+
+    // ---------- n) Exportación Excel (.xlsx 10 hojas), CSV, PDF y Transporte Nodemailer con adjunto ----------
+    const bufferExcel = await q.generarReporteExcel(null, { desde: '2020-01-01', hasta: '2099-12-31', usuarioGenerador: 'admin_test' });
     const wb = new ExcelJS.Workbook();
     await wb.xlsx.load(bufferExcel);
     const nombresHojas = wb.worksheets.map((w) => w.name);
-    cmp('n) Excel', 'contiene las 7 hojas (incluyendo Kardex Productos)', true,
-        ['Movimientos', 'Arqueos de Caja', 'Detalle Ventas (CMV)', 'Compras y Mermas', 'Inventario Kardex', 'Kardex Productos', 'Resumen Contable']
-            .every((h) => nombresHojas.includes(h)));
+    cmp('n) Excel 10 Hojas', 'contiene las 10 hojas contables y de auditoría', true,
+        [
+            'Movimientos',
+            'Arqueos de Caja',
+            'Detalle Ventas (CMV)',
+            'Rentabilidad por Producto',
+            'Compras y Mermas',
+            'Inventario Kardex',
+            'Kardex Productos',
+            'Kardex Insumos',
+            'Historial Anulaciones',
+            'Resumen Contable'
+        ].every((h) => nombresHojas.includes(h)));
     const hojaCompras = wb.getWorksheet('Compras y Mermas');
     let tieneCompraDirectaEnHoja4 = false;
     let tieneMermaDirectaEnHoja4 = false;
@@ -373,28 +395,43 @@ async function stockIns(id) { return Number((await get('SELECT stock_actual FROM
         if (txt.includes('Producto Directo') && txt.includes('Galleta Choc') && txt.includes('compra')) tieneCompraDirectaEnHoja4 = true;
         if (txt.includes('Producto Directo') && txt.includes('Galleta Choc') && txt.includes('merma')) tieneMermaDirectaEnHoja4 = true;
     });
-    cmp('n) Excel Hoja 4', 'incluye compra de producto directo', true, tieneCompraDirectaEnHoja4);
-    cmp('n) Excel Hoja 4', 'incluye merma de producto directo', true, tieneMermaDirectaEnHoja4);
+    cmp('n) Excel Compras y Mermas', 'incluye compra de producto directo', true, tieneCompraDirectaEnHoja4);
+    cmp('n) Excel Compras y Mermas', 'incluye merma de producto directo', true, tieneMermaDirectaEnHoja4);
     const hojaKardexCrono = wb.getWorksheet('Kardex Productos');
-    cmp('n) Excel Hoja 6', 'Kardex Productos tiene filas cronológicas (>10)', true, hojaKardexCrono.rowCount > 10);
+    cmp('n) Excel Kardex Productos', 'Kardex Productos tiene filas cronológicas (>10)', true, hojaKardexCrono.rowCount > 10);
+    const hojaKardexIns = wb.getWorksheet('Kardex Insumos');
+    cmp('n) Excel Kardex Insumos', 'Kardex Insumos tiene filas cronológicas (>5)', true, hojaKardexIns.rowCount > 5);
+    const hojaAnulaciones = wb.getWorksheet('Historial Anulaciones');
+    cmp('n) Excel Historial Anulaciones', 'incluye las 2 ventas anuladas + cabecera + total (4 filas)', 4, hojaAnulaciones.rowCount);
 
-    // Filtro de fechas fuera de rango -> Kardex Productos vacío
+    // Filtro de fechas fuera de rango -> Kardex Productos tiene solo la fila de cabecera (1 fila)
     const bufferVacio = await q.generarReporteExcel(null, { desde: '1999-01-01', hasta: '1999-12-31' });
     const wbVacio = new ExcelJS.Workbook();
     await wbVacio.xlsx.load(bufferVacio);
-    cmp('n) Excel Filtro Fechas', 'Kardex Productos respeta filtro de fechas (solo cabecera=1 fila)', 1, wbVacio.getWorksheet('Kardex Productos').rowCount);
+    cmp('n) Excel Filtro Fechas', 'Kardex Productos respeta filtro de fechas (sin filas de datos)', 1, wbVacio.getWorksheet('Kardex Productos').rowCount);
 
     // CSV
-    const csv = await q.generarReporteCSV(cajaId5);
-    cmp('n) CSV', 'incluye BOM UTF-8 y filas de caja 5', true, csv.startsWith('\uFEFF') && csv.includes('Latte modificado mixto'));
+    const csv = await q.generarReporteCSV(cajaId5, { usuarioGenerador: 'admin_test' });
+    cmp('n) CSV', 'incluye BOM UTF-8, metadatos y filas de caja 5', true,
+        csv.startsWith('\uFEFF') && csv.includes('Latte modificado mixto') && csv.includes('# Usuario Generador:'));
 
-    // Correo de cierre con ventas mixtas (turno 1 y turno 5)
+    // Correo de cierre con ventas mixtas (turno 1) + prueba real de Nodemailer con streamTransport y adjunto XLSX
     const datosCorreo1 = await q.obtenerDatosCierreParaNotificacion(cajaId1);
     const htmlCorreo1 = mailer.construirHtmlCierre(datosCorreo1);
     cmp('n) Correo Cierre', 'métricas de ventas mixtas Ef=32 / QR=42 / Total=74', '32|42|74',
         `${datosCorreo1.metricas.totalVentasEfectivo}|${datosCorreo1.metricas.totalVentasQR}|${datosCorreo1.metricas.totalVentas}`);
     cmp('n) Correo Cierre', 'HTML ejecutivo generado con montos y estación', true,
         htmlCorreo1.includes('Turno #1') && htmlCorreo1.includes('74') && htmlCorreo1.includes('Reporte_Turno_1.xlsx'));
+
+    const nodemailer = require('nodemailer');
+    const transporterSimulado = nodemailer.createTransport({ streamTransport: true, newline: 'unix', buffer: true });
+    mailer.configurarTransporterPrueba(transporterSimulado);
+    process.env.EMAIL_DESTINATARIO_CIERRE = 'auditoria@empresa-test.bo';
+    const envioRes = await mailer.enviarNotificacionCierreCaja(cajaId1);
+    const rawMime = envioRes.info && envioRes.info.message ? envioRes.info.message.toString('utf8') : '';
+    cmp('n) Nodemailer Transporte', 'envío por streamTransport exitoso con adjunto .xlsx', true,
+        Boolean(envioRes.enviado) && rawMime.includes('Reporte_Turno_1_') && rawMime.includes('Subject:'));
+    mailer.configurarTransporterPrueba(null);
 
     // PDF (importando app/admin/exportarPDF.js en Node mediante file:// URL)
     const { pathToFileURL } = require('url');
@@ -415,6 +452,106 @@ async function stockIns(id) { return Number((await get('SELECT stock_actual FROM
     const pdfBytes = docPdf.output('arraybuffer').byteLength;
     try { fs.unlinkSync(path.join(process.cwd(), `reporte_turno_${cajaId5}.pdf`)); } catch (_) {}
     cmp('n) PDF', 'genera documento PDF válido con tablas (>2 KB)', true, pdfBytes > 2000);
+
+    // =====================================================================
+    // BLOQUE III: PERMISOS FISCALES BACKEND, CASOS BORDE Y CONCURRENCIA
+    // =====================================================================
+    const prodDirectoNuevo = await q.crearProductoConInsumos({
+        nombre: 'Agua Con Gas 600ml',
+        precio: 10,
+        categoria: 'Bebidas',
+        tipoComposicion: 'directo',
+        stockInicial: 15,
+        costoInicial: 4,
+        stockMinimo: 3,
+        unidadMedida: 'botellas',
+        usuarioId: adminId
+    });
+    const aguaId = prodDirectoNuevo.id;
+    cmp('o) Crear Directo API', 'stock inicial y Kardex de apertura creados', 15, await stockProd(aguaId));
+
+    caja = await q.abrirCaja(cajeroId, 100, 1);
+    const cajaId6 = typeof caja === 'object' ? (caja.id || caja.cajaId) : caja;
+
+    // 1. Concurrencia de estación física: intentar abrir segundo turno en la misma estación abierta
+    let errDobleApertura = null;
+    try { await q.abrirCaja(adminId, 50, 1); } catch (e) { errDobleApertura = e.message; }
+    cmp('p) Concurrencia Caja', 'bloquea abrir dos turnos simultáneos en la misma estación', true, Boolean(errDobleApertura));
+
+    // 2. Permisos fiscales en backend (usuario sin permiso y estación sin permiso)
+    await q.guardarConfiguracionContable(adminId, { regimenTributario: 'regimen_general', emiteFactura: true, ivaPorcentaje: 13, itPorcentaje: 3 });
+    await q.actualizarPermisoFiscalUsuario(adminId, cajeroId, false);
+    let errSinPermUsuario = null;
+    try {
+        await q.registrarVentaCompleta(cajaId6, [{ productoId: aguaId, cantidad: 1 }], 'efectivo', 10, 'Fac sin perm', cajeroId, null, {
+            tipoComprobante: 'factura', nroFactura: '999', clienteNitCi: '12345'
+        });
+    } catch (e) { errSinPermUsuario = e.message; }
+    cmp('p) Permiso Fiscal Backend', 'rechaza factura si usuario no tiene permiso fiscal', true, Boolean(errSinPermUsuario));
+    await q.actualizarPermisoFiscalUsuario(adminId, cajeroId, true);
+
+    await q.actualizarPermisoFiscalCajaFisica(1, false, adminId);
+    let errSinPermCaja = null;
+    try {
+        await q.registrarVentaCompleta(cajaId6, [{ productoId: aguaId, cantidad: 1 }], 'efectivo', 10, 'Fac sin perm caja', cajeroId, null, {
+            tipoComprobante: 'factura', nroFactura: '999', clienteNitCi: '12345'
+        });
+    } catch (e) { errSinPermCaja = e.message; }
+    cmp('p) Permiso Fiscal Backend', 'rechaza factura si estación física no tiene permiso fiscal', true, Boolean(errSinPermCaja));
+    await q.actualizarPermisoFiscalCajaFisica(1, true, adminId);
+
+    // 3. Validaciones de casos borde: sin stock, pago insuficiente, descuento inválido, cantidad <= 0, doble anulación
+    let errSinStock = null;
+    try { await q.registrarVentaCompleta(cajaId6, [{ productoId: aguaId, cantidad: 999 }], 'efectivo', null, 'Exceso stock', cajeroId); } catch (e) { errSinStock = e.message; }
+    cmp('q) Casos Borde', 'rechaza venta sin stock suficiente', true, Boolean(errSinStock));
+
+    let errPagoInsuf = null;
+    try { await q.registrarVentaCompleta(cajaId6, [{ productoId: aguaId, cantidad: 2 }], 'efectivo', 5, 'Pago insuf', cajeroId); } catch (e) { errPagoInsuf = e.message; }
+    cmp('q) Casos Borde', 'rechaza pago efectivo inferior al total', true, Boolean(errPagoInsuf));
+
+    let errDescInvalido = null;
+    try { await q.registrarVentaCompleta(cajaId6, [{ productoId: aguaId, cantidad: 1 }], 'efectivo', null, 'Desc >= sub', cajeroId, null, { descuento: 10 }); } catch (e) { errDescInvalido = e.message; }
+    cmp('q) Casos Borde', 'rechaza descuento igual o superior al subtotal', true, Boolean(errDescInvalido));
+
+    let errCantCero = null;
+    try { await q.registrarVentaCompleta(cajaId6, [{ productoId: aguaId, cantidad: 0 }], 'efectivo', null, 'Cant 0', cajeroId); } catch (e) { errCantCero = e.message; }
+    cmp('q) Casos Borde', 'rechaza cantidad 0 o negativa', true, Boolean(errCantCero));
+
+    let errDobleAnul = null;
+    try { await q.anularMovimientoConPermiso(adminId, vCombo.movimientoId, 'Segunda anulación'); } catch (e) { errDobleAnul = e.message; }
+    cmp('q) Casos Borde', 'rechaza anulación repetida de movimiento ya anulado', true, Boolean(errDobleAnul));
+
+    // 4. Prorrateo de descuento impar en 3 productos (absorción de centavo residual)
+    const pA = await q.crearProducto('Item A', 10, 4, 'Test', 20, 'unidades', 0, null, adminId);
+    const pB = await q.crearProducto('Item B', 10, 4, 'Test', 20, 'unidades', 0, null, adminId);
+    const pC = await q.crearProducto('Item C', 10, 4, 'Test', 20, 'unidades', 0, null, adminId);
+    // Subtotal = 30, Descuento = 10 -> Neto = 20 (10/3 = 3.3333... por línea -> 6.67 + 6.67 + 6.66 = 20.00 exacto)
+    await q.registrarVentaCompleta(
+        cajaId6,
+        [{ productoId: pA, cantidad: 1 }, { productoId: pB, cantidad: 1 }, { productoId: pC, cantidad: 1 }],
+        'efectivo', 20, 'Prorrateo impar', cajeroId, null, { descuento: 10 }
+    );
+    const est6 = await q.obtenerEstadisticasCaja(cajaId6);
+    const sumaIng6 = q.redondear2(est6.productosMasVendidos.reduce((acc, x) => acc + Number(x.ingresos_generados || 0), 0));
+    const sumaGan6 = q.redondear2(est6.productosMasVendidos.reduce((acc, x) => acc + Number(x.ganancia_generada || 0), 0));
+    cmp('r) Redondeo Prorrateo', 'SUM(ingresos_producto) === ventasTotales con descuento 10/3', est6.ventasTotales, sumaIng6);
+    cmp('r) Redondeo Prorrateo', 'SUM(ganancia_producto) === gananciaBruta con descuento 10/3', est6.gananciaBruta, sumaGan6);
+
+    // 5. Concurrencia de stock: 3 ventas simultáneas de 10 unidades sobre stock disponible de 15 -> solo 1 debe triunfar y el stock queda en 5 (nunca negativo)
+    const resultadosConc = await Promise.allSettled([
+        q.registrarVentaCompleta(cajaId6, [{ productoId: aguaId, cantidad: 10 }], 'efectivo', 100, 'Conc 1', cajeroId),
+        q.registrarVentaCompleta(cajaId6, [{ productoId: aguaId, cantidad: 10 }], 'efectivo', 100, 'Conc 2', cajeroId),
+        q.registrarVentaCompleta(cajaId6, [{ productoId: aguaId, cantidad: 10 }], 'efectivo', 100, 'Conc 3', cajeroId)
+    ]);
+    const exitosConc = resultadosConc.filter((r) => r.status === 'fulfilled').length;
+    const fallosConc = resultadosConc.filter((r) => r.status === 'rejected').length;
+    cmp('s) Concurrencia Stock', 'solo 1 de 3 compras concurrentes de 10u sobre stock 15 triunfa', '1/2', `${exitosConc}/${fallosConc}`);
+    cmp('s) Concurrencia Stock', 'stock final exacto (15-10 = 5, nunca negativo)', 5, await stockProd(aguaId));
+
+    // Verificación final de integridad Kardex tras concurrencia
+    const ctrlFinalDir = await q.verificarIntegridadKardexDirecto();
+    const ctrlFinalIns = await q.verificarIntegridadKardexInsumos();
+    cmp('s) Kardex Final', 'integridad Directos e Insumos 100% tras todas las pruebas', true, ctrlFinalDir.integridadOk && ctrlFinalIns.integridadOk);
 
     console.log = logOriginal; console.warn = warnOriginal;
     console.log('\n=== RESULTADOS COMPLETOS: ESPERADO vs OBTENIDO ===');

@@ -21,7 +21,8 @@ export default function AdminPage() {
         productos: [],
         insumos: [],
         usuarios: [],
-        prediccionInsumos: []
+        prediccionInsumos: [],
+        kardexDetallado: { kardexProductosDirectos: [], kardexInsumos: [] }
     });
     const [tendencias, setTendencias] = useState(null);
 
@@ -49,9 +50,11 @@ export default function AdminPage() {
     const [cfgItBase, setCfgItBase] = useState('todas_las_ventas');
     const [cfgUsaRespaldoComprasEgresos, setCfgUsaRespaldoComprasEgresos] = useState(true);
 
-    // Filtros para Exportación Contable (Rango de Fechas y Turno Auditado)
+    // Filtros para Exportación Contable (Rango de Fechas, Usuario, Estación y Turno Auditado)
     const [filtroExportDesde, setFiltroExportDesde] = useState('');
     const [filtroExportHasta, setFiltroExportHasta] = useState('');
+    const [filtroExportUsuarioId, setFiltroExportUsuarioId] = useState('');
+    const [filtroExportCajaFisicaId, setFiltroExportCajaFisicaId] = useState('');
     const [turnoAuditadoId, setTurnoAuditadoId] = useState(null);
 
     // Apertura de nuevo turno desde Admin
@@ -74,7 +77,12 @@ export default function AdminPage() {
     const [prodNombre, setProdNombre] = useState('');
     const [prodPrecio, setProdPrecio] = useState('');
     const [prodCategorias, setProdCategorias] = useState([]);
-    const [tipoComposicion, setTipoComposicion] = useState('unitario'); // 'unitario' | 'receta' | 'libre' | 'combo'
+    const [tipoComposicion, setTipoComposicion] = useState('unitario'); // 'directo' | 'unitario' | 'receta' | 'libre' | 'combo'
+    const [prodDirectoStockIni, setProdDirectoStockIni] = useState('0');
+    const [prodDirectoCostoIni, setProdDirectoCostoIni] = useState('0');
+    const [prodDirectoStockMin, setProdDirectoStockMin] = useState('2');
+    const [prodDirectoUnidad, setProdDirectoUnidad] = useState('unidades');
+    const [prodDirectoVencimiento, setProdDirectoVencimiento] = useState('');
     const [insumoUnitarioId, setInsumoUnitarioId] = useState('');
     const [filasReceta, setFilasReceta] = useState([{ insumoId: '', cantidad: '', unidadReceta: '' }]);
     const [filasCombo, setFilasCombo] = useState([{ productoId: '', cantidad: '1' }]);
@@ -84,11 +92,32 @@ export default function AdminPage() {
     const [comboFechaInicio, setComboFechaInicio] = useState('');
     const [comboFechaFin, setComboFechaFin] = useState('');
 
-    // Compatibilidad y Reabastecimiento de Artículo Directo (con CPP)
+    // Compatibilidad y Reabastecimiento de Artículo Directo (con CPP y respaldo fiscal)
     const [compraProdId, setCompraProdId] = useState('');
     const [compraProdCantidad, setCompraProdCantidad] = useState('');
     const [compraProdCostoTotal, setCompraProdCostoTotal] = useState('');
     const [compraProdVencimiento, setCompraProdVencimiento] = useState('');
+    const [compraProdProveedor, setCompraProdProveedor] = useState('');
+    const [compraProdNit, setCompraProdNit] = useState('');
+    const [compraProdNroFactura, setCompraProdNroFactura] = useState('');
+    const [compraProdConFactura, setCompraProdConFactura] = useState(false);
+
+    // Formulario de Mermas de Productos Directos (con confirmación y vista de resultado)
+    const [mermaProdId, setMermaProdId] = useState('');
+    const [mermaProdCantidad, setMermaProdCantidad] = useState('');
+    const [mermaProdMotivo, setMermaProdMotivo] = useState('');
+    const [mermaProdConfirmando, setMermaProdConfirmando] = useState(false);
+    const [mermaProdResultado, setMermaProdResultado] = useState(null);
+
+    // Formulario de Mermas de Insumos (con confirmación y vista de resultado)
+    const [mermaInsId, setMermaInsId] = useState('');
+    const [mermaInsCantidad, setMermaInsCantidad] = useState('');
+    const [mermaInsMotivo, setMermaInsMotivo] = useState('');
+    const [mermaInsConfirmando, setMermaInsConfirmando] = useState(false);
+    const [mermaInsResultado, setMermaInsResultado] = useState(null);
+
+    // Estado de verificación de integridad Kardex
+    const [resultadoIntegridadKardex, setResultadoIntegridadKardex] = useState(null);
 
     // Formulario de Material / Insumo
     const [insNombre, setInsNombre] = useState('');
@@ -229,18 +258,23 @@ export default function AdminPage() {
                 setCfgUsaRespaldoComprasEgresos(c.usa_respaldo_compras_egresos !== undefined ? Boolean(c.usa_respaldo_compras_egresos) : true);
             }
 
-            if (dataCaja.insumos?.length > 0 && !compraInsumoId) {
-                setCompraInsumoId(String(dataCaja.insumos[0].id));
-                setRecetaInsumoId(String(dataCaja.insumos[0].id));
-                setRecetaUnidad(dataCaja.insumos[0].unidad_medida || 'unidades');
+            if (dataCaja.insumos?.length > 0) {
+                if (!compraInsumoId) {
+                    setCompraInsumoId(String(dataCaja.insumos[0].id));
+                    setRecetaInsumoId(String(dataCaja.insumos[0].id));
+                    setRecetaUnidad(dataCaja.insumos[0].unidad_medida || 'unidades');
+                }
+                setMermaInsId((prev) => (dataCaja.insumos.some((i) => String(i.id) === String(prev)) ? prev : String(dataCaja.insumos[0].id)));
             }
             if (dataCaja.productos?.length > 0) {
                 if (!recetaProdId) setRecetaProdId(String(dataCaja.productos[0].id));
                 const directos = dataCaja.productos.filter((p) => p.tipo_inventario === 'directo');
                 if (directos.length > 0) {
                     setCompraProdId((prev) => (directos.some((d) => String(d.id) === String(prev)) ? prev : String(directos[0].id)));
+                    setMermaProdId((prev) => (directos.some((d) => String(d.id) === String(prev)) ? prev : String(directos[0].id)));
                 } else {
                     setCompraProdId('');
+                    setMermaProdId('');
                 }
             }
         } catch (err) {
@@ -713,7 +747,13 @@ export default function AdminPage() {
             tipoComposicion
         };
 
-        if (tipoComposicion === 'unitario') {
+        if (tipoComposicion === 'directo') {
+            payload.stockInicial = Number(prodDirectoStockIni || 0);
+            payload.costoInicial = Number(prodDirectoCostoIni || 0);
+            payload.stockMinimo = Number(prodDirectoStockMin || 2);
+            payload.unidadMedida = prodDirectoUnidad || 'unidades';
+            payload.fechaVencimiento = cfgUsaVencimiento && prodDirectoVencimiento ? prodDirectoVencimiento : null;
+        } else if (tipoComposicion === 'unitario') {
             if (!insumoUnitarioId) {
                 setError('Por favor selecciona el insumo de inventario para la venta unitaria.');
                 return;
@@ -766,6 +806,11 @@ export default function AdminPage() {
         if (ok) {
             setProdNombre('');
             setProdPrecio('');
+            setProdDirectoStockIni('0');
+            setProdDirectoCostoIni('0');
+            setProdDirectoStockMin('2');
+            setProdDirectoUnidad('unidades');
+            setProdDirectoVencimiento('');
             setInsumoUnitarioId('');
             setFilasReceta([{ insumoId: '', cantidad: '', unidadReceta: '' }]);
             setFilasCombo([{ productoId: '', cantidad: '1' }]);
@@ -786,7 +831,11 @@ export default function AdminPage() {
                 productoId: compraProdId,
                 cantidadComprada: compraProdCantidad,
                 costoTotalCompra: compraProdCostoTotal,
-                fechaVencimiento: cfgUsaVencimiento ? compraProdVencimiento : null
+                fechaVencimiento: cfgUsaVencimiento ? compraProdVencimiento : null,
+                proveedorNombre: compraProdProveedor.trim() || null,
+                proveedorNit: compraProdNit.trim() || null,
+                nroFacturaCompra: compraProdNroFactura.trim() || null,
+                conFactura: compraProdConFactura
             },
             'Entrada de stock registrada con Costo Promedio Ponderado (NIC 2) sobre el artículo.'
         );
@@ -794,6 +843,128 @@ export default function AdminPage() {
             setCompraProdCantidad('');
             setCompraProdCostoTotal('');
             setCompraProdVencimiento('');
+            setCompraProdProveedor('');
+            setCompraProdNit('');
+            setCompraProdNroFactura('');
+            setCompraProdConFactura(false);
+        }
+    }
+
+    async function handleConfirmarMermaProductoDirecto() {
+        limpiarAlertas();
+        try {
+            const prodSel = (datos.productos || []).find((p) => String(p.id) === String(mermaProdId));
+            if (!prodSel) throw new Error('Selecciona un producto directo válido.');
+            const cant = Number(mermaProdCantidad);
+            if (!Number.isFinite(cant) || cant <= 0) {
+                throw new Error('La cantidad de merma debe ser mayor a 0.');
+            }
+            if (cant > Number(prodSel.stock || 0)) {
+                throw new Error(`No puedes dar de baja ${cant} unidades porque el stock disponible es ${prodSel.stock}.`);
+            }
+            if (!mermaProdMotivo || mermaProdMotivo.trim().length < 3) {
+                throw new Error('Ingresa un motivo descriptivo para la merma (mínimo 3 caracteres).');
+            }
+
+            const res = await fetch('/api/caja', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    accion: 'merma_producto_directo',
+                    productoId: Number(mermaProdId),
+                    cantidadPerdida: cant,
+                    motivo: mermaProdMotivo.trim()
+                })
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Error al registrar la merma de producto directo.');
+
+            setMermaProdResultado({
+                productoNombre: prodSel.nombre,
+                cantidadPerdida: cant,
+                unidadMedida: prodSel.unidad_medida || 'unidades',
+                stockRestante: data.stockRestante,
+                costoUnitario: data.costoUnitario,
+                costoPerdida: data.costoPerdida,
+                motivo: mermaProdMotivo.trim()
+            });
+            setMermaProdCantidad('');
+            setMermaProdMotivo('');
+            setMermaProdConfirmando(false);
+            setMensaje(`✅ Merma registrada: -${cant} ${prodSel.unidad_medida || 'u.'} de "${prodSel.nombre}" (Pérdida valorizada: Bs ${Number(data.costoPerdida || 0).toFixed(2)} | Stock restante: ${data.stockRestante}).`);
+            await cargarTodo();
+        } catch (err) {
+            setError(err.message);
+            setMermaProdConfirmando(false);
+        }
+    }
+
+    async function handleConfirmarMermaInsumo() {
+        limpiarAlertas();
+        try {
+            const insSel = (datos.insumos || []).find((i) => String(i.id) === String(mermaInsId));
+            if (!insSel) throw new Error('Selecciona un material o insumo válido.');
+            const cant = Number(mermaInsCantidad);
+            if (!Number.isFinite(cant) || cant <= 0) {
+                throw new Error('La cantidad de merma debe ser mayor a 0.');
+            }
+            if (cant > Number(insSel.stock_actual || 0)) {
+                throw new Error(`No puedes dar de baja ${cant} ${insSel.unidad_medida} porque el stock actual es ${insSel.stock_actual} ${insSel.unidad_medida}.`);
+            }
+            if (!mermaInsMotivo || mermaInsMotivo.trim().length < 3) {
+                throw new Error('Ingresa un motivo descriptivo para la merma (mínimo 3 caracteres).');
+            }
+
+            const res = await fetch('/api/caja', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    accion: 'merma_insumo',
+                    insumoId: Number(mermaInsId),
+                    cantidadPerdida: cant,
+                    motivo: mermaInsMotivo.trim()
+                })
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Error al registrar la merma de insumo.');
+
+            setMermaInsResultado({
+                insumoNombre: insSel.nombre,
+                cantidadPerdida: cant,
+                unidadMedida: insSel.unidad_medida || 'unidades',
+                stockRestante: data.stockRestante,
+                costoPerdida: data.costoPerdida,
+                motivo: mermaInsMotivo.trim()
+            });
+            setMermaInsCantidad('');
+            setMermaInsMotivo('');
+            setMermaInsConfirmando(false);
+            setMensaje(`✅ Merma de insumo registrada: -${cant} ${insSel.unidad_medida} de "${insSel.nombre}" (Pérdida: Bs ${Number(data.costoPerdida || 0).toFixed(2)} | Stock restante: ${data.stockRestante}).`);
+            await cargarTodo();
+        } catch (err) {
+            setError(err.message);
+            setMermaInsConfirmando(false);
+        }
+    }
+
+    async function handleVerificarIntegridadKardex() {
+        limpiarAlertas();
+        try {
+            const res = await fetch('/api/caja', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ accion: 'verificar_integridad_kardex' })
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Error al verificar la integridad del Kardex.');
+            setResultadoIntegridadKardex(data);
+            if (data.integro) {
+                setMensaje('✅ Verificación de Kardex completada: 100% íntegro (stock real coincide con los saldos acumulados de Kardex en productos directos e insumos).');
+            } else {
+                setError('⚠️ Se detectaron discrepancias en la conciliación del Kardex. Revisa el detalle en pantalla.');
+            }
+        } catch (err) {
+            setError(err.message);
         }
     }
 
@@ -1146,7 +1317,7 @@ export default function AdminPage() {
                 {/* Accesos Rápidos Inferiores y Filtros Contables */}
                 <div style={{ padding: '1rem', borderTop: '1px solid #334155', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                     <div style={{ fontSize: '0.75rem', color: '#94a3b8', fontWeight: 'bold', textTransform: 'uppercase' }}>
-                        📅 Filtro de Fechas (Excel/CSV)
+                        📅 Filtros de Exportación (Excel/CSV)
                     </div>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.35rem' }}>
                         <input
@@ -1164,8 +1335,32 @@ export default function AdminPage() {
                             style={{ padding: '0.3rem', borderRadius: '4px', border: '1px solid #475569', background: '#0f172a', color: '#f8fafc', fontSize: '0.74rem' }}
                         />
                     </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.35rem' }}>
+                        <select
+                            title="Filtrar por operador"
+                            value={filtroExportUsuarioId}
+                            onChange={(e) => setFiltroExportUsuarioId(e.target.value)}
+                            style={{ padding: '0.3rem', borderRadius: '4px', border: '1px solid #475569', background: '#0f172a', color: '#f8fafc', fontSize: '0.72rem' }}
+                        >
+                            <option value="">Todos los operadores</option>
+                            {(datos.usuarios || []).map((u) => (
+                                <option key={u.id} value={u.id}>{u.nombre}</option>
+                            ))}
+                        </select>
+                        <select
+                            title="Filtrar por estación física"
+                            value={filtroExportCajaFisicaId}
+                            onChange={(e) => setFiltroExportCajaFisicaId(e.target.value)}
+                            style={{ padding: '0.3rem', borderRadius: '4px', border: '1px solid #475569', background: '#0f172a', color: '#f8fafc', fontSize: '0.72rem' }}
+                        >
+                            <option value="">Todas las estaciones</option>
+                            {(datos.cajasFisicas || []).map((cf) => (
+                                <option key={cf.id} value={cf.id}>{cf.nombre}</option>
+                            ))}
+                        </select>
+                    </div>
                     <a
-                        href={`/api/reportes?formato=xlsx${filtroExportDesde ? `&desde=${filtroExportDesde}` : ''}${filtroExportHasta ? `&hasta=${filtroExportHasta}` : ''}`}
+                        href={`/api/reportes?formato=xlsx${filtroExportDesde ? `&desde=${filtroExportDesde}` : ''}${filtroExportHasta ? `&hasta=${filtroExportHasta}` : ''}${filtroExportUsuarioId ? `&usuarioId=${filtroExportUsuarioId}` : ''}${filtroExportCajaFisicaId ? `&cajaFisicaId=${filtroExportCajaFisicaId}` : ''}`}
                         style={{ ...btnPrimario, background: '#16a34a', textAlign: 'center', fontSize: '0.84rem' }}
                     >
                         📊 Descargar Excel Contable (.xlsx)
@@ -1188,7 +1383,7 @@ export default function AdminPage() {
                         📄 Descargar PDF (Turno #{datos.cajaAuditada?.id || '—'})
                     </button>
                     <a
-                        href={`/api/reportes?formato=csv${filtroExportDesde ? `&desde=${filtroExportDesde}` : ''}${filtroExportHasta ? `&hasta=${filtroExportHasta}` : ''}`}
+                        href={`/api/reportes?formato=csv${filtroExportDesde ? `&desde=${filtroExportDesde}` : ''}${filtroExportHasta ? `&hasta=${filtroExportHasta}` : ''}${filtroExportUsuarioId ? `&usuarioId=${filtroExportUsuarioId}` : ''}${filtroExportCajaFisicaId ? `&cajaFisicaId=${filtroExportCajaFisicaId}` : ''}`}
                         style={{ ...btnPrimario, textAlign: 'center', fontSize: '0.84rem' }}
                     >
                         📥 Descargar CSV Contable
@@ -2021,7 +2216,9 @@ export default function AdminPage() {
                         {seccionActiva === 'catalogo' && (() => {
                             const insumoUnitarioSeleccionado = (datos.insumos || []).find((i) => String(i.id) === String(insumoUnitarioId));
                             let costoEstimado = 0;
-                            if (tipoComposicion === 'unitario') {
+                            if (tipoComposicion === 'directo') {
+                                costoEstimado = Number(prodDirectoCostoIni || 0);
+                            } else if (tipoComposicion === 'unitario') {
                                 costoEstimado = insumoUnitarioSeleccionado ? Number(insumoUnitarioSeleccionado.costo_por_unidad || 0) : 0;
                             } else if (tipoComposicion === 'receta') {
                                 for (const f of filasReceta) {
@@ -2056,8 +2253,8 @@ export default function AdminPage() {
 
                             return (
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-                                    {/* SELECTOR DE SUB-SECCIÓN: ARTÍCULOS O MODIFICADORES */}
-                                    <div style={{ display: 'flex', gap: '0.5rem', background: '#e2e8f0', padding: '0.35rem', borderRadius: '8px', alignSelf: 'flex-start' }}>
+                                    {/* SELECTOR DE SUB-SECCIÓN: ARTÍCULOS, MODIFICADORES O KARDEX */}
+                                    <div style={{ display: 'flex', gap: '0.5rem', background: '#e2e8f0', padding: '0.35rem', borderRadius: '8px', alignSelf: 'flex-start', flexWrap: 'wrap' }}>
                                         <button
                                             type="button"
                                             onClick={() => setSubSeccionCatalogo('articulos')}
@@ -2092,9 +2289,158 @@ export default function AdminPage() {
                                         >
                                             ✨ Complementos y Modificadores ({(datos.gruposModificadores || []).length})
                                         </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => setSubSeccionCatalogo('kardex')}
+                                            style={{
+                                                padding: '0.45rem 1rem',
+                                                borderRadius: '6px',
+                                                border: 'none',
+                                                fontWeight: 'bold',
+                                                fontSize: '0.88rem',
+                                                cursor: 'pointer',
+                                                background: subSeccionCatalogo === 'kardex' ? '#ffffff' : 'transparent',
+                                                color: subSeccionCatalogo === 'kardex' ? '#15803d' : '#64748b',
+                                                boxShadow: subSeccionCatalogo === 'kardex' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none'
+                                            }}
+                                        >
+                                            📜 Kardex Cronológico e Integridad
+                                        </button>
                                     </div>
 
-                                    {subSeccionCatalogo === 'modificadores' ? (
+                                    {subSeccionCatalogo === 'kardex' ? (
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+                                            <section style={cardStyle}>
+                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
+                                                    <div>
+                                                        <h3 style={{ margin: 0 }}>🛡️ Verificación de Integridad del Kardex (NIC 2)</h3>
+                                                        <p style={{ margin: '0.25rem 0 0', fontSize: '0.84rem', color: '#64748b' }}>
+                                                            Comprueba que el stock físico actual de cada producto directo e insumo coincida exactamente con la reconstrucción matemática de sus movimientos de Kardex.
+                                                        </p>
+                                                    </div>
+                                                    <button type="button" onClick={handleVerificarIntegridadKardex} style={{ ...btnPrimario, background: '#15803d' }}>
+                                                        🔍 Auditar Integridad del Kardex Ahora
+                                                    </button>
+                                                </div>
+                                                {resultadoIntegridadKardex && (
+                                                    <div style={{
+                                                        marginTop: '0.85rem',
+                                                        padding: '0.75rem 1rem',
+                                                        borderRadius: '8px',
+                                                        background: resultadoIntegridadKardex.integro ? '#f0fdf4' : '#fef2f2',
+                                                        border: `1px solid ${resultadoIntegridadKardex.integro ? '#86efac' : '#fca5a5'}`,
+                                                        fontSize: '0.85rem'
+                                                    }}>
+                                                        <strong>
+                                                            {resultadoIntegridadKardex.integro
+                                                                ? '✅ Estado: 100% ÍNTEGRO'
+                                                                : '⚠️ Estado: Discrepancias detectadas'}
+                                                        </strong>
+                                                        <div style={{ marginTop: '0.25rem', color: '#334155' }}>
+                                                            Productos directos auditados: <strong>{resultadoIntegridadKardex.totalProductosAuditados}</strong> |{' '}
+                                                            Insumos auditados: <strong>{resultadoIntegridadKardex.insumos?.totalInsumosAuditados ?? 0}</strong>
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </section>
+
+                                            <section style={cardStyle}>
+                                                <h3 style={{ marginTop: 0 }}>📦 Kardex Cronológico de Productos Directos</h3>
+                                                {(datos.kardexDetallado?.kardexProductosDirectos || []).length === 0 ? (
+                                                    <p style={{ color: '#64748b', fontSize: '0.88rem' }}>No hay movimientos de Kardex de productos directos registrados.</p>
+                                                ) : (
+                                                    <div style={{ overflowX: 'auto', maxHeight: '340px' }}>
+                                                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
+                                                            <thead style={{ background: '#f8fafc', position: 'sticky', top: 0 }}>
+                                                                <tr style={{ borderBottom: '2px solid #cbd5e1', textAlign: 'left' }}>
+                                                                    <th style={thTd}>ID</th>
+                                                                    <th style={thTd}>Fecha / Hora</th>
+                                                                    <th style={thTd}>Producto Directo</th>
+                                                                    <th style={thTd}>Tipo</th>
+                                                                    <th style={{ ...thTd, textAlign: 'right' }}>Cantidad</th>
+                                                                    <th style={{ ...thTd, textAlign: 'right' }}>Stock Resultante</th>
+                                                                    <th style={{ ...thTd, textAlign: 'right' }}>Costo Unit.</th>
+                                                                    <th style={{ ...thTd, textAlign: 'right' }}>CPP Resultante</th>
+                                                                    <th style={{ ...thTd, textAlign: 'right' }}>Costo Total</th>
+                                                                    <th style={thTd}>Motivo / Comprobante</th>
+                                                                </tr>
+                                                            </thead>
+                                                            <tbody>
+                                                                {(datos.kardexDetallado?.kardexProductosDirectos || []).map((k) => (
+                                                                    <tr key={k.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                                                                        <td style={thTd}>#{k.id}</td>
+                                                                        <td style={thTd}>{k.fecha_hora_local}</td>
+                                                                        <td style={thTd}><strong>{k.producto_nombre}</strong></td>
+                                                                        <td style={{ ...thTd, fontWeight: 600, color: k.tipo === 'merma' || k.tipo === 'venta' ? '#b91c1c' : '#15803d' }}>
+                                                                            {k.tipo.toUpperCase()}
+                                                                        </td>
+                                                                        <td style={{ ...thTd, textAlign: 'right', fontWeight: 'bold' }}>
+                                                                            {k.tipo === 'merma' || k.tipo === 'venta' ? `-${k.cantidad}` : `+${k.cantidad}`} {k.unidad_medida || 'u.'}
+                                                                        </td>
+                                                                        <td style={{ ...thTd, textAlign: 'right', fontWeight: 'bold' }}>{k.stock_resultante}</td>
+                                                                        <td style={{ ...thTd, textAlign: 'right' }}>Bs {Number(k.costo_unitario || 0).toFixed(2)}</td>
+                                                                        <td style={{ ...thTd, textAlign: 'right' }}>Bs {Number(k.costo_promedio_resultante || 0).toFixed(2)}</td>
+                                                                        <td style={{ ...thTd, textAlign: 'right' }}>Bs {Number(k.costo_total || 0).toFixed(2)}</td>
+                                                                        <td style={thTd}>
+                                                                            {k.motivo}
+                                                                            {k.nro_factura_compra ? ` (Fact. #${k.nro_factura_compra})` : ''}
+                                                                        </td>
+                                                                    </tr>
+                                                                ))}
+                                                            </tbody>
+                                                        </table>
+                                                    </div>
+                                                )}
+                                            </section>
+
+                                            <section style={cardStyle}>
+                                                <h3 style={{ marginTop: 0 }}>🧱 Kardex Cronológico de Materiales e Insumos</h3>
+                                                {(datos.kardexDetallado?.kardexInsumos || []).length === 0 ? (
+                                                    <p style={{ color: '#64748b', fontSize: '0.88rem' }}>No hay movimientos de Kardex de insumos registrados.</p>
+                                                ) : (
+                                                    <div style={{ overflowX: 'auto', maxHeight: '340px' }}>
+                                                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
+                                                            <thead style={{ background: '#f8fafc', position: 'sticky', top: 0 }}>
+                                                                <tr style={{ borderBottom: '2px solid #cbd5e1', textAlign: 'left' }}>
+                                                                    <th style={thTd}>ID</th>
+                                                                    <th style={thTd}>Fecha / Hora</th>
+                                                                    <th style={thTd}>Insumo</th>
+                                                                    <th style={thTd}>Tipo</th>
+                                                                    <th style={{ ...thTd, textAlign: 'right' }}>Cantidad</th>
+                                                                    <th style={{ ...thTd, textAlign: 'right' }}>Stock Resultante</th>
+                                                                    <th style={{ ...thTd, textAlign: 'right' }}>CPP Resultante</th>
+                                                                    <th style={{ ...thTd, textAlign: 'right' }}>Costo Total</th>
+                                                                    <th style={thTd}>Motivo / Proveedor</th>
+                                                                </tr>
+                                                            </thead>
+                                                            <tbody>
+                                                                {(datos.kardexDetallado?.kardexInsumos || []).map((k) => (
+                                                                    <tr key={k.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                                                                        <td style={thTd}>#{k.id}</td>
+                                                                        <td style={thTd}>{k.fecha_hora_local}</td>
+                                                                        <td style={thTd}><strong>{k.insumo_nombre}</strong></td>
+                                                                        <td style={{ ...thTd, fontWeight: 600, color: k.tipo === 'merma' || k.tipo === 'consumo_venta' ? '#b91c1c' : '#15803d' }}>
+                                                                            {k.tipo.toUpperCase()}
+                                                                        </td>
+                                                                        <td style={{ ...thTd, textAlign: 'right', fontWeight: 'bold' }}>
+                                                                            {k.tipo === 'merma' || k.tipo === 'consumo_venta' ? `-${k.cantidad}` : `+${k.cantidad}`} {k.unidad_medida}
+                                                                        </td>
+                                                                        <td style={{ ...thTd, textAlign: 'right', fontWeight: 'bold' }}>{Number(k.stock_resultante ?? 0).toFixed(2)}</td>
+                                                                        <td style={{ ...thTd, textAlign: 'right' }}>Bs {Number(k.costo_promedio_resultante ?? 0).toFixed(4)}</td>
+                                                                        <td style={{ ...thTd, textAlign: 'right' }}>Bs {Number(k.costo_total || 0).toFixed(2)}</td>
+                                                                        <td style={thTd}>
+                                                                            {k.motivo}
+                                                                            {k.nro_factura_compra ? ` (Fact. #${k.nro_factura_compra})` : ''}
+                                                                        </td>
+                                                                    </tr>
+                                                                ))}
+                                                            </tbody>
+                                                        </table>
+                                                    </div>
+                                                )}
+                                            </section>
+                                        </div>
+                                    ) : subSeccionCatalogo === 'modificadores' ? (
                                         <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 0.8fr', gap: '1.5rem', alignItems: 'start' }}>
                                             {/* COLUMNA IZQUIERDA: CREAR NUEVO GRUPO */}
                                             <section style={cardStyle}>
@@ -2644,76 +2990,159 @@ export default function AdminPage() {
                                                     <span style={{ fontSize: '0.85rem', fontWeight: 'bold', color: '#334155', display: 'block', marginBottom: '0.4rem' }}>
                                                         Composición y Origen de Inventario:
                                                     </span>
-                                                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0.4rem' }}>
+                                                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '0.35rem' }}>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setTipoComposicion('directo')}
+                                                            style={{
+                                                                padding: '0.55rem 0.35rem',
+                                                                borderRadius: '8px',
+                                                                border: tipoComposicion === 'directo' ? '2px solid #0284c7' : '1px solid #cbd5e1',
+                                                                background: tipoComposicion === 'directo' ? '#f0f9ff' : '#fff',
+                                                                cursor: 'pointer',
+                                                                textAlign: 'center',
+                                                                fontSize: '0.78rem'
+                                                            }}
+                                                        >
+                                                            <strong>📦 Directo</strong>
+                                                            <div style={{ fontSize: '0.68rem', color: '#64748b', marginTop: '0.15rem' }}>Stock propio</div>
+                                                        </button>
+
                                                         <button
                                                             type="button"
                                                             onClick={() => setTipoComposicion('unitario')}
                                                             style={{
-                                                                padding: '0.6rem 0.4rem',
+                                                                padding: '0.55rem 0.35rem',
                                                                 borderRadius: '8px',
                                                                 border: tipoComposicion === 'unitario' ? '2px solid #0284c7' : '1px solid #cbd5e1',
                                                                 background: tipoComposicion === 'unitario' ? '#f0f9ff' : '#fff',
                                                                 cursor: 'pointer',
                                                                 textAlign: 'center',
-                                                                fontSize: '0.8rem'
+                                                                fontSize: '0.78rem'
                                                             }}
                                                         >
-                                                            <strong>📦 Unitario</strong>
-                                                            <div style={{ fontSize: '0.7rem', color: '#64748b', marginTop: '0.2rem' }}>Reventa 1 a 1</div>
+                                                            <strong>🔗 Unitario</strong>
+                                                            <div style={{ fontSize: '0.68rem', color: '#64748b', marginTop: '0.15rem' }}>1 a 1 Insumo</div>
                                                         </button>
 
                                                         <button
                                                             type="button"
                                                             onClick={() => setTipoComposicion('receta')}
                                                             style={{
-                                                                padding: '0.6rem 0.4rem',
+                                                                padding: '0.55rem 0.35rem',
                                                                 borderRadius: '8px',
                                                                 border: tipoComposicion === 'receta' ? '2px solid #0284c7' : '1px solid #cbd5e1',
                                                                 background: tipoComposicion === 'receta' ? '#f0f9ff' : '#fff',
                                                                 cursor: 'pointer',
                                                                 textAlign: 'center',
-                                                                fontSize: '0.8rem'
+                                                                fontSize: '0.78rem'
                                                             }}
                                                         >
                                                             <strong>🧪 Receta</strong>
-                                                            <div style={{ fontSize: '0.7rem', color: '#64748b', marginTop: '0.2rem' }}>Insumos métricos</div>
+                                                            <div style={{ fontSize: '0.68rem', color: '#64748b', marginTop: '0.15rem' }}>Insumos métricos</div>
                                                         </button>
 
                                                         <button
                                                             type="button"
                                                             onClick={() => setTipoComposicion('combo')}
                                                             style={{
-                                                                padding: '0.6rem 0.4rem',
+                                                                padding: '0.55rem 0.35rem',
                                                                 borderRadius: '8px',
                                                                 border: tipoComposicion === 'combo' ? '2px solid #0284c7' : '1px solid #cbd5e1',
                                                                 background: tipoComposicion === 'combo' ? '#f0f9ff' : '#fff',
                                                                 cursor: 'pointer',
                                                                 textAlign: 'center',
-                                                                fontSize: '0.8rem'
+                                                                fontSize: '0.78rem'
                                                             }}
                                                         >
                                                             <strong>🎁 Combo</strong>
-                                                            <div style={{ fontSize: '0.7rem', color: '#64748b', marginTop: '0.2rem' }}>Agrupa productos</div>
+                                                            <div style={{ fontSize: '0.68rem', color: '#64748b', marginTop: '0.15rem' }}>Agrupa productos</div>
                                                         </button>
 
                                                         <button
                                                             type="button"
                                                             onClick={() => setTipoComposicion('libre')}
                                                             style={{
-                                                                padding: '0.6rem 0.4rem',
+                                                                padding: '0.55rem 0.35rem',
                                                                 borderRadius: '8px',
                                                                 border: tipoComposicion === 'libre' ? '2px solid #0284c7' : '1px solid #cbd5e1',
                                                                 background: tipoComposicion === 'libre' ? '#f0f9ff' : '#fff',
                                                                 cursor: 'pointer',
                                                                 textAlign: 'center',
-                                                                fontSize: '0.8rem'
+                                                                fontSize: '0.78rem'
                                                             }}
                                                         >
-                                                            <strong>✨ Venta Libre</strong>
-                                                            <div style={{ fontSize: '0.7rem', color: '#64748b', marginTop: '0.2rem' }}>Sin inventario</div>
+                                                            <strong>✨ Libre</strong>
+                                                            <div style={{ fontSize: '0.68rem', color: '#64748b', marginTop: '0.15rem' }}>Sin inventario</div>
                                                         </button>
                                                     </div>
                                                 </div>
+
+                                                {/* OPCIÓN 0: PRODUCTO DE STOCK DIRECTO (KARDEX PROPIO) */}
+                                                {tipoComposicion === 'directo' && (
+                                                    <div style={{ background: '#f8fafc', padding: '0.85rem', borderRadius: '8px', border: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', gap: '0.55rem' }}>
+                                                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+                                                            <label style={{ fontSize: '0.82rem', color: '#334155' }}>
+                                                                Stock Inicial Físico:
+                                                                <input
+                                                                    type="number"
+                                                                    step="1"
+                                                                    min="0"
+                                                                    required
+                                                                    value={prodDirectoStockIni}
+                                                                    onChange={(e) => setProdDirectoStockIni(e.target.value)}
+                                                                    style={inputStyle}
+                                                                />
+                                                            </label>
+                                                            <label style={{ fontSize: '0.82rem', color: '#334155' }}>
+                                                                Costo Unitario Inicial (Bs):
+                                                                <input
+                                                                    type="number"
+                                                                    step="0.01"
+                                                                    min="0"
+                                                                    required
+                                                                    value={prodDirectoCostoIni}
+                                                                    onChange={(e) => setProdDirectoCostoIni(e.target.value)}
+                                                                    style={inputStyle}
+                                                                />
+                                                            </label>
+                                                            <label style={{ fontSize: '0.82rem', color: '#334155' }}>
+                                                                Stock Mínimo (Alerta):
+                                                                <input
+                                                                    type="number"
+                                                                    step="1"
+                                                                    min="0"
+                                                                    value={prodDirectoStockMin}
+                                                                    onChange={(e) => setProdDirectoStockMin(e.target.value)}
+                                                                    style={inputStyle}
+                                                                />
+                                                            </label>
+                                                            <label style={{ fontSize: '0.82rem', color: '#334155' }}>
+                                                                Unidad de Medida:
+                                                                <input
+                                                                    type="text"
+                                                                    value={prodDirectoUnidad}
+                                                                    onChange={(e) => setProdDirectoUnidad(e.target.value)}
+                                                                    style={inputStyle}
+                                                                />
+                                                            </label>
+                                                        </div>
+                                                        {cfgUsaVencimiento && (
+                                                            <label style={{ fontSize: '0.82rem', color: '#334155' }}>
+                                                                Fecha de Vencimiento (Opcional):
+                                                                <input
+                                                                    type="date"
+                                                                    value={prodDirectoVencimiento}
+                                                                    onChange={(e) => setProdDirectoVencimiento(e.target.value)}
+                                                                    style={inputStyle}
+                                                                />
+                                                            </label>
+                                                        )}
+                                                        <div style={{ fontSize: '0.78rem', color: '#64748b' }}>
+                                                            📦 <em>Artículo de reventa directa con Kardex propio (`movimientos_productos_directos`), compras CPP y registro de mermas directo.</em>
+                                                        </div>
+                                                    </div>
+                                                )}
 
                                                 {/* OPCIÓN 1: PRODUCTO UNITARIO (1 a 1) */}
                                                 {tipoComposicion === 'unitario' && (
@@ -3092,36 +3521,241 @@ export default function AdminPage() {
 
                                             {/* Si algún producto requiere compra directa tradicional */}
                                             {usaStockDirecto && (
-                                                <section style={cardStyle}>
-                                                    <h3 style={{ marginTop: 0, fontSize: '0.98rem' }}>🚚 Reabastecer Artículo Directo (NIC 2)</h3>
-                                                    {(() => {
-                                                        const productosDirectos = (datos.productos || []).filter((p) => p.tipo_inventario === 'directo');
-                                                        if (productosDirectos.length === 0) {
+                                                <>
+                                                    <section style={cardStyle}>
+                                                        <h3 style={{ marginTop: 0, fontSize: '0.98rem' }}>🚚 Reabastecer Artículo Directo (NIC 2)</h3>
+                                                        {(() => {
+                                                            const productosDirectos = (datos.productos || []).filter((p) => p.tipo_inventario === 'directo');
+                                                            if (productosDirectos.length === 0) {
+                                                                return (
+                                                                    <p style={{ margin: 0, fontSize: '0.82rem', color: '#64748b', lineHeight: 1.4 }}>
+                                                                        No hay artículos de reventa directa registrados. Crea uno con el botón <strong>📦 Directo</strong> o usa insumos para artículos con receta.
+                                                                    </p>
+                                                                );
+                                                            }
                                                             return (
-                                                                <p style={{ margin: 0, fontSize: '0.82rem', color: '#64748b', lineHeight: 1.4 }}>
-                                                                    No hay artículos de reventa directa registrados. Los artículos con receta (como café o bebidas) se abastecen automáticamente mediante sus insumos.
-                                                                </p>
+                                                                <form onSubmit={handleComprarProductoDirecto} style={formCol}>
+                                                                    <select value={compraProdId} onChange={(e) => setCompraProdId(e.target.value)} style={inputStyle}>
+                                                                        <option value="">-- Selecciona el artículo directo --</option>
+                                                                        {productosDirectos.map((p) => (
+                                                                            <option key={p.id} value={p.id}>
+                                                                                {p.nombre} (Stock: {p.stock ?? 0} {p.unidad_medida || 'u.'} | Costo: Bs {Number(p.costo).toFixed(2)})
+                                                                            </option>
+                                                                        ))}
+                                                                    </select>
+                                                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.4rem' }}>
+                                                                        <input type="number" step="0.01" min="0.01" placeholder="Cantidad" required value={compraProdCantidad} onChange={(e) => setCompraProdCantidad(e.target.value)} style={inputStyle} />
+                                                                        <input type="number" step="0.01" min="0" placeholder="Costo Total (Bs)" required value={compraProdCostoTotal} onChange={(e) => setCompraProdCostoTotal(e.target.value)} style={inputStyle} />
+                                                                    </div>
+                                                                    <input
+                                                                        type="text"
+                                                                        placeholder="Proveedor / Distribuidora (Opcional)"
+                                                                        value={compraProdProveedor}
+                                                                        onChange={(e) => setCompraProdProveedor(e.target.value)}
+                                                                        style={{ ...inputStyle, fontSize: '0.8rem' }}
+                                                                    />
+                                                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.4rem' }}>
+                                                                        <input
+                                                                            type="text"
+                                                                            placeholder="NIT Proveedor (Opc.)"
+                                                                            value={compraProdNit}
+                                                                            onChange={(e) => setCompraProdNit(e.target.value)}
+                                                                            style={{ ...inputStyle, fontSize: '0.8rem' }}
+                                                                        />
+                                                                        <input
+                                                                            type="text"
+                                                                            placeholder="N° Factura (Opc.)"
+                                                                            value={compraProdNroFactura}
+                                                                            onChange={(e) => {
+                                                                                setCompraProdNroFactura(e.target.value);
+                                                                                if (e.target.value.trim() !== '') setCompraProdConFactura(true);
+                                                                            }}
+                                                                            style={{ ...inputStyle, fontSize: '0.8rem' }}
+                                                                        />
+                                                                    </div>
+                                                                    <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.8rem', color: '#1e293b', cursor: 'pointer' }}>
+                                                                        <input
+                                                                            type="checkbox"
+                                                                            checked={compraProdConFactura}
+                                                                            onChange={(e) => setCompraProdConFactura(e.target.checked)}
+                                                                        />
+                                                                        <span>🧾 Compra con Factura Fiscal (Crédito Fiscal IVA)</span>
+                                                                    </label>
+                                                                    <button type="submit" style={{ ...btnOscuro, padding: '0.45rem', fontSize: '0.82rem' }}>Registrar Entrada CPP</button>
+                                                                </form>
                                                             );
-                                                        }
-                                                        return (
-                                                            <form onSubmit={handleComprarProductoDirecto} style={formCol}>
-                                                                <select value={compraProdId} onChange={(e) => setCompraProdId(e.target.value)} style={inputStyle}>
-                                                                    <option value="">-- Selecciona el artículo directo --</option>
-                                                                    {productosDirectos.map((p) => (
-                                                                        <option key={p.id} value={p.id}>
-                                                                            {p.nombre} (Stock: {p.stock ?? 0} {p.unidad_medida || 'u.'} | Costo: Bs {Number(p.costo).toFixed(2)})
-                                                                        </option>
-                                                                    ))}
-                                                                </select>
-                                                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.4rem' }}>
-                                                                    <input type="number" step="0.01" placeholder="Cantidad" required value={compraProdCantidad} onChange={(e) => setCompraProdCantidad(e.target.value)} style={inputStyle} />
-                                                                    <input type="number" step="0.01" placeholder="Costo Total (Bs)" required value={compraProdCostoTotal} onChange={(e) => setCompraProdCostoTotal(e.target.value)} style={inputStyle} />
+                                                        })()}
+                                                    </section>
+
+                                                    {/* FORMULARIO DE REGISTRO DE MERMAS DE PRODUCTOS DIRECTOS (FASE 3.A) */}
+                                                    <section style={{ ...cardStyle, border: '1px solid #fecaca', background: '#fffdfd' }}>
+                                                        <h3 style={{ marginTop: 0, fontSize: '0.98rem', color: '#991b1b' }}>
+                                                            ⚠️ Registrar Merma / Baja de Producto Directo
+                                                        </h3>
+                                                        {(() => {
+                                                            const productosDirectos = (datos.productos || []).filter((p) => p.tipo_inventario === 'directo');
+                                                            if (productosDirectos.length === 0) {
+                                                                return (
+                                                                    <p style={{ margin: 0, fontSize: '0.82rem', color: '#64748b', lineHeight: 1.4 }}>
+                                                                        No hay productos directos registrados para dar de baja por merma.
+                                                                    </p>
+                                                                );
+                                                            }
+                                                            const prodMermaSel = productosDirectos.find((p) => String(p.id) === String(mermaProdId)) || productosDirectos[0];
+                                                            const stockActualProd = Number(prodMermaSel?.stock ?? 0);
+                                                            const costoUnitProd = Number(prodMermaSel?.costo ?? 0);
+                                                            const cantBajaNum = Number(mermaProdCantidad) || 0;
+                                                            const costoEstimadoPerdida = Number(( Math.max(0, cantBajaNum) * costoUnitProd ).toFixed(2));
+                                                            const superaStock = cantBajaNum > stockActualProd;
+                                                            const cantidadInvalidaMerma = mermaProdCantidad !== '' && (cantBajaNum <= 0 || superaStock);
+
+                                                            return (
+                                                                <div style={formCol}>
+                                                                    <label style={{ fontSize: '0.82rem', color: '#334155', fontWeight: 600 }}>
+                                                                        1. Seleccionar Producto Directo:
+                                                                        <select
+                                                                            value={mermaProdId}
+                                                                            onChange={(e) => {
+                                                                                setMermaProdId(e.target.value);
+                                                                                setMermaProdConfirmando(false);
+                                                                                setMermaProdResultado(null);
+                                                                            }}
+                                                                            style={{ ...inputStyle, marginTop: '0.25rem' }}
+                                                                        >
+                                                                            {productosDirectos.map((p) => (
+                                                                                <option key={p.id} value={p.id}>
+                                                                                    {p.nombre} (Stock: {p.stock ?? 0} {p.unidad_medida || 'u.'} | CPP: Bs {Number(p.costo).toFixed(2)})
+                                                                                </option>
+                                                                            ))}
+                                                                        </select>
+                                                                    </label>
+
+                                                                    {/* Consulta de stock actual y costo unitario */}
+                                                                    {prodMermaSel && (
+                                                                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.4rem', background: '#f8fafc', padding: '0.55rem', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '0.8rem' }}>
+                                                                            <div>
+                                                                                <span style={{ color: '#64748b' }}>Stock Actual:</span>{' '}
+                                                                                <strong style={{ color: stockActualProd > 0 ? '#0f172a' : '#dc2626' }}>
+                                                                                    {stockActualProd} {prodMermaSel.unidad_medida || 'u.'}
+                                                                                </strong>
+                                                                            </div>
+                                                                            <div>
+                                                                                <span style={{ color: '#64748b' }}>Costo Unit. (CPP):</span>{' '}
+                                                                                <strong>Bs {costoUnitProd.toFixed(2)}</strong>
+                                                                            </div>
+                                                                        </div>
+                                                                    )}
+
+                                                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.4rem', alignItems: 'end' }}>
+                                                                        <label style={{ fontSize: '0.82rem', color: '#334155', fontWeight: 600 }}>
+                                                                            2. Cantidad a Dar de Baja:
+                                                                            <input
+                                                                                type="number"
+                                                                                step="1"
+                                                                                min="1"
+                                                                                max={stockActualProd}
+                                                                                placeholder={`Máx: ${stockActualProd}`}
+                                                                                value={mermaProdCantidad}
+                                                                                onChange={(e) => {
+                                                                                    setMermaProdCantidad(e.target.value);
+                                                                                    setMermaProdConfirmando(false);
+                                                                                }}
+                                                                                style={{
+                                                                                    ...inputStyle,
+                                                                                    marginTop: '0.25rem',
+                                                                                    borderColor: cantidadInvalidaMerma ? '#ef4444' : '#ccc',
+                                                                                    background: cantidadInvalidaMerma ? '#fef2f2' : '#fff'
+                                                                                }}
+                                                                            />
+                                                                        </label>
+                                                                        <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '6px', padding: '0.45rem 0.6rem', textAlign: 'right' }}>
+                                                                            <div style={{ fontSize: '0.7rem', color: '#991b1b', textTransform: 'uppercase', fontWeight: 'bold' }}>
+                                                                                Costo Estimado Pérdida
+                                                                            </div>
+                                                                            <div style={{ fontSize: '1.05rem', fontWeight: 'bold', color: '#b91c1c' }}>
+                                                                                Bs {costoEstimadoPerdida.toFixed(2)}
+                                                                            </div>
+                                                                        </div>
+                                                                    </div>
+
+                                                                    {superaStock && (
+                                                                        <div style={{ fontSize: '0.78rem', color: '#b91c1c', fontWeight: 'bold' }}>
+                                                                            ⚠️ No puedes registrar una merma superior al stock disponible ({stockActualProd} {prodMermaSel?.unidad_medida || 'u.'}).
+                                                                        </div>
+                                                                    )}
+
+                                                                    <label style={{ fontSize: '0.82rem', color: '#334155', fontWeight: 600 }}>
+                                                                        3. Motivo de la Merma (Obligatorio):
+                                                                        <input
+                                                                            type="text"
+                                                                            placeholder="Ej. Producto vencido, envase roto, daño en almacén..."
+                                                                            value={mermaProdMotivo}
+                                                                            onChange={(e) => {
+                                                                                setMermaProdMotivo(e.target.value);
+                                                                                setMermaProdConfirmando(false);
+                                                                            }}
+                                                                            style={{ ...inputStyle, marginTop: '0.25rem' }}
+                                                                        />
+                                                                    </label>
+
+                                                                    {!mermaProdConfirmando ? (
+                                                                        <button
+                                                                            type="button"
+                                                                            disabled={!prodMermaSel || stockActualProd <= 0 || cantBajaNum <= 0 || superaStock || !mermaProdMotivo || mermaProdMotivo.trim().length < 3}
+                                                                            onClick={() => setMermaProdConfirmando(true)}
+                                                                            style={{
+                                                                                ...btnPrimario,
+                                                                                background: '#dc2626',
+                                                                                padding: '0.5rem',
+                                                                                fontSize: '0.84rem',
+                                                                                opacity: (!prodMermaSel || stockActualProd <= 0 || cantBajaNum <= 0 || superaStock || !mermaProdMotivo || mermaProdMotivo.trim().length < 3) ? 0.55 : 1,
+                                                                                cursor: (!prodMermaSel || stockActualProd <= 0 || cantBajaNum <= 0 || superaStock || !mermaProdMotivo || mermaProdMotivo.trim().length < 3) ? 'not-allowed' : 'pointer'
+                                                                            }}
+                                                                        >
+                                                                            Registrar Baja por Merma
+                                                                        </button>
+                                                                    ) : (
+                                                                        <div style={{ background: '#fffbeb', border: '2px solid #f59e0b', borderRadius: '8px', padding: '0.7rem', display: 'flex', flexDirection: 'column', gap: '0.45rem' }}>
+                                                                            <div style={{ fontSize: '0.82rem', color: '#92400e', fontWeight: 'bold' }}>
+                                                                                ⚠️ ¿Confirmar baja definitiva de {cantBajaNum} {prodMermaSel?.unidad_medida || 'u.'} de &ldquo;{prodMermaSel?.nombre}&rdquo;?
+                                                                            </div>
+                                                                            <div style={{ fontSize: '0.78rem', color: '#78350f' }}>
+                                                                                Stock resultante: <strong>{stockActualProd - cantBajaNum}</strong> | Pérdida contable: <strong>Bs {costoEstimadoPerdida.toFixed(2)}</strong>
+                                                                            </div>
+                                                                            <div style={{ display: 'flex', gap: '0.4rem' }}>
+                                                                                <button
+                                                                                    type="button"
+                                                                                    onClick={handleConfirmarMermaProductoDirecto}
+                                                                                    style={{ ...btnPrimario, background: '#dc2626', flex: 1, padding: '0.45rem', fontSize: '0.82rem' }}
+                                                                                >
+                                                                                    ✅ Sí, Confirmar Merma
+                                                                                </button>
+                                                                                <button
+                                                                                    type="button"
+                                                                                    onClick={() => setMermaProdConfirmando(false)}
+                                                                                    style={{ ...btnSecundario, padding: '0.45rem 0.75rem', fontSize: '0.82rem', cursor: 'pointer', border: '1px solid #cbd5e1' }}
+                                                                                >
+                                                                                    Cancelar
+                                                                                </button>
+                                                                            </div>
+                                                                        </div>
+                                                                    )}
+
+                                                                    {mermaProdResultado && (
+                                                                        <div style={{ background: '#f0fdf4', border: '1px solid #86efac', borderRadius: '6px', padding: '0.6rem', fontSize: '0.8rem', color: '#166534' }}>
+                                                                            <div><strong>✅ Última merma registrada:</strong> {mermaProdResultado.productoNombre}</div>
+                                                                            <div>
+                                                                                Baja: <strong>-{mermaProdResultado.cantidadPerdida} {mermaProdResultado.unidadMedida}</strong> |{' '}
+                                                                                Stock restante: <strong>{mermaProdResultado.stockRestante}</strong> |{' '}
+                                                                                Pérdida: <strong>Bs {Number(mermaProdResultado.costoPerdida || 0).toFixed(2)}</strong>
+                                                                            </div>
+                                                                        </div>
+                                                                    )}
                                                                 </div>
-                                                                <button type="submit" style={{ ...btnOscuro, padding: '0.45rem', fontSize: '0.82rem' }}>Registrar Entrada</button>
-                                                            </form>
-                                                        );
-                                                    })()}
-                                                </section>
+                                                            );
+                                                        })()}
+                                                    </section>
+                                                </>
                                             )}
                                         </div>
                                     </div>
@@ -3385,7 +4019,7 @@ export default function AdminPage() {
                                             </label>
                                             <label style={{ fontSize: '0.85rem', color: '#334155' }}>
                                                 Costo por unidad (Bs):
-                                                <input type="number" step="0.01" min="0" placeholder="Cuánto cuesta 1 unidad en Bs" value={insCostoUni} onChange={(e) => setInsCostoUni(e.target.value)} style={inputStyle} />
+                                                <input type="number" step="0.0001" min="0" placeholder="Cuánto cuesta 1 unidad en Bs" value={insCostoUni} onChange={(e) => setInsCostoUni(e.target.value)} style={inputStyle} />
                                             </label>
                                             <label style={{ fontSize: '0.85rem', color: '#334155' }}>
                                                 Stock de Seguridad (Reserva mínima para alerta de reposición):
@@ -3426,6 +4060,118 @@ export default function AdminPage() {
                                         </form>
                                     </section>
                                 </div>
+
+                                {/* FORMULARIO DE REGISTRO DE MERMAS DE MATERIALES / INSUMOS */}
+                                <section style={{ ...cardStyle, marginTop: '1.5rem', border: '1px solid #fecaca', background: '#fffdfd' }}>
+                                    <h3 style={{ marginTop: 0, color: '#991b1b' }}>⚠️ Registrar Merma / Desperdicio de Material o Insumo</h3>
+                                    {(() => {
+                                        const listaIns = datos.insumos || [];
+                                        if (listaIns.length === 0) {
+                                            return <p style={{ margin: 0, color: '#64748b', fontSize: '0.85rem' }}>No hay materiales o insumos registrados.</p>;
+                                        }
+                                        const insSel = listaIns.find((i) => String(i.id) === String(mermaInsId)) || listaIns[0];
+                                        const stockIns = Number(insSel?.stock_actual ?? 0);
+                                        const costoUnitIns = Number(insSel?.costo_por_unidad ?? 0);
+                                        const cantInsNum = Number(mermaInsCantidad) || 0;
+                                        const perdidaInsBs = Number((Math.max(0, cantInsNum) * costoUnitIns).toFixed(2));
+                                        const superaStockIns = cantInsNum > stockIns;
+
+                                        return (
+                                            <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 0.8fr 0.8fr 1.4fr auto', gap: '0.75rem', alignItems: 'end', flexWrap: 'wrap' }}>
+                                                <label style={{ fontSize: '0.82rem', color: '#334155', fontWeight: 600 }}>
+                                                    Insumo ({insSel?.unidad_medida || 'u.'}):
+                                                    <select
+                                                        value={mermaInsId}
+                                                        onChange={(e) => {
+                                                            setMermaInsId(e.target.value);
+                                                            setMermaInsConfirmando(false);
+                                                            setMermaInsResultado(null);
+                                                        }}
+                                                        style={{ ...inputStyle, marginTop: '0.25rem' }}
+                                                    >
+                                                        {listaIns.map((i) => (
+                                                            <option key={i.id} value={i.id}>
+                                                                {i.nombre} (Stock: {i.stock_actual} {i.unidad_medida} | Bs {Number(i.costo_por_unidad).toFixed(4)}/{i.unidad_medida})
+                                                            </option>
+                                                        ))}
+                                                    </select>
+                                                </label>
+                                                <label style={{ fontSize: '0.82rem', color: '#334155', fontWeight: 600 }}>
+                                                    Cantidad Perdida:
+                                                    <input
+                                                        type="number"
+                                                        step="0.01"
+                                                        min="0.01"
+                                                        max={stockIns}
+                                                        placeholder={`Máx: ${stockIns}`}
+                                                        value={mermaInsCantidad}
+                                                        onChange={(e) => {
+                                                            setMermaInsCantidad(e.target.value);
+                                                            setMermaInsConfirmando(false);
+                                                        }}
+                                                        style={{ ...inputStyle, marginTop: '0.25rem', borderColor: superaStockIns ? '#ef4444' : '#ccc' }}
+                                                    />
+                                                </label>
+                                                <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '6px', padding: '0.45rem 0.6rem', textAlign: 'right' }}>
+                                                    <div style={{ fontSize: '0.7rem', color: '#991b1b', fontWeight: 'bold', textTransform: 'uppercase' }}>Pérdida Estimada</div>
+                                                    <div style={{ fontSize: '1rem', fontWeight: 'bold', color: '#b91c1c' }}>Bs {perdidaInsBs.toFixed(2)}</div>
+                                                </div>
+                                                <label style={{ fontSize: '0.82rem', color: '#334155', fontWeight: 600 }}>
+                                                    Motivo de Merma (Obligatorio):
+                                                    <input
+                                                        type="text"
+                                                        placeholder="Ej. Derrame, caducidad, merma de cocción..."
+                                                        value={mermaInsMotivo}
+                                                        onChange={(e) => {
+                                                            setMermaInsMotivo(e.target.value);
+                                                            setMermaInsConfirmando(false);
+                                                        }}
+                                                        style={{ ...inputStyle, marginTop: '0.25rem' }}
+                                                    />
+                                                </label>
+                                                <div>
+                                                    {!mermaInsConfirmando ? (
+                                                        <button
+                                                            type="button"
+                                                            disabled={!insSel || stockIns <= 0 || cantInsNum <= 0 || superaStockIns || !mermaInsMotivo || mermaInsMotivo.trim().length < 3}
+                                                            onClick={() => setMermaInsConfirmando(true)}
+                                                            style={{
+                                                                ...btnPrimario,
+                                                                background: '#dc2626',
+                                                                opacity: (!insSel || stockIns <= 0 || cantInsNum <= 0 || superaStockIns || !mermaInsMotivo || mermaInsMotivo.trim().length < 3) ? 0.55 : 1,
+                                                                cursor: (!insSel || stockIns <= 0 || cantInsNum <= 0 || superaStockIns || !mermaInsMotivo || mermaInsMotivo.trim().length < 3) ? 'not-allowed' : 'pointer'
+                                                            }}
+                                                        >
+                                                            Dar de Baja
+                                                        </button>
+                                                    ) : (
+                                                        <div style={{ display: 'flex', gap: '0.35rem' }}>
+                                                            <button
+                                                                type="button"
+                                                                onClick={handleConfirmarMermaInsumo}
+                                                                style={{ ...btnPrimario, background: '#dc2626', padding: '0.5rem 0.75rem', fontSize: '0.8rem' }}
+                                                            >
+                                                                ✅ Confirmar (-{cantInsNum} {insSel?.unidad_medida})
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setMermaInsConfirmando(false)}
+                                                                style={{ ...btnSecundario, padding: '0.5rem 0.65rem', fontSize: '0.8rem', cursor: 'pointer', border: '1px solid #cbd5e1' }}
+                                                            >
+                                                                Cancelar
+                                                            </button>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        );
+                                    })()}
+                                    {mermaInsResultado && (
+                                        <div style={{ marginTop: '0.75rem', background: '#f0fdf4', border: '1px solid #86efac', borderRadius: '6px', padding: '0.55rem 0.75rem', fontSize: '0.82rem', color: '#166534' }}>
+                                            <strong>✅ Merma de insumo registrada:</strong> {mermaInsResultado.insumoNombre} (-{mermaInsResultado.cantidadPerdida} {mermaInsResultado.unidadMedida}) | Stock restante: <strong>{mermaInsResultado.stockRestante} {mermaInsResultado.unidadMedida}</strong> | Pérdida: <strong>Bs {Number(mermaInsResultado.costoPerdida || 0).toFixed(2)}</strong>
+                                        </div>
+                                    )}
+                                </section>
                             </>
                         )}
 

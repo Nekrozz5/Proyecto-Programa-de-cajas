@@ -959,6 +959,246 @@ const MIGRACIONES = [
                 console.log(`[Migraciones v10 Kardex] Saldos de apertura sembrados (${sembrados.length}): ${sembrados.join(', ')}`);
             }
         }
+    },
+    {
+        version: 11,
+        descripcion: 'Índice único de turno abierto por estación física, Kardex cronológico completo de insumos (stock_resultante, costo_promedio_resultante y tipos inventario_inicial/ajuste) y reconciliación integral de movimientos_pagos',
+        up: async (conn) => {
+            // 1. Índice único parcial para impedir dos turnos abiertos simultáneamente en la misma estación física
+            await runRaw(
+                conn,
+                `CREATE UNIQUE INDEX IF NOT EXISTS una_caja_abierta_por_estacion ON cajas(caja_fisica_id) WHERE estado = 'abierta'`
+            );
+
+            // 2. Recrear movimientos_insumos para soportar 'inventario_inicial' y 'ajuste' y columnas de saldo/CPP resultante
+            const tieneProvNombre = await tieneColumna(conn, 'movimientos_insumos', 'proveedor_nombre');
+            const tieneProvNit = await tieneColumna(conn, 'movimientos_insumos', 'proveedor_nit');
+            const tieneNroFac = await tieneColumna(conn, 'movimientos_insumos', 'nro_factura_compra');
+            const tieneConFac = await tieneColumna(conn, 'movimientos_insumos', 'con_factura');
+            const tieneMontoTot = await tieneColumna(conn, 'movimientos_insumos', 'monto_total_compra');
+            const tieneUsuarioId = await tieneColumna(conn, 'movimientos_insumos', 'usuario_id');
+
+            await runRaw(conn, `
+                CREATE TABLE movimientos_insumos_v11 (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    insumo_id INTEGER NOT NULL,
+                    movimiento_id INTEGER,
+                    usuario_id INTEGER DEFAULT NULL,
+                    tipo TEXT CHECK(tipo IN ('inventario_inicial', 'compra', 'consumo_venta', 'merma', 'reingreso_anulacion', 'ajuste')) NOT NULL,
+                    cantidad REAL NOT NULL,
+                    stock_resultante REAL NOT NULL DEFAULT 0,
+                    costo_unitario REAL NOT NULL,
+                    costo_promedio_resultante REAL NOT NULL DEFAULT 0,
+                    monto_total_compra REAL DEFAULT 0,
+                    proveedor_nombre TEXT DEFAULT NULL,
+                    proveedor_nit TEXT DEFAULT NULL,
+                    nro_factura_compra TEXT DEFAULT NULL,
+                    con_factura INTEGER DEFAULT 0,
+                    motivo TEXT DEFAULT '',
+                    fecha_hora DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (insumo_id) REFERENCES insumos(id),
+                    FOREIGN KEY (movimiento_id) REFERENCES movimientos(id),
+                    FOREIGN KEY (usuario_id) REFERENCES usuarios(id)
+                )
+            `);
+
+            await runRaw(conn, `
+                INSERT INTO movimientos_insumos_v11 (
+                    id, insumo_id, movimiento_id, usuario_id, tipo, cantidad,
+                    stock_resultante, costo_unitario, costo_promedio_resultante, monto_total_compra,
+                    proveedor_nombre, proveedor_nit, nro_factura_compra, con_factura, motivo, fecha_hora
+                )
+                SELECT
+                    mi.id,
+                    mi.insumo_id,
+                    mi.movimiento_id,
+                    ${tieneUsuarioId ? 'mi.usuario_id' : 'NULL'},
+                    mi.tipo,
+                    mi.cantidad,
+                    0,
+                    mi.costo_unitario,
+                    mi.costo_unitario,
+                    ${tieneMontoTot ? 'COALESCE(mi.monto_total_compra, ROUND(mi.cantidad * mi.costo_unitario, 2))' : 'ROUND(mi.cantidad * mi.costo_unitario, 2)'},
+                    ${tieneProvNombre ? 'mi.proveedor_nombre' : 'NULL'},
+                    ${tieneProvNit ? 'mi.proveedor_nit' : 'NULL'},
+                    ${tieneNroFac ? 'mi.nro_factura_compra' : 'NULL'},
+                    ${tieneConFac ? 'COALESCE(mi.con_factura, 0)' : '0'},
+                    mi.motivo,
+                    mi.fecha_hora
+                FROM movimientos_insumos mi
+                ORDER BY mi.id ASC
+            `);
+
+            await runRaw(conn, `DROP TABLE movimientos_insumos`);
+            await runRaw(conn, `ALTER TABLE movimientos_insumos_v11 RENAME TO movimientos_insumos`);
+            await runRaw(conn, `CREATE INDEX IF NOT EXISTS idx_movimientos_insumos_insumo_id ON movimientos_insumos(insumo_id)`);
+            await runRaw(conn, `CREATE INDEX IF NOT EXISTS idx_movimientos_insumos_movimiento_id ON movimientos_insumos(movimiento_id)`);
+
+            // 2.5. Reparar costos unitarios métricos de insumos que fueron truncados a 0.00 por redondeo a 2 decimales previo
+            const costosMetricosSemilla = [
+                { nombre: 'Leche Entera Barista', costo: 0.0015 },
+                { nombre: 'Leche Deslactosada Barista', costo: 0.0018 },
+                { nombre: 'Leche de Almendras', costo: 0.0030 },
+                { nombre: 'Leche de Avena Barista', costo: 0.0032 },
+                { nombre: 'Hielo Purificado', costo: 0.0005 },
+                { nombre: 'Leche Entera Fresca', costo: 0.0015 },
+                { nombre: 'Leche Deslactosada', costo: 0.0018 },
+                { nombre: 'Leche de Soya', costo: 0.0032 },
+                { nombre: 'Agua Purificada Filtrada', costo: 0.0005 }
+            ];
+            for (const item of costosMetricosSemilla) {
+                await runRaw(
+                    conn,
+                    `UPDATE insumos SET costo_por_unidad = ? WHERE nombre = ? AND COALESCE(costo_por_unidad, 0) = 0`,
+                    [item.costo, item.nombre]
+                );
+            }
+            // Recalcular costos de recetas y combos en cascada si se repararon insumos métricos
+            await runRaw(
+                conn,
+                `UPDATE productos
+                 SET costo = COALESCE((
+                     SELECT ROUND(SUM(r.cantidad_requerida * i.costo_por_unidad), 2)
+                     FROM recetas r
+                     JOIN insumos i ON r.insumo_id = i.id
+                     WHERE r.producto_id = productos.id
+                 ), costo)
+                 WHERE tipo_inventario = 'receta'
+                   AND EXISTS (SELECT 1 FROM recetas rp WHERE rp.producto_id = productos.id)`
+            );
+            await runRaw(
+                conn,
+                `UPDATE productos
+                 SET costo = COALESCE((
+                     SELECT ROUND(SUM(cc.cantidad * p_comp.costo), 2)
+                     FROM combo_componentes cc
+                     JOIN productos p_comp ON cc.componente_producto_id = p_comp.id
+                     WHERE cc.combo_producto_id = productos.id
+                 ), costo)
+                 WHERE tipo_inventario = 'combo'
+                   AND EXISTS (SELECT 1 FROM combo_componentes c2 WHERE c2.combo_producto_id = productos.id)`
+            );
+
+            // 3. Reconstruir saldos cronológicos y CPP resultante en movimientos_insumos
+            const todosInsumos = await allRaw(conn, `SELECT id, nombre, COALESCE(stock_actual, 0) as stock_actual, COALESCE(costo_por_unidad, 0) as costo_por_unidad FROM insumos ORDER BY id ASC`);
+            for (const ins of todosInsumos) {
+                const movsIns = await allRaw(
+                    conn,
+                    `SELECT id, tipo, cantidad, costo_unitario, fecha_hora FROM movimientos_insumos WHERE insumo_id = ? ORDER BY id ASC`,
+                    [ins.id]
+                );
+
+                if (movsIns.length === 0) {
+                    const stockNum = Number(Number(ins.stock_actual || 0).toFixed(4));
+                    const costoNum = Number(Number(ins.costo_por_unidad || 0).toFixed(6));
+                    if (stockNum > 0) {
+                        const montoTot = Math.round((stockNum * costoNum + Number.EPSILON) * 100) / 100;
+                        await runRaw(
+                            conn,
+                            `INSERT INTO movimientos_insumos (
+                                insumo_id, movimiento_id, usuario_id, tipo, cantidad,
+                                stock_resultante, costo_unitario, costo_promedio_resultante, monto_total_compra, motivo
+                            ) VALUES (?, NULL, NULL, 'inventario_inicial', ?, ?, ?, ?, ?, 'Saldo de apertura (migración v11)')`,
+                            [ins.id, stockNum, stockNum, costoNum, costoNum, montoTot]
+                        );
+                    }
+                    continue;
+                }
+
+                // Calcular variación neta de los movimientos registrados para detectar si existía un saldo previo no registrado
+                let deltaMovs = 0;
+                for (const m of movsIns) {
+                    const c = Number(m.cantidad || 0);
+                    const esEntrada = ['inventario_inicial', 'compra', 'reingreso_anulacion'].includes(m.tipo) || (m.tipo === 'ajuste' && c >= 0);
+                    deltaMovs = Number((deltaMovs + (esEntrada ? c : -c)).toFixed(4));
+                }
+
+                const stockActualReal = Number(Number(ins.stock_actual || 0).toFixed(4));
+                let saldoAcumulado = Number((stockActualReal - deltaMovs).toFixed(4));
+                let cppActual = Number(Number(ins.costo_por_unidad || 0).toFixed(6));
+
+                // Si había un saldo de apertura previo a los movimientos registrados, insertarlo como inventario_inicial
+                if (saldoAcumulado > 0.0001) {
+                    const montoTotIni = Math.round((saldoAcumulado * cppActual + Number.EPSILON) * 100) / 100;
+                    await runRaw(
+                        conn,
+                        `INSERT INTO movimientos_insumos (
+                            insumo_id, movimiento_id, usuario_id, tipo, cantidad,
+                            stock_resultante, costo_unitario, costo_promedio_resultante, monto_total_compra, motivo, fecha_hora
+                        ) VALUES (?, NULL, NULL, 'inventario_inicial', ?, ?, ?, ?, ?, 'Saldo de apertura reconstruido (migración v11)', ?)`,
+                        [ins.id, saldoAcumulado, saldoAcumulado, cppActual, cppActual, montoTotIni, movsIns[0].fecha_hora]
+                    );
+                }
+
+                for (const m of movsIns) {
+                    const cant = Number(m.cantidad || 0);
+                    const costoMov = Number(m.costo_unitario || cppActual || 0);
+                    const esEntrada = ['inventario_inicial', 'compra', 'reingreso_anulacion'].includes(m.tipo) || (m.tipo === 'ajuste' && cant >= 0);
+
+                    if (m.tipo === 'compra' || m.tipo === 'inventario_inicial') {
+                        const stockPrevio = Math.max(0, saldoAcumulado);
+                        const nuevoStock = Number((saldoAcumulado + cant).toFixed(4));
+                        if (nuevoStock > 0 && costoMov > 0) {
+                            cppActual = Number((((stockPrevio * cppActual) + (cant * costoMov)) / (stockPrevio + cant)).toFixed(6));
+                        } else if (costoMov > 0) {
+                            cppActual = Number(costoMov.toFixed(6));
+                        }
+                        saldoAcumulado = nuevoStock;
+                    } else if (esEntrada) {
+                        saldoAcumulado = Number((saldoAcumulado + Math.abs(cant)).toFixed(4));
+                    } else {
+                        saldoAcumulado = Number((saldoAcumulado - Math.abs(cant)).toFixed(4));
+                    }
+
+                    const cppGuardar = cppActual > 0 ? cppActual : Number(Number(ins.costo_por_unidad || costoMov || 0).toFixed(6));
+                    await runRaw(
+                        conn,
+                        `UPDATE movimientos_insumos SET stock_resultante = ?, costo_promedio_resultante = ? WHERE id = ?`,
+                        [saldoAcumulado, cppGuardar, m.id]
+                    );
+                }
+            }
+
+            // 4. Reconciliar movimientos_pagos para garantizar que todo movimiento tenga su desglose exacto
+            const movsDescuadrados = await allRaw(
+                conn,
+                `SELECT m.id, m.metodo_pago, m.monto, m.monto_efectivo, m.monto_qr, m.referencia_qr,
+                        COALESCE((SELECT SUM(mp.monto) FROM movimientos_pagos mp WHERE mp.movimiento_id = m.id), 0) as suma_pagos
+                 FROM movimientos m
+                 WHERE m.monto > 0`
+            );
+
+            for (const m of movsDescuadrados) {
+                if (Math.abs(Number(m.monto) - Number(m.suma_pagos)) > 0.005) {
+                    await runRaw(conn, `DELETE FROM movimientos_pagos WHERE movimiento_id = ?`, [m.id]);
+                    if (m.metodo_pago === 'mixto') {
+                        const ef = Number(m.monto_efectivo || 0);
+                        const qr = Number(m.monto_qr || 0);
+                        if (ef > 0) {
+                            await runRaw(
+                                conn,
+                                `INSERT INTO movimientos_pagos (movimiento_id, metodo_pago, monto, referencia) VALUES (?, 'efectivo', ?, NULL)`,
+                                [m.id, ef]
+                            );
+                        }
+                        if (qr > 0) {
+                            await runRaw(
+                                conn,
+                                `INSERT INTO movimientos_pagos (movimiento_id, metodo_pago, monto, referencia) VALUES (?, 'qr', ?, ?)`,
+                                [m.id, qr, m.referencia_qr || null]
+                            );
+                        }
+                    } else {
+                        const canal = m.metodo_pago === 'qr' ? 'qr' : 'efectivo';
+                        await runRaw(
+                            conn,
+                            `INSERT INTO movimientos_pagos (movimiento_id, metodo_pago, monto, referencia) VALUES (?, ?, ?, ?)`,
+                            [m.id, canal, Number(m.monto), canal === 'qr' ? (m.referencia_qr || null) : null]
+                        );
+                    }
+                }
+            }
+        }
     }
 ];
 

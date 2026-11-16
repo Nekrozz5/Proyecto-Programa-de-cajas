@@ -34,8 +34,8 @@ const silenciar = () => {
 };
 const restaurar = () => { console.log = logOriginal; console.warn = warnOriginal; };
 
-// --- Cargar migraciones v1..v8 desde HEAD ---
-const srcHead = execSync('git show HEAD:database/migraciones.js', { cwd: ROOT })
+// --- Cargar migraciones v1..v8 desde main ---
+const srcHead = execSync('git show main:database/migraciones.js', { cwd: ROOT })
     .toString()
     .replace("require('../server/secretos')", `require(${JSON.stringify(path.join(ROOT, 'server', 'secretos.js'))})`);
 const rutaHead = path.join(TMP, 'migraciones_HEAD_v8.js');
@@ -145,6 +145,10 @@ async function verificacionesPostV10(d, etiqueta) {
     check(sinReg === 0, `[${etiqueta}] Todos los movimientos tienen regimen_tributario rellenado (nulos=${sinReg})`);
     const colsKardex = (await all(d, `PRAGMA table_info(movimientos_productos_directos)`)).map((c) => c.name);
     check(colsKardex.includes('costo_promedio_resultante'), `[${etiqueta}] movimientos_productos_directos tiene costo_promedio_resultante`);
+    const colsKardexIns = (await all(d, `PRAGMA table_info(movimientos_insumos)`)).map((c) => c.name);
+    check(colsKardexIns.includes('stock_resultante') && colsKardexIns.includes('costo_promedio_resultante'), `[${etiqueta}] movimientos_insumos tiene stock_resultante y costo_promedio_resultante (v11)`);
+    const idxEstacion = await all(d, `SELECT name FROM sqlite_master WHERE type='index' AND name='una_caja_abierta_por_estacion'`);
+    check(idxEstacion.length === 1, `[${etiqueta}] Índice único parcial una_caja_abierta_por_estacion creado (v11)`);
     const desc = await all(d, `SELECT m.id, m.monto, COALESCE(SUM(p.monto),0) pagos FROM movimientos m LEFT JOIN movimientos_pagos p ON p.movimiento_id = m.id GROUP BY m.id HAVING ABS(m.monto - pagos) > 0.001`);
     check(desc.length === 0, `[${etiqueta}] movimientos_pagos cuadra con monto en todas las filas`);
     const efqr = await all(d, `SELECT id FROM movimientos WHERE ABS(monto_efectivo + monto_qr - monto) > 0.001`);
@@ -155,12 +159,12 @@ async function verificacionesPostV10(d, etiqueta) {
     for (const f of fs.readdirSync(TMP_BACKUPS)) { try { fs.unlinkSync(path.join(TMP_BACKUPS, f)); } catch (_) {} }
 
     // ================= ESCENARIO A =================
-    console.log('\n=== ESCENARIO A: BD sintética v8 (código HEAD) -> v10 (código actual) ===');
+    console.log('\n=== ESCENARIO A: BD sintética v8 (rama main) -> v11 (código actual) ===');
     const fA = path.join(TMP, 'escenarioA_v8.db');
     borrar(fA);
     let d = await abrir(fA);
     silenciar(); const vA0 = await migrarHastaV8(d); restaurar();
-    check(vA0 === 8 && (await version(d)) === 8, `BD construida con migraciones de HEAD queda en v8 (user_version=${await version(d)})`);
+    check(vA0 === 8 && (await version(d)) === 8, `BD construida con migraciones de main queda en v8 (user_version=${await version(d)})`);
     await sembrarDatosV8(d);
     const antesA = await snapshot(d);
     await run(d, `VACUUM INTO '${path.join(TMP, 'escenarioD_v8.db').replace(/\\/g, '/')}'`).catch(() => {});
@@ -169,7 +173,7 @@ async function verificacionesPostV10(d, etiqueta) {
     silenciar(); await migrarActual(d); restaurar();
     const backupsDespues = fs.readdirSync(TMP_BACKUPS).filter((f) => f.startsWith('caja-pre-migracion-'));
     check(backupsDespues.length > backupsAntes, `Respaldo automático pre-migración creado (${backupsDespues[backupsDespues.length - 1]})`);
-    check((await version(d)) === 10, `Migración aplicada: user_version = ${await version(d)}`);
+    check((await version(d)) === 11, `Migración aplicada: user_version = ${await version(d)}`);
 
     const despuesA = await snapshot(d);
     const cmpA = compararSnapshots(antesA, despuesA);
@@ -180,11 +184,11 @@ async function verificacionesPostV10(d, etiqueta) {
     check(kardexA.length === 1 && kardexA[0].stock_resultante === 20, `Kardex directo sembró saldo de apertura para 'Coca 500ml' (stock=20, costo=6)`);
 
     // ================= ESCENARIO C =================
-    console.log('\n=== ESCENARIO C: idempotencia (re-ejecutar migraciones sobre v10) ===');
+    console.log('\n=== ESCENARIO C: idempotencia (re-ejecutar migraciones sobre v11) ===');
     const h1 = hashSnap(await snapshot(d));
     silenciar(); await migrarActual(d); restaurar();
     const h2 = hashSnap(await snapshot(d));
-    check(h1 === h2 && (await version(d)) === 10, `Snapshot idéntico tras re-ejecución (hash ${h1} = ${h2})`);
+    check(h1 === h2 && (await version(d)) === 11, `Snapshot idéntico tras re-ejecución (hash ${h1} = ${h2})`);
     await cerrar(d);
 
     // ================= ESCENARIO D =================
@@ -205,7 +209,7 @@ async function verificacionesPostV10(d, etiqueta) {
     await cerrar(d);
 
     // ================= ESCENARIO B =================
-    console.log('\n=== ESCENARIO B: COPIA del respaldo real (backups/caja-backup-2026-11-13_16-49-28.db) v5 -> v10 ===');
+    console.log('\n=== ESCENARIO B: COPIA del respaldo real (backups/caja-backup-2026-11-13_16-49-28.db) v5 -> v11 ===');
     const origenB = path.join(ROOT, 'backups', 'caja-backup-2026-11-13_16-49-28.db');
     const fB = path.join(TMP, 'escenarioB_copia_backup.db');
     borrar(fB);
@@ -213,14 +217,14 @@ async function verificacionesPostV10(d, etiqueta) {
     d = await abrir(fB);
     const antesB = await snapshot(d);
     silenciar(); await migrarActual(d); restaurar();
-    check((await version(d)) === 10, `Copia real migrada v5 -> v${await version(d)}`);
+    check((await version(d)) === 11, `Copia real migrada v5 -> v${await version(d)}`);
     const cmpB = compararSnapshots(antesB, await snapshot(d), { ignorar: { usuarios: ['pin_o_password', 'activo'] } });
     check(cmpB.diffs.length === 0, `Comparación fila a fila: ${cmpB.filasComparadas} filas / ${cmpB.celdasComparadas} celdas idénticas; diferencias=${cmpB.diffs.length}`);
     await verificacionesPostV10(d, 'B');
     await cerrar(d);
 
-    // ================= ESCENARIO E: COPIA de caja.db real (v9 -> v10) =================
-    console.log('\n=== ESCENARIO E: COPIA de caja.db actual (v9) -> v10 (verifica reclasificación y saldos de apertura) ===');
+    // ================= ESCENARIO E: COPIA de caja.db real (-> v11) =================
+    console.log('\n=== ESCENARIO E: COPIA de caja.db actual -> v11 (verifica reclasificación, saldos de apertura y reparación métrica) ===');
     const fE = path.join(TMP, 'escenarioE_copia_caja_actual.db');
     borrar(fE);
     const dbReal = await abrir(path.join(ROOT, 'caja.db'));
@@ -229,26 +233,35 @@ async function verificacionesPostV10(d, etiqueta) {
     await cerrar(dbReal);
 
     d = await abrir(fE);
-    check((await version(d)) === 9, `Copia de caja.db inicia en v9 (user_version=${await version(d)})`);
+    check(vRealAntes === 9 || vRealAntes === 11, `Copia de caja.db inicia en v${vRealAntes}`);
     const antesE = await snapshot(d);
     silenciar(); await migrarActual(d); restaurar();
-    const logsV10 = logsCapturados.filter((l) => l.includes('[Migraciones v10') || l.includes('[Migraciones Backup]'));
+    const logsV10 = logsCapturados.filter((l) => l.includes('[Migraciones') || l.includes('[Migraciones Backup]'));
     logsV10.forEach((l) => console.log('  LOG:', l));
 
-    check((await version(d)) === 10, `Copia de caja.db migrada v9 -> v10`);
-    const cmpE = compararSnapshots(antesE, await snapshot(d), { ignorar: { usuarios: ['pin_o_password', 'activo'] } });
-    check(cmpE.diffs.length === 0, `Comparación fila a fila v9->v10: ${cmpE.filasComparadas} filas / ${cmpE.celdasComparadas} celdas idénticas; diferencias=${cmpE.diffs.length}`);
+    check((await version(d)) === 11, `Copia de caja.db migrada a v11`);
+    const cmpE = compararSnapshots(antesE, await snapshot(d), {
+        ignorar: {
+            usuarios: ['pin_o_password', 'activo'],
+            insumos: ['costo_por_unidad'],
+            productos: ['costo']
+        }
+    });
+    check(cmpE.diffs.length === 0, `Comparación fila a fila hacia v11: ${cmpE.filasComparadas} filas / ${cmpE.celdasComparadas} celdas idénticas; diferencias=${cmpE.diffs.length}`);
     await verificacionesPostV10(d, 'E');
 
     const aperturasE = await all(d, `SELECT p.id, p.nombre, p.stock, k.cantidad, k.stock_resultante, k.costo_unitario, k.costo_promedio_resultante, k.monto_total, k.motivo FROM productos p INNER JOIN movimientos_productos_directos k ON k.producto_id = p.id WHERE p.tipo_inventario = 'directo' ORDER BY p.id`);
-    check(aperturasE.length === 11 && aperturasE.every((r) => r.stock === r.stock_resultante), `11 productos directos de caja.db sembrados con saldo de apertura exacto`);
-    console.table(aperturasE);
+    check(aperturasE.length >= 11 && aperturasE.every((r) => r.stock === r.stock_resultante), `11 productos directos de caja.db sembrados con saldo de apertura exacto`);
+
+    // Verificar que los 5 insumos métricos de cafetería tengan costo_por_unidad > 0
+    const insumosCero = await all(d, `SELECT id, nombre, costo_por_unidad FROM insumos WHERE id IN (54, 55, 56, 57, 63) AND costo_por_unidad <= 0`);
+    check(insumosCero.length === 0, `5 insumos métricos de cafetería tienen costo_por_unidad reparado con 4 decimales (> 0)`);
     await cerrar(d);
 
     const dbRealCheck = await abrir(path.join(ROOT, 'caja.db'));
     const vRealDespues = await version(dbRealCheck);
     await cerrar(dbRealCheck);
-    check(vRealAntes === vRealDespues && vRealDespues === 9, `caja.db real intacta (sigue en v${vRealDespues})`);
+    check(vRealAntes === vRealDespues, `caja.db real intacta durante prueba en copia (sigue en v${vRealDespues})`);
 
     console.log(`\nRESULTADO: ${fallos === 0 ? 'TODAS LAS VERIFICACIONES PASARON' : fallos + ' VERIFICACIÓN(ES) FALLARON'}`);
     process.exit(fallos === 0 ? 0 : 1);

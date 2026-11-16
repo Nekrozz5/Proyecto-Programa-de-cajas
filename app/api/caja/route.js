@@ -42,6 +42,8 @@ import {
     registrarCompraProductoDirecto,
     registrarMermaProductoDirecto,
     verificarIntegridadKardexDirecto,
+    verificarIntegridadKardexInsumos,
+    obtenerKardexDetallado,
     crearInsumo,
     registrarCompraInsumo,
     registrarMermaInsumo,
@@ -137,7 +139,7 @@ export async function GET(request) {
         const { searchParams } = new URL(request.url);
         const cajaAuditadaParam = searchParams.get('cajaAuditadaId');
 
-        const [usuarioFresco, cajaUsuario, cajasAbiertas, cajasFisicas, historialCajas, productos, insumos, prediccionInsumos, gruposModificadores] = await Promise.all([
+        const [usuarioFresco, cajaUsuario, cajasAbiertas, cajasFisicas, historialCajas, productos, insumos, prediccionInsumos, gruposModificadores, kardexDetallado] = await Promise.all([
             obtenerUsuarioPorId(usuarioSesion.id),
             obtenerCajaAbierta(usuarioSesion.id),
             obtenerCajasAbiertas(),
@@ -146,7 +148,8 @@ export async function GET(request) {
             obtenerProductos(),
             esAdmin ? obtenerInsumos() : Promise.resolve([]),
             esAdmin ? obtenerPrediccionComprasInsumos() : Promise.resolve([]),
-            obtenerGruposModificadores(!esAdmin)
+            obtenerGruposModificadores(!esAdmin),
+            esAdmin ? obtenerKardexDetallado({ limite: 150 }) : Promise.resolve({ kardexProductosDirectos: [], kardexInsumos: [] })
         ]);
 
         const usuarioSesionEnriquecido = usuarioFresco ? { ...usuarioSesion, ...usuarioFresco } : usuarioSesion;
@@ -175,7 +178,8 @@ export async function GET(request) {
                 insumos,
                 usuarios,
                 categorias,
-                prediccionInsumos
+                prediccionInsumos,
+                kardexDetallado
             }, { headers: HEADERS_SIN_CACHE });
         }
 
@@ -206,6 +210,7 @@ export async function GET(request) {
             usuarios,
             categorias,
             prediccionInsumos,
+            kardexDetallado,
             estadoEmail
         }, { headers: HEADERS_SIN_CACHE });
     } catch (error) {
@@ -444,7 +449,7 @@ export async function POST(request) {
 
         if (accion === 'crear_producto') {
             await exigirUsuarioSesion(request, ROLES_ADMIN);
-            const resultado = await crearProductoConInsumos(body);
+            const resultado = await crearProductoConInsumos({ ...body, usuarioId: usuarioSesion.id });
             return NextResponse.json({ ok: true, ...resultado });
         }
 
@@ -476,7 +481,8 @@ export async function POST(request) {
                 Number(body.stockSeguridad || 0),
                 Number(body.tiempoEntregaDias || 1),
                 body.fechaVencimiento || null,
-                body.proveedor || null
+                body.proveedor || null,
+                usuarioSesion.id
             );
             return NextResponse.json({ ok: true, insumoId: id });
         }
@@ -505,7 +511,8 @@ export async function POST(request) {
             const res = await registrarMermaInsumo(
                 Number(body.insumoId),
                 Number(body.cantidadPerdida),
-                body.motivo
+                body.motivo,
+                usuarioSesion.id
             );
             return NextResponse.json({ ok: true, merma: res });
         }
@@ -523,8 +530,15 @@ export async function POST(request) {
 
         if (accion === 'verificar_integridad_kardex') {
             await exigirUsuarioSesion(request, ROLES_ADMIN);
-            const res = await verificarIntegridadKardexDirecto();
-            return NextResponse.json({ ok: true, ...res });
+            const [resDirectos, resInsumos] = await Promise.all([
+                verificarIntegridadKardexDirecto(),
+                verificarIntegridadKardexInsumos()
+            ]);
+            return NextResponse.json({
+                ok: true,
+                ...resDirectos,
+                integridadInsumos: resInsumos
+            });
         }
 
         if (accion === 'asignar_receta') {

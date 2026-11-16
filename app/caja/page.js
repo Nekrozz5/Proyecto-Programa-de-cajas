@@ -36,6 +36,7 @@ export default function CajaPage() {
 
     // Estado del carrito y cobro
     const [carrito, setCarrito] = useState([]);
+    const [descuentoVenta, setDescuentoVenta] = useState('');
     const [metodoPago, setMetodoPago] = useState('efectivo');
     const [montoMixtoEfectivo, setMontoMixtoEfectivo] = useState('');
     const [montoMixtoQr, setMontoMixtoQr] = useState('');
@@ -63,9 +64,15 @@ export default function CajaPage() {
     const [montoIngresoEfectivo, setMontoIngresoEfectivo] = useState('');
     const [motivoIngresoEfectivo, setMotivoIngresoEfectivo] = useState('');
 
-    // Estado para cierre ciego
+    // Estado para cierre ciego y conciliación
     const [efectivoReal, setEfectivoReal] = useState('');
+    const [qrRealCierre, setQrRealCierre] = useState('');
+    const [observacionesCierre, setObservacionesCierre] = useState('');
     const [confirmacionCierreCiego, setConfirmacionCierreCiego] = useState(null);
+
+    // Estado para anulación de movimientos desde Historial del Turno
+    const [movimientoAAnularId, setMovimientoAAnularId] = useState(null);
+    const [motivoAnulacionCaja, setMotivoAnulacionCaja] = useState('');
 
     // Estado para personalización de complementos / modificadores en el POS
     const [productoParaPersonalizar, setProductoParaPersonalizar] = useState(null);
@@ -481,9 +488,16 @@ export default function CajaPage() {
         setCarrito((prev) => prev.filter((i) => (i.itemKey || String(i.productoId)) !== String(itemKey)));
     }
 
-    const totalCarrito = Number(
+    const subtotalBrutoCarrito = Number(
         carrito.reduce((acc, item) => acc + (Number(item.precio) || 0) * (Number(item.cantidad) || 0), 0).toFixed(2)
     );
+    const descuentoAplicadoNum = descuentoVenta !== '' && !isNaN(Number(descuentoVenta))
+        ? Number(Number(descuentoVenta).toFixed(2))
+        : 0;
+    const descuentoInvalido = descuentoAplicadoNum < 0 || (descuentoAplicadoNum > 0 && descuentoAplicadoNum >= subtotalBrutoCarrito);
+    const totalCarrito = descuentoInvalido
+        ? subtotalBrutoCarrito
+        : Math.max(0, Number((subtotalBrutoCarrito - descuentoAplicadoNum).toFixed(2)));
 
     const hayCantidadInvalida = carrito.some((i) => !i.cantidad || Number(i.cantidad) <= 0);
 
@@ -654,6 +668,10 @@ export default function CajaPage() {
             setError(`El producto "${itemInvalido.nombre}" no tiene una cantidad válida. Ingresa un número mayor a 0 o elimínalo del pedido.`);
             return;
         }
+        if (descuentoInvalido) {
+            setError(`El descuento (Bs ${descuentoAplicadoNum.toFixed(2)}) debe ser menor al subtotal del pedido (Bs ${subtotalBrutoCarrito.toFixed(2)}).`);
+            return;
+        }
         if (metodoPago === 'mixto' && mixtoDescuadrado) {
             setError(`En pago mixto, la suma de Efectivo (Bs ${montoEfectivoRequerido.toFixed(2)}) + QR (Bs ${montoQrRequerido.toFixed(2)}) debe ser igual al total a cobrar (Bs ${totalCarrito.toFixed(2)}).`);
             return;
@@ -670,6 +688,7 @@ export default function CajaPage() {
                         cantidad: i.cantidad,
                         modificadores: (i.modificadores || []).map((m) => m.id)
                     })),
+                    descuento: descuentoAplicadoNum > 0 ? descuentoAplicadoNum : 0,
                     metodoPago,
                     montoEfectivo: metodoPago === 'mixto' ? Number(montoEfectivoRequerido) : (metodoPago === 'efectivo' ? totalCarrito : 0),
                     montoQr: metodoPago === 'mixto' ? Number(montoQrRequerido) : (metodoPago === 'qr' ? totalCarrito : 0),
@@ -689,6 +708,7 @@ export default function CajaPage() {
 
             setUltimoTicket({ ...data.venta, operador: usuarioActual.nombre });
             setCarrito([]);
+            setDescuentoVenta('');
             setMontoRecibido('');
             setCambioManual('');
             setMontoMixtoEfectivo('');
@@ -775,13 +795,16 @@ export default function CajaPage() {
         limpiarAlertas();
         try {
             const montoDeclarado = Number(efectivoReal);
+            const qrDeclarado = qrRealCierre !== '' ? Number(qrRealCierre) : null;
             const res = await fetch('/api/caja', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     accion: 'cerrar',
                     cajaId: cajaAbierta.id,
-                    efectivoReal: montoDeclarado
+                    efectivoReal: montoDeclarado,
+                    qrReal: qrDeclarado,
+                    observacionesCierre: observacionesCierre.trim()
                 })
             });
             const data = await res.json();
@@ -793,8 +816,37 @@ export default function CajaPage() {
                 cerradoPor: usuarioActual.nombre
             });
             setEfectivoReal('');
+            setQrRealCierre('');
+            setObservacionesCierre('');
             setCarrito([]);
             setMensaje('Caja cerrada con Arqueo Ciego. Los resultados de diferencias fueron enviados a Administración.');
+            await cargarDatos();
+        } catch (err) {
+            setError(err.message);
+        }
+    }
+
+    async function confirmarAnularMovimientoCaja(movimientoId) {
+        limpiarAlertas();
+        if (!motivoAnulacionCaja || motivoAnulacionCaja.trim().length < 3) {
+            setError('Debes ingresar un motivo justificado (mínimo 3 caracteres) para anular el movimiento.');
+            return;
+        }
+        try {
+            const res = await fetch('/api/caja', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    accion: 'anular',
+                    movimientoId,
+                    motivo: motivoAnulacionCaja.trim()
+                })
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error);
+            setMovimientoAAnularId(null);
+            setMotivoAnulacionCaja('');
+            setMensaje(`Movimiento #${movimientoId} anulado y stock reintegrado al inventario.`);
             await cargarDatos();
         } catch (err) {
             setError(err.message);
@@ -967,14 +1019,12 @@ export default function CajaPage() {
                             >
                                 🔒 4. Cerrar Turno (Arqueo)
                             </button>
-                            {usuarioActual.rol !== 'user' && (
-                                <button
-                                    onClick={() => { limpiarAlertas(); setSeccionActiva('movimientos'); }}
-                                    style={navBtnStyle(seccionActiva === 'movimientos')}
-                                >
-                                    📋 5. Historial del Turno
-                                </button>
-                            )}
+                            <button
+                                onClick={() => { limpiarAlertas(); setSeccionActiva('movimientos'); }}
+                                style={navBtnStyle(seccionActiva === 'movimientos')}
+                            >
+                                📋 5. Historial del Turno
+                            </button>
                         </>
                     )}
                 </nav>
@@ -1343,6 +1393,11 @@ export default function CajaPage() {
                                             <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#1e3a8a', marginTop: '0.2rem' }}>
                                                 Bs {totalCarrito.toFixed(2)}
                                             </div>
+                                            {descuentoAplicadoNum > 0 && !descuentoInvalido && (
+                                                <div style={{ fontSize: '0.74rem', color: '#475569', marginTop: '0.15rem' }}>
+                                                    Sub: Bs {subtotalBrutoCarrito.toFixed(2)} | <span style={{ color: '#dc2626', fontWeight: 600 }}>Desc: -Bs {descuentoAplicadoNum.toFixed(2)}</span>
+                                                </div>
+                                            )}
                                         </div>
 
                                         <div style={{
@@ -1385,6 +1440,44 @@ export default function CajaPage() {
 
                                     {/* Formulario de Pago justo arriba para no bajar */}
                                     <form onSubmit={handleCobrarVenta} style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginBottom: '1rem', paddingBottom: '1rem', borderBottom: '1px solid #e2e8f0' }}>
+                                        {/* Campo opcional de Descuento sobre el Ticket */}
+                                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.6rem' }}>
+                                            <label style={{ fontSize: '0.84rem', fontWeight: 'bold' }}>
+                                                🏷️ Descuento Ticket (Bs, Opcional):
+                                                <input
+                                                    type="number"
+                                                    step="0.01"
+                                                    min="0"
+                                                    placeholder="0.00"
+                                                    value={descuentoVenta}
+                                                    onChange={(e) => {
+                                                        const val = e.target.value;
+                                                        setDescuentoVenta(val);
+                                                        const descNum = Number(val) || 0;
+                                                        const nuevoTotal = Math.max(0, Number((subtotalBrutoCarrito - Math.max(0, descNum)).toFixed(2)));
+                                                        if (metodoPago === 'mixto' && nuevoTotal > 0) {
+                                                            const mitadEf = Number((nuevoTotal / 2).toFixed(2));
+                                                            const mitadQr = Number((nuevoTotal - mitadEf).toFixed(2));
+                                                            setMontoMixtoEfectivo(String(mitadEf));
+                                                            setMontoMixtoQr(String(mitadQr));
+                                                        }
+                                                    }}
+                                                    style={{
+                                                        ...inputStyle,
+                                                        borderColor: descuentoInvalido ? '#ef4444' : '#cbd5e1',
+                                                        background: descuentoInvalido ? '#fef2f2' : '#fff'
+                                                    }}
+                                                />
+                                            </label>
+                                            <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', fontSize: '0.78rem', color: descuentoInvalido ? '#b91c1c' : '#64748b', paddingBottom: '0.35rem' }}>
+                                                {descuentoInvalido ? (
+                                                    <strong>⚠️ El descuento debe ser mayor o igual a 0 y menor al subtotal (Bs {subtotalBrutoCarrito.toFixed(2)}).</strong>
+                                                ) : (
+                                                    <span>Subtotal bruto: <strong>Bs {subtotalBrutoCarrito.toFixed(2)}</strong></span>
+                                                )}
+                                            </div>
+                                        </div>
+
                                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.6rem' }}>
                                             <label style={{ fontSize: '0.88rem', fontWeight: 'bold' }}>
                                                 Método de Pago:
@@ -1502,10 +1595,11 @@ export default function CajaPage() {
                                             </div>
                                         )}
 
-                                        {/* Bloque modular de Factura / Datos Fiscales del Cliente (solo visible en Régimen General con facturación habilitada) */}
+                                        {/* Bloque modular de Factura / Datos Fiscales del Cliente (solo visible en Régimen General con facturación habilitada en negocio, usuario y estación) */}
                                         {configuracionNegocio?.regimen_tributario === 'regimen_general' &&
-                                            (Number(configuracionNegocio?.emite_factura) === 1 ||
-                                                (Number(usuarioActual?.puede_registrar_respaldo_fiscal ?? 1) === 1 && Number(cajaAbierta?.habilita_respaldo_fiscal ?? 1) === 1)) && (
+                                            Number(configuracionNegocio?.emite_factura) === 1 &&
+                                            Number(usuarioActual?.puede_registrar_respaldo_fiscal ?? 1) === 1 &&
+                                            Number(cajaAbierta?.habilita_respaldo_fiscal ?? 1) === 1 && (
                                             <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '0.55rem 0.7rem' }}>
                                                 <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.84rem', fontWeight: 600, cursor: 'pointer', color: '#1e293b' }}>
                                                     <input
@@ -1519,6 +1613,7 @@ export default function CajaPage() {
                                                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', marginTop: '0.5rem' }}>
                                                         <input
                                                             type="text"
+                                                            required
                                                             placeholder="NIT / CI del cliente"
                                                             value={nitClienteVenta}
                                                             onChange={(e) => setNitClienteVenta(e.target.value)}
@@ -1526,6 +1621,7 @@ export default function CajaPage() {
                                                         />
                                                         <input
                                                             type="text"
+                                                            required
                                                             placeholder="N° Factura (ej. 104)"
                                                             value={nroFacturaVenta}
                                                             onChange={(e) => setNroFacturaVenta(e.target.value)}
@@ -1545,12 +1641,12 @@ export default function CajaPage() {
 
                                         <button
                                             type="submit"
-                                            disabled={carrito.length === 0 || faltaDineroRecibido || hayCantidadInvalida || mixtoDescuadrado}
+                                            disabled={carrito.length === 0 || faltaDineroRecibido || hayCantidadInvalida || mixtoDescuadrado || descuentoInvalido}
                                             style={{
                                                 ...btnPrimario,
                                                 fontSize: '1rem',
-                                                opacity: (carrito.length === 0 || faltaDineroRecibido || hayCantidadInvalida || mixtoDescuadrado) ? 0.6 : 1,
-                                                cursor: (carrito.length === 0 || faltaDineroRecibido || hayCantidadInvalida || mixtoDescuadrado) ? 'not-allowed' : 'pointer'
+                                                opacity: (carrito.length === 0 || faltaDineroRecibido || hayCantidadInvalida || mixtoDescuadrado || descuentoInvalido) ? 0.6 : 1,
+                                                cursor: (carrito.length === 0 || faltaDineroRecibido || hayCantidadInvalida || mixtoDescuadrado || descuentoInvalido) ? 'not-allowed' : 'pointer'
                                             }}
                                         >
                                             Confirmar Cobro ({metodoPago.toUpperCase()})
@@ -1710,10 +1806,22 @@ export default function CajaPage() {
 
                                     {ultimoTicket && (
                                         <div style={{ marginTop: '1rem', padding: '0.75rem', background: '#f0fdf4', borderRadius: '6px', border: '1px solid #bbf7d0', fontSize: '0.88rem' }}>
-                                            <div><strong>✅ Último Ticket #{ultimoTicket.movimientoId}:</strong> Cobrado Bs {ultimoTicket.montoTotal.toFixed(2)} ({ultimoTicket.metodoPago.toUpperCase()})</div>
-                                            {ultimoTicket.metodoPago === 'efectivo' && (
+                                            <div>
+                                                <strong>✅ Último Ticket #{ultimoTicket.movimientoId}:</strong> Cobrado Bs {ultimoTicket.montoTotal.toFixed(2)} ({ultimoTicket.metodoPago.toUpperCase()})
+                                                {Number(ultimoTicket.descuento || 0) > 0 && (
+                                                    <span style={{ color: '#dc2626', marginLeft: '0.4rem' }}>
+                                                        (Desc: -Bs {Number(ultimoTicket.descuento).toFixed(2)})
+                                                    </span>
+                                                )}
+                                            </div>
+                                            {ultimoTicket.metodoPago === 'mixto' && (
+                                                <div style={{ marginTop: '0.2rem', color: '#0369a1' }}>
+                                                    Desglose Mixto: 💵 Efectivo Bs {Number(ultimoTicket.montoEfectivo || 0).toFixed(2)} + 📱 QR Bs {Number(ultimoTicket.montoQr || 0).toFixed(2)}
+                                                </div>
+                                            )}
+                                            {(ultimoTicket.metodoPago === 'efectivo' || ultimoTicket.metodoPago === 'mixto') && (
                                                 <div style={{ marginTop: '0.2rem' }}>
-                                                    Entregó cliente: Bs {ultimoTicket.montoRecibido.toFixed(2)} | <strong style={{ color: '#15803d' }}>Salió de caja en cambio: Bs {ultimoTicket.cambio.toFixed(2)}</strong>
+                                                    Entregó cliente en efectivo: Bs {Number(ultimoTicket.montoRecibido || 0).toFixed(2)} | <strong style={{ color: '#15803d' }}>Salió de caja en cambio: Bs {Number(ultimoTicket.cambio || 0).toFixed(2)}</strong>
                                                 </div>
                                             )}
                                         </div>
@@ -1860,7 +1968,7 @@ export default function CajaPage() {
                             </section>
                         )}
 
-                        {/* SECCIÓN 3: CIERRE DE TURNO (ARQUEO CIEGO) */}
+                        {/* SECCIÓN 4: CIERRE DE TURNO (ARQUEO CIEGO) */}
                         {seccionActiva === 'cierre' && (
                             <section style={{ ...cardStyle, maxWidth: '540px' }}>
                                 <h2 style={{ marginTop: 0 }}>🔒 Cerrar Turno (Arqueo Ciego)</h2>
@@ -1882,10 +1990,172 @@ export default function CajaPage() {
                                             style={inputStyle}
                                         />
                                     </label>
+                                    <label>
+                                        Total QR Conciliado en Extracto Bancario (Bs, Opcional):
+                                        <input
+                                            type="number"
+                                            step="0.01"
+                                            min="0"
+                                            placeholder="Opcional: monto QR verificado en cuenta..."
+                                            value={qrRealCierre}
+                                            onChange={(e) => setQrRealCierre(e.target.value)}
+                                            style={inputStyle}
+                                        />
+                                    </label>
+                                    <label>
+                                        Observaciones de Cierre (Opcional):
+                                        <input
+                                            type="text"
+                                            placeholder="Ej. Billete deteriorado, corte de luz, nota al administrador..."
+                                            value={observacionesCierre}
+                                            onChange={(e) => setObservacionesCierre(e.target.value)}
+                                            style={inputStyle}
+                                        />
+                                    </label>
                                     <button type="submit" style={{ ...btnPrimario, background: '#dc2626' }}>
                                         Declarar Efectivo y Cerrar Caja
                                     </button>
                                 </form>
+                            </section>
+                        )}
+
+                        {/* SECCIÓN 5: HISTORIAL DE MOVIMIENTOS DEL TURNO Y ANULACIÓN */}
+                        {seccionActiva === 'movimientos' && (
+                            <section style={cardStyle}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                                    <div>
+                                        <h2 style={{ margin: 0 }}>📋 Historial de Movimientos del Turno #{cajaAbierta.id}</h2>
+                                        <p style={{ margin: '0.25rem 0 0', fontSize: '0.86rem', color: '#64748b' }}>
+                                            Estación: <strong>{cajaAbierta.caja_fisica_nombre || `Estación #${cajaAbierta.caja_fisica_id || 1}`}</strong> | Operaciones registradas en este turno.
+                                        </p>
+                                    </div>
+                                    <button type="button" onClick={cargarDatos} style={btnSecundario}>
+                                        🔄 Actualizar
+                                    </button>
+                                </div>
+
+                                {movimientos.length === 0 ? (
+                                    <p style={{ color: '#64748b' }}>Aún no hay movimientos registrados en este turno.</p>
+                                ) : (
+                                    <div style={{ overflowX: 'auto' }}>
+                                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.86rem' }}>
+                                            <thead>
+                                                <tr style={{ background: '#f8fafc', borderBottom: '2px solid #cbd5e1', textAlign: 'left' }}>
+                                                    <th style={{ padding: '0.6rem' }}>ID</th>
+                                                    <th style={{ padding: '0.6rem' }}>Hora</th>
+                                                    <th style={{ padding: '0.6rem' }}>Tipo</th>
+                                                    <th style={{ padding: '0.6rem' }}>Método</th>
+                                                    <th style={{ padding: '0.6rem' }}>Comprobante</th>
+                                                    <th style={{ padding: '0.6rem' }}>Detalle / Motivo</th>
+                                                    <th style={{ padding: '0.6rem', textAlign: 'right' }}>Descuento</th>
+                                                    <th style={{ padding: '0.6rem', textAlign: 'right' }}>Monto Neto</th>
+                                                    <th style={{ padding: '0.6rem' }}>Operador</th>
+                                                    <th style={{ padding: '0.6rem' }}>Estado</th>
+                                                    {usuarioActual.rol !== 'user' && <th style={{ padding: '0.6rem' }}>Acción Admin</th>}
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {movimientos.map((m) => {
+                                                    const esAnulado = m.estado === 'anulado';
+                                                    return (
+                                                        <tr key={m.id} style={{ borderBottom: '1px solid #e2e8f0', opacity: esAnulado ? 0.55 : 1, background: esAnulado ? '#fef2f2' : '#fff' }}>
+                                                            <td style={{ padding: '0.6rem', fontWeight: 'bold' }}>#{m.id}</td>
+                                                            <td style={{ padding: '0.6rem', whiteSpace: 'nowrap' }}>{m.fecha_hora_local || m.fecha_hora}</td>
+                                                            <td style={{ padding: '0.6rem', textTransform: 'uppercase', fontWeight: 600, color: m.tipo === 'venta' ? '#15803d' : m.tipo === 'egreso' ? '#b91c1c' : '#0369a1' }}>
+                                                                {m.tipo}
+                                                            </td>
+                                                            <td style={{ padding: '0.6rem', textTransform: 'uppercase' }}>
+                                                                {m.metodo_pago}
+                                                                {m.metodo_pago === 'mixto' && (
+                                                                    <div style={{ fontSize: '0.74rem', color: '#475569' }}>
+                                                                        Ef: Bs {Number(m.monto_efectivo || 0).toFixed(2)} | QR: Bs {Number(m.monto_qr || 0).toFixed(2)}
+                                                                    </div>
+                                                                )}
+                                                            </td>
+                                                            <td style={{ padding: '0.6rem', fontSize: '0.8rem' }}>
+                                                                {m.tipo_comprobante === 'factura' ? (
+                                                                    <span style={{ color: '#1d4ed8', fontWeight: 600 }}>
+                                                                        🧾 Fact. #{m.nro_factura || '-'} ({m.cliente_nit || m.proveedor_nit || 'S/N'})
+                                                                    </span>
+                                                                ) : (
+                                                                    <span style={{ color: '#64748b' }}>{m.tipo_comprobante || 'recibo'}</span>
+                                                                )}
+                                                            </td>
+                                                            <td style={{ padding: '0.6rem' }}>
+                                                                <div>{m.motivo}</div>
+                                                                {esAnulado && m.motivo_anulacion && (
+                                                                    <div style={{ fontSize: '0.76rem', color: '#b91c1c', marginTop: '0.15rem' }}>
+                                                                        <strong>Anulado:</strong> {m.motivo_anulacion}
+                                                                    </div>
+                                                                )}
+                                                            </td>
+                                                            <td style={{ padding: '0.6rem', textAlign: 'right', color: Number(m.descuento_total || 0) > 0 ? '#dc2626' : '#94a3b8' }}>
+                                                                {Number(m.descuento_total || 0) > 0 ? `-Bs ${Number(m.descuento_total).toFixed(2)}` : '-'}
+                                                            </td>
+                                                            <td style={{ padding: '0.6rem', textAlign: 'right', fontWeight: 'bold', textDecoration: esAnulado ? 'line-through' : 'none' }}>
+                                                                Bs {Number(m.monto || 0).toFixed(2)}
+                                                            </td>
+                                                            <td style={{ padding: '0.6rem' }}>{m.usuario_nombre || m.operador || '-'}</td>
+                                                            <td style={{ padding: '0.6rem' }}>
+                                                                <span style={{
+                                                                    padding: '0.15rem 0.5rem',
+                                                                    borderRadius: '999px',
+                                                                    fontSize: '0.75rem',
+                                                                    fontWeight: 'bold',
+                                                                    background: esAnulado ? '#fee2e2' : '#dcfce7',
+                                                                    color: esAnulado ? '#991b1b' : '#166534'
+                                                                }}>
+                                                                    {m.estado.toUpperCase()}
+                                                                </span>
+                                                            </td>
+                                                            {usuarioActual.rol !== 'user' && (
+                                                                <td style={{ padding: '0.6rem' }}>
+                                                                    {!esAnulado && (
+                                                                        movimientoAAnularId === m.id ? (
+                                                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', minWidth: '190px' }}>
+                                                                                <input
+                                                                                    type="text"
+                                                                                    placeholder="Motivo de anulación..."
+                                                                                    value={motivoAnulacionCaja}
+                                                                                    onChange={(e) => setMotivoAnulacionCaja(e.target.value)}
+                                                                                    style={{ ...inputStyle, marginTop: 0, padding: '0.3rem 0.45rem', fontSize: '0.8rem' }}
+                                                                                />
+                                                                                <div style={{ display: 'flex', gap: '0.3rem' }}>
+                                                                                    <button
+                                                                                        type="button"
+                                                                                        onClick={() => confirmarAnularMovimientoCaja(m.id)}
+                                                                                        style={{ ...btnMini, background: '#dc2626', color: '#fff', border: 'none', fontWeight: 'bold', cursor: 'pointer' }}
+                                                                                    >
+                                                                                        Confirmar
+                                                                                    </button>
+                                                                                    <button
+                                                                                        type="button"
+                                                                                        onClick={() => { setMovimientoAAnularId(null); setMotivoAnulacionCaja(''); }}
+                                                                                        style={{ ...btnMini, cursor: 'pointer' }}
+                                                                                    >
+                                                                                        Cancelar
+                                                                                    </button>
+                                                                                </div>
+                                                                            </div>
+                                                                        ) : (
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={() => { setMovimientoAAnularId(m.id); setMotivoAnulacionCaja(''); }}
+                                                                                style={{ ...btnMini, color: '#b91c1c', borderColor: '#fca5a5', background: '#fef2f2', cursor: 'pointer', fontWeight: 600 }}
+                                                                            >
+                                                                                🚫 Anular
+                                                                            </button>
+                                                                        )
+                                                                    )}
+                                                                </td>
+                                                            )}
+                                                        </tr>
+                                                    );
+                                                })}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                )}
                             </section>
                         )}
 

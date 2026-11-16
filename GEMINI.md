@@ -17,24 +17,24 @@
   - Soporte nativo para operación dual (PC local por `http://localhost:3000` / LAN + acceso móvil remoto por `https://` vía Cloudflare Tunnel) con detección automática de `cf-connecting-ip` y cookie `Secure` adaptativa por protocolo.
   - Documentación organizada en `README.md` y la carpeta `docs/` (`docs/ARQUITECTURA.md`, `docs/PRUEBAS.md`).
 - **APIs, Reportes y Notificaciones:**
-  - `exceljs` (`^4.4.0`): Generación de libros Excel (`.xlsx`) en servidor con múltiples hojas (`Movimientos` y `Arqueos de Caja`).
-  - `jspdf` (`^4.2.1`) y `jspdf-autotable` (`^5.0.9`): Exportación de reportes PDF de caja auditada en el navegador (`app/admin/exportarPDF.js`).
+  - `exceljs` (`^4.4.0`): Generación de libros Excel (`.xlsx`) en servidor con 10 hojas contables y de auditoría (`Movimientos`, `Arqueos de Caja`, `Detalle Ventas (CMV)` con prorrateo exacto de descuentos, `Rentabilidad por Producto`, `Compras y Mermas`, `Inventario Kardex`, `Kardex Productos`, `Kardex Insumos`, `Historial Anulaciones` y `Resumen Contable`).
+  - `jspdf` (`^4.2.1`) y `jspdf-autotable` (`^5.0.9`): Exportación de reportes PDF de caja auditada en el navegador (`app/admin/exportarPDF.js`) con resumen ejecutivo, liquidación de impuestos (Débito IVA, IT, Crédito Fiscal IVA), arqueo ciego de efectivo y QR, rentabilidad por producto neta de descuentos, movimientos y anulaciones.
   - `recharts` (`^3.10.1`): Gráficos financieros interactivos en `/admin` (`app/admin/GraficosFinancieros.js`).
-  - `nodemailer` (`^10.5.0`): Notificaciones automáticas por correo electrónico vía SMTP (`server/mailer.js`) al cerrar cada turno, con plantilla HTML ejecutiva y libro Excel `.xlsx` adjunto en caliente.
+  - `nodemailer` (`^10.5.0`): Notificaciones automáticas por correo electrónico vía SMTP (`server/mailer.js`) al cerrar cada turno, con plantilla HTML ejecutiva (conciliación separada de cajón físico efectivo vs. cuenta QR, ventas mixtas y descuentos), soporte para inyección de transporte de prueba (`configurarTransporterPrueba`) y libro Excel `.xlsx` adjunto en caliente.
 - **Estructura de Carpetas:**
   - `README.md`: Punto de entrada, estructura general y comandos rápidos.
   - `docs/`: Documentación técnica (`ARQUITECTURA.md`) y checklist de pruebas (`PRUEBAS.md`).
   - `database/database.js`: Inicialización de SQLite, activación de claves foráneas (`PRAGMA foreign_keys = ON`), modo WAL, timeout y ejecución automática de migraciones.
-  - `database/migraciones.js`: Sistema de migraciones versionado con `PRAGMA user_version`. Toda mutación al esquema se aplica de forma transaccional e idempotente (migraciones v1 a v8).
-  - `server/queries.js`: Lógica de negocio y consultas con promesas nativas (`async/await`) usando `runQuery`, `getQuery`, `allQuery` y `transaccion()`.
+  - `database/migraciones.js`: Sistema de migraciones versionado con `PRAGMA user_version` y respaldo automático previo a toda migración (`VACUUM INTO backups/caja-pre-migracion-vX-a-vY-*.db`). Toda mutación al esquema se aplica de forma transaccional e idempotente (migraciones v1 a v11).
+  - `server/queries.js`: Lógica de negocio y consultas con promesas nativas (`async/await`) usando `runQuery`, `getQuery`, `allQuery` y `enTransaccion()`.
   - `server/sesion.js`: Manejo de sesión JWT del servidor (crear, validar, renovar y destruir cookies HttpOnly `pos_session`).
   - `server/mailer.js`: Servicio SMTP (`nodemailer`) con plantillas HTML responsivas y adjuntos en background.
   - `server/secretos.js`: Verificación estricta de variables de entorno y secretos pre-arranque en producción.
   - `instrumentation.js`: Gancho de arranque de Next.js para validación temprana de seguridad.
   - `scripts/backup.js`: Script de copia de seguridad atómica con retención configurable.
   - `scripts/update.js`: Script de actualización segura automatizada (`npm run update`: backup previo + `git pull` + `npm ci` + `build`).
-  - `app/api/caja/route.js`: Endpoint principal (`GET` de estado/sesión/catálogo/auditoría y `POST` por `accion`: `login`, `logout`, `instalacion_inicial`, `abrir`, `reabrir`, `vender`, `egreso`, `ingreso_efectivo`, `cerrar`, `anular`, `crear_usuario`, `borrar_usuario`, `cambiar_password`, `guardar_configuracion`, `crear_categoria`, `crear_producto`, `comprar_producto_directo`, `crear_insumo`, `comprar_insumo`, `merma_insumo`, `asignar_receta`, `crear_caja_fisica`, `desactivar_caja_fisica`, `reactivar_caja_fisica`, `crear_grupo_modificador`, `actualizar_grupo_modificador`, `eliminar_grupo_modificador`, `asignar_modificadores_producto`, `test_email`, `reenviar_reporte_email`).
-  - `app/api/reportes/route.js`: Endpoint administrativo (`GET`) para tendencias JSON, exportación CSV (`?formato=csv`) y exportación Excel (`?formato=xlsx`, con filtro opcional `?cajaId=`).
+  - `app/api/caja/route.js`: Endpoint principal (`GET` de estado/sesión/catálogo/auditoría/kardexDetallado y `POST` por `accion`: `login`, `logout`, `instalacion_inicial`, `abrir`, `reabrir`, `vender`, `egreso`, `ingreso_efectivo`, `cerrar`, `anular`, `crear_usuario`, `borrar_usuario`, `cambiar_password`, `guardar_configuracion`, `guardar_configuracion_contable`, `actualizar_permiso_fiscal_caja`, `actualizar_permiso_fiscal_usuario`, `crear_categoria`, `crear_producto`, `comprar_producto_directo`, `merma_producto_directo`, `verificar_integridad_kardex`, `crear_insumo`, `comprar_insumo`, `merma_insumo`, `asignar_receta`, `crear_caja_fisica`, `desactivar_caja_fisica`, `reactivar_caja_fisica`, `crear_grupo_modificador`, `actualizar_grupo_modificador`, `eliminar_grupo_modificador`, `asignar_modificadores_producto`, `probar_email`, `reenviar_cierre_email`).
+  - `app/api/reportes/route.js`: Endpoint administrativo (`GET`) para tendencias JSON, exportación CSV (`?formato=csv`) y exportación Excel (`?formato=xlsx`, con filtros opcionales `cajaId`, `desde`, `hasta`, `usuarioId`, `cajaFisicaId` y metadatos del usuario generador).
   - `app/caja/page.js` y `app/admin/page.js`: Vistas de operador y administrador.
   - `app/admin/GraficosFinancieros.js` y `app/admin/exportarPDF.js`: Módulos de visualización financiera y exportación PDF del panel administrativo.
 
@@ -81,12 +81,21 @@
   - Reemplazo de insumos de recetas (`insumo_reemplazado_id`): resta el insumo base de la receta y consume el insumo sustituto en la cantidad indicada, recalculando costo y stock de forma atómica.
   - Adición de insumos (shots/toppings extra) o modificadores operativos/libres con recargo de precio adicional (`precio_adicional`).
   - Auditoría atómica: `detalle_movimientos_modificadores` congela el precio y costo adicional al momento de la venta, garantizando trazabilidad y restitución exacta del stock en caso de anulación.
-- **Cálculo Financiero y Estadísticas de Ganancia:**
-  - `Ventas Totales = SUM(subtotal)` de movimientos completados de venta.
-  - `Costo Total de Ventas = SUM(cantidad * costo_unitario)` con costos congelados al momento de cada venta.
+- **Cálculo Financiero, Régimen Tributario Modular y Estadísticas de Ganancia (v9 - v11):**
+  - `Ventas Totales (Netas) = SUM(monto)` de movimientos completados con `tipo = 'ingreso'` y `categoria_contable = 'venta'`.
+  - `Costo Total de Ventas (CMV) = SUM(cantidad * costo_unitario)` con costos congelados al momento de cada venta.
   - `Ganancia Bruta = Ventas Totales - Costo Total de Ventas`.
   - `Flujo Neto Operativo = Ganancia Bruta - Total Egresos`.
-  - `Ganancia por Producto = SUM(subtotal - (cantidad * costo_unitario))`.
+  - `Ganancia por Producto`: distribuye proporcionalmente cualquier `descuento_total` del ticket entre las líneas de venta (`detalle_movimientos`), absorbiendo el centavo residual en la última línea para garantizar que `SUM(ingresos_netos_producto) === Ventas Totales` y `SUM(ganancia_producto) === Ganancia Bruta`.
+  - **Fuente de verdad de pagos:** `movimientos_pagos` registra el desglose exacto (`efectivo` y `qr`) para pagos simples y mixtos (`metodo_pago = 'mixto'`). El cambio solo se calcula y entrega sobre la porción en efectivo.
+  - **Régimen Tributario Modular y Snapshot Fiscal:**
+    - Soporta `simplificado_control_interno` (IVA = 0, IT = 0, prohibición estricta de emitir factura en frontend y backend) y `regimen_general` (alícuotas configurables `iva_porcentaje`, `it_porcentaje` y base `it_base` configurable entre `'todas_las_ventas'` o `'solo_facturadas'`).
+    - Cada venta y egreso congela su snapshot tributario (`regimen_tributario`, `iva_porcentaje`, `it_porcentaje`, `iva_monto`, `it_monto`) en `movimientos`, garantizando inmutabilidad histórica ante cambios futuros de tasas o régimen.
+    - Validación estricta en backend de permisos fiscales por negocio (`emite_factura`, `usa_respaldo_compras_egresos`), por operador (`puede_registrar_respaldo_fiscal`) y por estación física (`habilita_respaldo_fiscal`).
+  - **Kardex Cronológico Dual (Productos Directos e Insumos):**
+    - `movimientos_productos_directos` y `movimientos_insumos` registran cronológicamente `inventario_inicial`, `compra`, `venta`/`consumo_venta`, `merma`, `reingreso_anulacion` y `ajuste`, almacenando `stock_resultante` y `costo_promedio_resultante` en cada fila.
+    - Los insumos métricos preservan hasta 6 decimales en `costo_por_unidad` (ej. `Bs 0.0015/ml`).
+    - Funciones de auditoría `verificarIntegridadKardexDirecto()` y `verificarIntegridadKardexInsumos()` verifican que el stock actual coincida exactamente con la suma algebraica del Kardex.
 
 ## 3. Reglas Técnicas Obligatorias
 - **Compatibilidad y Reseteo de Base de Datos:** Si un rediseño del esquema de base de datos no es compatible con versiones anteriores locales, está autorizado reiniciar o eliminar la base de datos local (`caja.db`) y sus copias de seguridad para inicializar el proyecto con un esquema limpio.
@@ -249,28 +258,24 @@ Cuando se clona o actualiza este repositorio en un equipo nuevo, el agente y el 
     - Creación de `.vscode/extensions.json` con recomendaciones (SQLite Viewer, ESLint, Prettier).
     - Creación de `.vscode/settings.json` optimizando observadores de archivos, exclusión de logs/backups y formateo.
     - Documentación de pautas de sincronización entre PC y laptop.
-  - **Migración a arquitectura con esquema versionado (`database/migraciones.js`, PRAGMA `user_version` hasta v7):**
-    - Migración v7: Tablas `grupos_modificadores`, `modificadores_opciones`, `producto_grupos_modificadores` y `detalle_movimientos_modificadores`. Soporte integral de complementos y reemplazos de recetas (ej. Leche de almendras, extras de jarabes) con selección única/múltiple, obligatoriedad, recargos de precio, descuento atómico en `movimientos_insumos` y congelación de costos/precios en auditoría de ventas.
-    - Modal interactivo de personalización en la caja (`app/caja/page.js`) y panel de configuración de grupos y asignaciones en el administrador (`app/admin/page.js`).
-    - Migración v6: Tabla `cajas_fisicas` para gestión multicaja de terminales/estaciones con "Caja 1 - Principal" por defecto, vinculación `caja_fisica_id` en `cajas`, soporte de múltiples cajas abiertas en simultáneo y reformulación de terminología de `Caja #` a `N° Turno` en UI, Excel (.xlsx) y PDF.
-    - Gestión administrativa de estaciones físicas en `/admin` con regla de negocio de mínimo 1 caja física activa requerida y baja lógica protegida sin turnos abiertos en curso.
-    - Migraciones v4 y v5: Tabla `categorias` para catálogo interactivo por pestañas, normalización multicategoría y limpieza de categoría 'General'.
+  - **Migración a arquitectura contable y de auditoría versionada (`database/migraciones.js`, PRAGMA `user_version` hasta v11):**
+    - **Migración v11**: Índice único parcial `una_caja_abierta_por_estacion` en `cajas`, Kardex cronológico completo para `movimientos_insumos` (`stock_resultante`, `costo_promedio_resultante`, tipos `inventario_inicial` y `ajuste`), preservación de hasta 6 decimales en costos unitarios métricos de insumos y reconciliación integral de `movimientos_pagos`.
+    - **Migración v10**: Snapshot fiscal inmutable por movimiento (`regimen_tributario`, `iva_porcentaje`, `it_porcentaje`, `iva_monto`, `it_monto`), parámetro configurable `it_base` (`'todas_las_ventas'` vs `'solo_facturadas'`), `costo_promedio_resultante` en `movimientos_productos_directos`, siembra de saldos de apertura de Kardex y respaldo automático previo a toda migración (`VACUUM INTO backups/`).
+    - **Migración v9**: Régimen tributario modular, pagos mixtos (`movimientos_pagos`), permisos fiscales por usuario y por estación física, compras con respaldo fiscal y tabla `movimientos_productos_directos`.
+    - **Migración v8**: Tabla `combo_componentes` y `detalle_movimientos_combos` para combos y promociones con límites y vigencia temporal.
+    - **Migración v7**: Tablas `grupos_modificadores`, `modificadores_opciones`, `producto_grupos_modificadores` y `detalle_movimientos_modificadores`. Soporte integral de complementos y reemplazos de recetas con selección única/múltiple, obligatoriedad, recargos de precio, descuento atómico en `movimientos_insumos` y congelación de costos/precios en auditoría de ventas.
+    - **Migración v6**: Tabla `cajas_fisicas` para gestión multicaja de terminales/estaciones con "Caja 1 - Principal" por defecto, vinculación `caja_fisica_id` en `cajas`, soporte de múltiples cajas abiertas en simultáneo y reformulación de terminología de `Caja #` a `N° Turno` en UI, Excel (.xlsx) y PDF.
+    - **Migraciones v4 y v5**: Tabla `categorias` para catálogo interactivo por pestañas, normalización multicategoría y limpieza de categoría 'General'.
   - **Seguridad de cuentas y sesiones:**
     - Sincronización automática y segura de la cuenta `developer` vinculada a `DEVELOPER_PASSWORD` en `.env.local` con hash bcrypt.
     - Módulo de sesiones seguras (`server/sesion.js`) con `INSTANCE_BOOT_ID` (invalidación automática al reiniciar servidor), TTL por rol (15 min dev, 30 min admin, 8 h cajero) y session cookies para roles administrativos.
     - Cierre automático de sesión en frontend tras 15 minutos de inactividad para roles privilegiados en `/admin` y `/caja`.
-  - **Operaciones de caja y catálogo:**
+  - **Operaciones de caja, catálogo y control de mermas:**
     - Acción `ingreso_efectivo` para inyección de cambio/sencillo al cajón sin inflar las ventas ni distorsionar utilidades.
-    - Rediseño de creación de productos en `app/admin/page.js`: modalidades asistidas `unitario` (autocreación o enlace a insumo con proveedor y vencimiento), `receta` (escandallo multi-insumo dinámico) y `libre`.
-    - Optimización de catálogo en caja (`app/caja/page.js`): barra interactiva de categorías en la vista de ventas (POS) con soporte de filtrado simple o múltiple simultáneo, contador reactivo de productos, opción para productos sin categoría, botón de restablecimiento rápido y reinicio automático del filtro tras completar cada venta.
-    - Inputs numéricos reactivos con debounce, validación atómica de stock en carrito y botón para eliminar ítems.
-    - Implementación de transacciones atómicas seguras en `server/queries.js`.
-    - Lógica de arqueo ciego, control de apertura única por usuario y trazabilidad de reaperturas auditadas.
-    - Soporte de inventario híbrido (`libre`, `directo`, `receta`) con costeo ponderado y rollback garantizado en anulaciones.
-    - Batería completa de 12 escenarios de prueba documentada en `docs/PRUEBAS.md`.
-- **En Progreso:**
-  - Validación y ejecución de la suite de pruebas funcionales y de concurrencia (`docs/PRUEBAS.md`).
-  - Alineación de estilos y ergonomía responsiva para pantallas táctiles de POS y tablets.
-- **Pendiente:**
-  - Impresión/exportación de tickets individuales de venta y movimientos de insumos.
-  - Panel de auditoría dedicada de reaperturas de caja y anulaciones de movimientos con filtrado por fecha y responsable.
+    - Cobros en efectivo, QR y pagos mixtos (`efectivo` + `qr`) con campo de descuento en ticket, validación en vivo, vista de `Historial del Turno` y anulación en línea en `app/caja/page.js`.
+    - Creación de productos en `app/admin/page.js` con modalidades `directo` (stock propio y Kardex directo), `unitario` (relación 1 a 1 con insumo), `receta` (escandallo multi-insumo), `combo` y `libre`.
+    - Formularios completos de registro de mermas de productos directos (`merma_producto_directo`) y de insumos (`merma_insumo`) con consulta de stock/CPP en vivo, cálculo de pérdida estimada, paso de confirmación explícita y visualización del resultado, integrados con el visor cronológico de Kardex y verificador de integridad en `app/admin/page.js`.
+    - Suites de pruebas automatizadas (`scratch/test_migracion_v8_v9.js` y `scratch/test_ventas_v9.js`) con 121 verificaciones contables, de concurrencia, casos borde, exportaciones (CSV, XLSX de 10 hojas, PDF) y transporte simulado Nodemailer.
+- **Pendiente (Sujeto a entorno externo / hardware):**
+  - Prueba con credenciales SMTP reales de un proveedor de correo externo (cuando se configuren `SMTP_USER` y `SMTP_PASS` reales en `.env.local`).
+  - Impresión térmica directa (ESC/POS) de tickets individuales si se requiere conectar impresora física.
