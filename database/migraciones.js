@@ -587,6 +587,76 @@ const MIGRACIONES = [
             await runRaw(conn, `CREATE INDEX IF NOT EXISTS idx_prod_grupos_mod ON producto_grupos_modificadores(producto_id)`);
             await runRaw(conn, `CREATE INDEX IF NOT EXISTS idx_det_mov_mod ON detalle_movimientos_modificadores(detalle_movimiento_id)`);
         }
+    },
+    {
+        version: 8,
+        descripcion: 'Soporte para combos y promociones: tipo_inventario combo, límites de unidades, vigencia temporal y tablas de componentes y auditoría de combos',
+        up: async (conn) => {
+            // 1. Ampliar CHECK de tipo_inventario en tabla productos para permitir 'combo'
+            await runRaw(conn, `
+                CREATE TABLE IF NOT EXISTS productos_nueva (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    nombre TEXT NOT NULL,
+                    precio REAL NOT NULL,
+                    costo REAL DEFAULT 0,
+                    categoria TEXT DEFAULT 'General',
+                    unidad_medida TEXT DEFAULT 'unidades',
+                    tipo_inventario TEXT CHECK(tipo_inventario IN ('libre', 'directo', 'receta', 'combo')) DEFAULT 'libre',
+                    stock REAL DEFAULT NULL,
+                    stock_minimo REAL DEFAULT 0,
+                    fecha_vencimiento TEXT DEFAULT NULL,
+                    activo INTEGER DEFAULT 1,
+                    limite_maximo_activo INTEGER DEFAULT 0,
+                    limite_unidades_total REAL DEFAULT NULL,
+                    limite_unidades_restante REAL DEFAULT NULL,
+                    fecha_inicio_vigencia TEXT DEFAULT NULL,
+                    fecha_fin_vigencia TEXT DEFAULT NULL
+                )
+            `);
+
+            await runRaw(conn, `
+                INSERT INTO productos_nueva (
+                    id, nombre, precio, costo, categoria, unidad_medida, tipo_inventario,
+                    stock, stock_minimo, fecha_vencimiento, activo
+                )
+                SELECT id, nombre, precio, costo, categoria, unidad_medida, tipo_inventario,
+                       stock, stock_minimo, fecha_vencimiento, activo
+                FROM productos
+            `);
+
+            await runRaw(conn, `DROP TABLE productos`);
+            await runRaw(conn, `ALTER TABLE productos_nueva RENAME TO productos`);
+
+            // 2. Tabla de componentes de combos
+            await runRaw(conn, `
+                CREATE TABLE IF NOT EXISTS combo_componentes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    combo_producto_id INTEGER NOT NULL,
+                    componente_producto_id INTEGER NOT NULL,
+                    cantidad REAL NOT NULL CHECK(cantidad > 0),
+                    FOREIGN KEY (combo_producto_id) REFERENCES productos(id) ON DELETE CASCADE,
+                    FOREIGN KEY (componente_producto_id) REFERENCES productos(id) ON DELETE RESTRICT
+                )
+            `);
+
+            // 3. Tabla de auditoría histórica para ventas de combos
+            await runRaw(conn, `
+                CREATE TABLE IF NOT EXISTS detalle_movimientos_combos (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    detalle_movimiento_id INTEGER NOT NULL,
+                    componente_producto_id INTEGER NOT NULL,
+                    cantidad_unitaria REAL NOT NULL,
+                    cantidad_total REAL NOT NULL,
+                    costo_unitario_congelado REAL NOT NULL,
+                    FOREIGN KEY (detalle_movimiento_id) REFERENCES detalle_movimientos(id) ON DELETE CASCADE,
+                    FOREIGN KEY (componente_producto_id) REFERENCES productos(id)
+                )
+            `);
+
+            await runRaw(conn, `CREATE INDEX IF NOT EXISTS idx_combo_comp_combo ON combo_componentes(combo_producto_id)`);
+            await runRaw(conn, `CREATE INDEX IF NOT EXISTS idx_combo_comp_prod ON combo_componentes(componente_producto_id)`);
+            await runRaw(conn, `CREATE INDEX IF NOT EXISTS idx_det_mov_combos ON detalle_movimientos_combos(detalle_movimiento_id)`);
+        }
     }
 ];
 

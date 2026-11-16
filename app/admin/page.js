@@ -59,9 +59,15 @@ export default function AdminPage() {
     const [prodNombre, setProdNombre] = useState('');
     const [prodPrecio, setProdPrecio] = useState('');
     const [prodCategorias, setProdCategorias] = useState([]);
-    const [tipoComposicion, setTipoComposicion] = useState('unitario'); // 'unitario' | 'receta' | 'libre'
+    const [tipoComposicion, setTipoComposicion] = useState('unitario'); // 'unitario' | 'receta' | 'libre' | 'combo'
     const [insumoUnitarioId, setInsumoUnitarioId] = useState('');
     const [filasReceta, setFilasReceta] = useState([{ insumoId: '', cantidad: '', unidadReceta: '' }]);
+    const [filasCombo, setFilasCombo] = useState([{ productoId: '', cantidad: '1' }]);
+    const [comboModoLimite, setComboModoLimite] = useState('sin_limite'); // 'sin_limite' | 'cantidad_maxima'
+    const [comboCantidadMaxima, setComboCantidadMaxima] = useState('50');
+    const [comboUsaVigencia, setComboUsaVigencia] = useState(false);
+    const [comboFechaInicio, setComboFechaInicio] = useState('');
+    const [comboFechaFin, setComboFechaFin] = useState('');
 
     // Compatibilidad y Reabastecimiento de Artículo Directo (con CPP)
     const [compraProdId, setCompraProdId] = useState('');
@@ -647,6 +653,33 @@ export default function AdminPage() {
                 return;
             }
             payload.insumosReceta = insumosLimpio;
+        } else if (tipoComposicion === 'combo') {
+            const componentesLimpio = filasCombo.filter((f) => f.productoId && Number(f.cantidad) > 0);
+            if (componentesLimpio.length === 0) {
+                setError('Debes agregar al menos un producto componente con cantidad mayor a 0 para el combo.');
+                return;
+            }
+            payload.componentesCombo = componentesLimpio;
+            payload.limiteMaximoActivo = comboModoLimite === 'cantidad_maxima';
+            if (payload.limiteMaximoActivo) {
+                const maxVal = Number(comboCantidadMaxima);
+                if (!Number.isFinite(maxVal) || maxVal <= 0) {
+                    setError('Debes indicar una cantidad máxima válida mayor a 0.');
+                    return;
+                }
+                payload.limiteUnidadesTotal = maxVal;
+            }
+            if (comboUsaVigencia) {
+                payload.fechaInicioVigencia = comboFechaInicio ? new Date(comboFechaInicio).toISOString() : null;
+                payload.fechaFinVigencia = comboFechaFin ? new Date(comboFechaFin).toISOString() : null;
+                if (payload.fechaInicioVigencia && payload.fechaFinVigencia && new Date(payload.fechaInicioVigencia) > new Date(payload.fechaFinVigencia)) {
+                    setError('La fecha y hora de inicio no puede ser posterior a la fecha final.');
+                    return;
+                }
+            } else {
+                payload.fechaInicioVigencia = null;
+                payload.fechaFinVigencia = null;
+            }
         }
 
         const ok = await ejecutarAccion(
@@ -658,6 +691,12 @@ export default function AdminPage() {
             setProdPrecio('');
             setInsumoUnitarioId('');
             setFilasReceta([{ insumoId: '', cantidad: '', unidadReceta: '' }]);
+            setFilasCombo([{ productoId: '', cantidad: '1' }]);
+            setComboModoLimite('sin_limite');
+            setComboCantidadMaxima('50');
+            setComboUsaVigencia(false);
+            setComboFechaInicio('');
+            setComboFechaFin('');
             setProdCategorias(categoriaTabActiva !== 'todas' ? [categoriaTabActiva] : []);
         }
     }
@@ -1727,6 +1766,14 @@ export default function AdminPage() {
                                         costoEstimado += convertida * Number(ins.costo_por_unidad || 0);
                                     }
                                 }
+                            } else if (tipoComposicion === 'combo') {
+                                for (const f of filasCombo) {
+                                    if (!f.productoId || !f.cantidad) continue;
+                                    const prodComp = (datos.productos || []).find((p) => String(p.id) === String(f.productoId));
+                                    if (!prodComp) continue;
+                                    const cant = Number(f.cantidad) || 0;
+                                    costoEstimado += cant * Number(prodComp.costo || 0);
+                                }
                             }
                             const gananciaEstimada = Number(prodPrecio || 0) - costoEstimado;
                             const margenPorcentaje = Number(prodPrecio) > 0 ? (gananciaEstimada / Number(prodPrecio)) * 100 : 0;
@@ -2327,56 +2374,73 @@ export default function AdminPage() {
                                                     <span style={{ fontSize: '0.85rem', fontWeight: 'bold', color: '#334155', display: 'block', marginBottom: '0.4rem' }}>
                                                         Composición y Origen de Inventario:
                                                     </span>
-                                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 0.9fr', gap: '0.4rem' }}>
+                                                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0.4rem' }}>
                                                         <button
                                                             type="button"
                                                             onClick={() => setTipoComposicion('unitario')}
                                                             style={{
-                                                                padding: '0.6rem 0.5rem',
+                                                                padding: '0.6rem 0.4rem',
                                                                 borderRadius: '8px',
                                                                 border: tipoComposicion === 'unitario' ? '2px solid #0284c7' : '1px solid #cbd5e1',
                                                                 background: tipoComposicion === 'unitario' ? '#f0f9ff' : '#fff',
                                                                 cursor: 'pointer',
                                                                 textAlign: 'center',
-                                                                fontSize: '0.82rem'
+                                                                fontSize: '0.8rem'
                                                             }}
                                                         >
-                                                            <strong>📦 Artículo Unitario</strong>
-                                                            <div style={{ fontSize: '0.72rem', color: '#64748b', marginTop: '0.2rem' }}>Reventa 1 a 1 de un insumo</div>
+                                                            <strong>📦 Unitario</strong>
+                                                            <div style={{ fontSize: '0.7rem', color: '#64748b', marginTop: '0.2rem' }}>Reventa 1 a 1</div>
                                                         </button>
 
                                                         <button
                                                             type="button"
                                                             onClick={() => setTipoComposicion('receta')}
                                                             style={{
-                                                                padding: '0.6rem 0.5rem',
+                                                                padding: '0.6rem 0.4rem',
                                                                 borderRadius: '8px',
                                                                 border: tipoComposicion === 'receta' ? '2px solid #0284c7' : '1px solid #cbd5e1',
                                                                 background: tipoComposicion === 'receta' ? '#f0f9ff' : '#fff',
                                                                 cursor: 'pointer',
                                                                 textAlign: 'center',
-                                                                fontSize: '0.82rem'
+                                                                fontSize: '0.8rem'
                                                             }}
                                                         >
-                                                            <strong>🧪 Receta / Ensamble</strong>
-                                                            <div style={{ fontSize: '0.72rem', color: '#64748b', marginTop: '0.2rem' }}>Hasta 30 insumos métricos</div>
+                                                            <strong>🧪 Receta</strong>
+                                                            <div style={{ fontSize: '0.7rem', color: '#64748b', marginTop: '0.2rem' }}>Insumos métricos</div>
+                                                        </button>
+
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setTipoComposicion('combo')}
+                                                            style={{
+                                                                padding: '0.6rem 0.4rem',
+                                                                borderRadius: '8px',
+                                                                border: tipoComposicion === 'combo' ? '2px solid #0284c7' : '1px solid #cbd5e1',
+                                                                background: tipoComposicion === 'combo' ? '#f0f9ff' : '#fff',
+                                                                cursor: 'pointer',
+                                                                textAlign: 'center',
+                                                                fontSize: '0.8rem'
+                                                            }}
+                                                        >
+                                                            <strong>🎁 Combo</strong>
+                                                            <div style={{ fontSize: '0.7rem', color: '#64748b', marginTop: '0.2rem' }}>Agrupa productos</div>
                                                         </button>
 
                                                         <button
                                                             type="button"
                                                             onClick={() => setTipoComposicion('libre')}
                                                             style={{
-                                                                padding: '0.6rem 0.5rem',
+                                                                padding: '0.6rem 0.4rem',
                                                                 borderRadius: '8px',
                                                                 border: tipoComposicion === 'libre' ? '2px solid #0284c7' : '1px solid #cbd5e1',
                                                                 background: tipoComposicion === 'libre' ? '#f0f9ff' : '#fff',
                                                                 cursor: 'pointer',
                                                                 textAlign: 'center',
-                                                                fontSize: '0.82rem'
+                                                                fontSize: '0.8rem'
                                                             }}
                                                         >
                                                             <strong>✨ Venta Libre</strong>
-                                                            <div style={{ fontSize: '0.72rem', color: '#64748b', marginTop: '0.2rem' }}>Servicio sin inventario</div>
+                                                            <div style={{ fontSize: '0.7rem', color: '#64748b', marginTop: '0.2rem' }}>Sin inventario</div>
                                                         </button>
                                                     </div>
                                                 </div>
@@ -2502,7 +2566,178 @@ export default function AdminPage() {
                                                     </div>
                                                 )}
 
-                                                {/* OPCIÓN 3: SERVICIO / LIBRE */}
+                                                {/* OPCIÓN 3: COMBO / PROMOCIÓN */}
+                                                {tipoComposicion === 'combo' && (
+                                                    <div style={{ background: '#f8fafc', padding: '0.85rem', borderRadius: '8px', border: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                                            <span style={{ fontSize: '0.84rem', fontWeight: 'bold', color: '#334155' }}>
+                                                                Productos Componentes del Combo:
+                                                            </span>
+                                                            <span style={{ fontSize: '0.78rem', color: '#0284c7', fontWeight: 'bold' }}>
+                                                                {filasCombo.length} / 20 productos
+                                                            </span>
+                                                        </div>
+
+                                                        {filasCombo.map((fila, index) => {
+                                                            const prodSel = (datos.productos || []).find((p) => String(p.id) === String(fila.productoId));
+                                                            return (
+                                                                <div key={index} style={{ display: 'grid', gridTemplateColumns: '1.8fr 1fr 34px', gap: '0.4rem', alignItems: 'center' }}>
+                                                                    <select
+                                                                        required
+                                                                        value={fila.productoId}
+                                                                        onChange={(e) => {
+                                                                            const val = e.target.value;
+                                                                            setFilasCombo((prev) => prev.map((f, i) => i === index ? { ...f, productoId: val } : f));
+                                                                        }}
+                                                                        style={{ ...inputStyle, padding: '0.4rem', fontSize: '0.82rem' }}
+                                                                    >
+                                                                        <option value="">-- Selecciona producto --</option>
+                                                                        {(datos.productos || [])
+                                                                            .filter((p) => p.tipo_inventario !== 'combo')
+                                                                            .map((prod) => (
+                                                                                <option key={prod.id} value={prod.id}>
+                                                                                    {prod.nombre} (Costo: Bs {Number(prod.costo || 0).toFixed(2)} | {prod.tipo_inventario})
+                                                                                </option>
+                                                                            ))}
+                                                                    </select>
+                                                                    <input
+                                                                        type="number"
+                                                                        step="1"
+                                                                        min="1"
+                                                                        required
+                                                                        placeholder="Cantidad"
+                                                                        value={fila.cantidad}
+                                                                        onChange={(e) => {
+                                                                            const val = e.target.value;
+                                                                            setFilasCombo((prev) => prev.map((f, i) => i === index ? { ...f, cantidad: val } : f));
+                                                                        }}
+                                                                        style={{ ...inputStyle, padding: '0.4rem', fontSize: '0.82rem' }}
+                                                                    />
+                                                                    <button
+                                                                        type="button"
+                                                                        disabled={filasCombo.length <= 1}
+                                                                        onClick={() => {
+                                                                            if (filasCombo.length <= 1) return;
+                                                                            setFilasCombo((prev) => prev.filter((_, i) => i !== index));
+                                                                        }}
+                                                                        style={{
+                                                                            padding: '0.4rem',
+                                                                            background: filasCombo.length <= 1 ? '#e2e8f0' : '#fee2e2',
+                                                                            color: filasCombo.length <= 1 ? '#94a3b8' : '#b91c1c',
+                                                                            border: 'none',
+                                                                            borderRadius: '4px',
+                                                                            cursor: filasCombo.length <= 1 ? 'not-allowed' : 'pointer',
+                                                                            fontWeight: 'bold'
+                                                                        }}
+                                                                        title="Quitar este componente"
+                                                                    >
+                                                                        ✕
+                                                                    </button>
+                                                                </div>
+                                                            );
+                                                        })}
+
+                                                        <button
+                                                            type="button"
+                                                            disabled={filasCombo.length >= 20}
+                                                            onClick={() => setFilasCombo((prev) => [...prev, { productoId: '', cantidad: '1' }])}
+                                                            style={{
+                                                                width: '100%',
+                                                                padding: '0.4rem',
+                                                                background: '#f1f5f9',
+                                                                color: '#0284c7',
+                                                                border: '1px dashed #cbd5e1',
+                                                                borderRadius: '6px',
+                                                                cursor: filasCombo.length >= 20 ? 'not-allowed' : 'pointer',
+                                                                fontSize: '0.82rem',
+                                                                fontWeight: 'bold'
+                                                            }}
+                                                        >
+                                                            ➕ Agregar otro producto al combo ({filasCombo.length}/20)
+                                                        </button>
+
+                                                        {/* MODO DE VENTA / LÍMITES */}
+                                                        <div style={{ marginTop: '0.4rem', borderTop: '1px solid #e2e8f0', paddingTop: '0.6rem' }}>
+                                                            <span style={{ fontSize: '0.84rem', fontWeight: 'bold', color: '#334155', display: 'block', marginBottom: '0.35rem' }}>
+                                                                Modo de Límite de Venta (Excluyente):
+                                                            </span>
+                                                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', marginBottom: '0.5rem' }}>
+                                                                <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.82rem', background: '#fff', padding: '0.5rem', borderRadius: '6px', border: comboModoLimite === 'sin_limite' ? '2px solid #0284c7' : '1px solid #cbd5e1', cursor: 'pointer' }}>
+                                                                    <input
+                                                                        type="radio"
+                                                                        name="modo_combo"
+                                                                        checked={comboModoLimite === 'sin_limite'}
+                                                                        onChange={() => setComboModoLimite('sin_limite')}
+                                                                    />
+                                                                    <span><strong>Sin límite</strong><br/><small style={{ color: '#64748b' }}>Hasta agotar inventario</small></span>
+                                                                </label>
+                                                                <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.82rem', background: '#fff', padding: '0.5rem', borderRadius: '6px', border: comboModoLimite === 'cantidad_maxima' ? '2px solid #0284c7' : '1px solid #cbd5e1', cursor: 'pointer' }}>
+                                                                    <input
+                                                                        type="radio"
+                                                                        name="modo_combo"
+                                                                        checked={comboModoLimite === 'cantidad_maxima'}
+                                                                        onChange={() => setComboModoLimite('cantidad_maxima')}
+                                                                    />
+                                                                    <span><strong>Cantidad máxima</strong><br/><small style={{ color: '#64748b' }}>Límite de unidades fijas</small></span>
+                                                                </label>
+                                                            </div>
+
+                                                            {comboModoLimite === 'cantidad_maxima' && (
+                                                                <div style={{ marginBottom: '0.5rem' }}>
+                                                                    <label style={{ fontSize: '0.82rem', color: '#334155' }}>
+                                                                        Número máximo de combos a vender:
+                                                                        <input
+                                                                            type="number"
+                                                                            min="1"
+                                                                            step="1"
+                                                                            required
+                                                                            value={comboCantidadMaxima}
+                                                                            onChange={(e) => setComboCantidadMaxima(e.target.value)}
+                                                                            style={{ ...inputStyle, marginTop: '0.2rem' }}
+                                                                        />
+                                                                    </label>
+                                                                </div>
+                                                            )}
+                                                        </div>
+
+                                                        {/* VIGENCIA TEMPORAL (FECHA Y HORA) */}
+                                                        <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: '0.6rem' }}>
+                                                            <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.84rem', fontWeight: 'bold', color: '#334155', cursor: 'pointer' }}>
+                                                                <input
+                                                                    type="checkbox"
+                                                                    checked={comboUsaVigencia}
+                                                                    onChange={(e) => setComboUsaVigencia(e.target.checked)}
+                                                                />
+                                                                Programar vigencia temporal (Fecha y Hora)
+                                                            </label>
+
+                                                            {comboUsaVigencia && (
+                                                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', marginTop: '0.4rem' }}>
+                                                                    <label style={{ fontSize: '0.8rem', color: '#475569' }}>
+                                                                        Válido Desde:
+                                                                        <input
+                                                                            type="datetime-local"
+                                                                            value={comboFechaInicio}
+                                                                            onChange={(e) => setComboFechaInicio(e.target.value)}
+                                                                            style={{ ...inputStyle, marginTop: '0.2rem', fontSize: '0.8rem' }}
+                                                                        />
+                                                                    </label>
+                                                                    <label style={{ fontSize: '0.8rem', color: '#475569' }}>
+                                                                        Válido Hasta:
+                                                                        <input
+                                                                            type="datetime-local"
+                                                                            value={comboFechaFin}
+                                                                            onChange={(e) => setComboFechaFin(e.target.value)}
+                                                                            style={{ ...inputStyle, marginTop: '0.2rem', fontSize: '0.8rem' }}
+                                                                        />
+                                                                    </label>
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                )}
+
+                                                {/* OPCIÓN 4: SERVICIO / LIBRE */}
                                                 {tipoComposicion === 'libre' && (
                                                     <div style={{ background: '#f8fafc', padding: '0.75rem', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '0.82rem', color: '#64748b' }}>
                                                         ✨ <em>Este producto se registrará como servicio o venta libre sin descontar stock físico del inventario.</em>
@@ -2703,7 +2938,23 @@ export default function AdminPage() {
                                                                     )}
                                                                 </td>
                                                                 <td style={thTd}>
-                                                                    {p.tipo_inventario === 'receta' ? '🧪 Receta / Insumo' : p.tipo_inventario === 'directo' ? '📦 Reventa Directa' : '✨ Libre'}
+                                                                    {p.tipo_inventario === 'receta'
+                                                                        ? '🧪 Receta / Insumo'
+                                                                        : p.tipo_inventario === 'directo'
+                                                                        ? '📦 Reventa Directa'
+                                                                        : p.tipo_inventario === 'combo'
+                                                                        ? '🎁 Combo / Promo'
+                                                                        : '✨ Libre'}
+                                                                    {p.tipo_inventario === 'combo' && Number(p.limite_maximo_activo) === 1 && (
+                                                                        <div style={{ fontSize: '0.72rem', color: '#0284c7', marginTop: '0.2rem' }}>
+                                                                            Límite: {p.limite_unidades_restante}/{p.limite_unidades_total} u.
+                                                                        </div>
+                                                                    )}
+                                                                    {p.tipo_inventario === 'combo' && (p.fecha_inicio_vigencia || p.fecha_fin_vigencia) && (
+                                                                        <div style={{ fontSize: '0.7rem', color: p.esta_vigente === false ? '#dc2626' : '#166534', marginTop: '0.15rem' }}>
+                                                                            {p.esta_vigente === false ? `⛔ ${p.motivo_no_vigente || 'Fuera de vigencia'}` : '🟢 En vigencia'}
+                                                                        </div>
+                                                                    )}
                                                                 </td>
                                                                 <td style={{ ...thTd, fontWeight: 'bold' }}>Bs {Number(p.precio).toFixed(2)}</td>
                                                                 <td style={thTd}>Bs {Number(p.costo).toFixed(2)}</td>

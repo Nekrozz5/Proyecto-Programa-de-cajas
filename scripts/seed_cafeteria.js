@@ -45,7 +45,9 @@ async function sembrarCafeteria() {
 
     // 1. Limpieza de tablas operativas
     console.log('[1/8] Limpiando tablas operativas previas...');
+    await run(`DELETE FROM detalle_movimientos_combos`);
     await run(`DELETE FROM detalle_movimientos_modificadores`);
+    await run(`DELETE FROM combo_componentes`);
     await run(`DELETE FROM producto_grupos_modificadores`);
     await run(`DELETE FROM modificadores_opciones`);
     await run(`DELETE FROM grupos_modificadores`);
@@ -80,43 +82,56 @@ async function sembrarCafeteria() {
     );
 
     // 4. Usuarios del sistema
-    console.log('[4/8] Configurando usuarios y credenciales...');
-    const hashCarlos = await bcrypt.hash('Carlos1234*', BCRYPT_ROUNDS);
-    const hashSofia = await bcrypt.hash('Admin1234*', BCRYPT_ROUNDS);
-    const hashLucia = await bcrypt.hash('1234', BCRYPT_ROUNDS);
-    const hashMarcos = await bcrypt.hash('5678', BCRYPT_ROUNDS);
+    console.log('[4/8] Configurando usuarios y credenciales (Clave universal: 12345678)...');
+    const PASSWORD_UNIVERSAL = '12345678';
+    const hashUniversal = await bcrypt.hash(PASSWORD_UNIVERSAL, BCRYPT_ROUNDS);
 
-    await run(`UPDATE usuarios SET nombre = 'carlos', pin_o_password = ?, rol = 'superadmin', activo = 1 WHERE id = 2`, [hashCarlos]);
+    // Asegurar cuenta Super Admin: carlos
+    let carlosId;
+    const carlos = await get(`SELECT id FROM usuarios WHERE LOWER(nombre) = 'carlos'`);
+    if (!carlos) {
+        const res = await run(`INSERT INTO usuarios (nombre, pin_o_password, rol, activo) VALUES ('carlos', ?, 'superadmin', 1)`, [hashUniversal]);
+        carlosId = res.lastID;
+    } else {
+        await run(`UPDATE usuarios SET pin_o_password = ?, rol = 'superadmin', activo = 1 WHERE id = ?`, [hashUniversal, carlos.id]);
+        carlosId = carlos.id;
+    }
 
+    // Asegurar cuenta Administradora: sofia
     let sofiaId;
     const sofia = await get(`SELECT id FROM usuarios WHERE LOWER(nombre) = 'sofia'`);
     if (!sofia) {
-        const res = await run(`INSERT INTO usuarios (nombre, pin_o_password, rol, activo) VALUES ('sofia', ?, 'admin', 1)`, [hashSofia]);
+        const res = await run(`INSERT INTO usuarios (nombre, pin_o_password, rol, activo) VALUES ('sofia', ?, 'admin', 1)`, [hashUniversal]);
         sofiaId = res.lastID;
     } else {
-        await run(`UPDATE usuarios SET pin_o_password = ?, rol = 'admin', activo = 1 WHERE id = ?`, [hashSofia, sofia.id]);
+        await run(`UPDATE usuarios SET pin_o_password = ?, rol = 'admin', activo = 1 WHERE id = ?`, [hashUniversal, sofia.id]);
         sofiaId = sofia.id;
     }
 
+    // Asegurar cuenta Cajera 1: lucia
     let luciaId;
     const lucia = await get(`SELECT id FROM usuarios WHERE LOWER(nombre) = 'lucia'`);
     if (!lucia) {
-        const res = await run(`INSERT INTO usuarios (nombre, pin_o_password, rol, activo) VALUES ('lucia', ?, 'user', 1)`, [hashLucia]);
+        const res = await run(`INSERT INTO usuarios (nombre, pin_o_password, rol, activo) VALUES ('lucia', ?, 'user', 1)`, [hashUniversal]);
         luciaId = res.lastID;
     } else {
-        await run(`UPDATE usuarios SET pin_o_password = ?, rol = 'user', activo = 1 WHERE id = ?`, [hashLucia, lucia.id]);
+        await run(`UPDATE usuarios SET pin_o_password = ?, rol = 'user', activo = 1 WHERE id = ?`, [hashUniversal, lucia.id]);
         luciaId = lucia.id;
     }
 
+    // Asegurar cuenta Cajero 2: marcos
     let marcosId;
     const marcos = await get(`SELECT id FROM usuarios WHERE LOWER(nombre) = 'marcos'`);
     if (!marcos) {
-        const res = await run(`INSERT INTO usuarios (nombre, pin_o_password, rol, activo) VALUES ('marcos', ?, 'user', 1)`, [hashMarcos]);
+        const res = await run(`INSERT INTO usuarios (nombre, pin_o_password, rol, activo) VALUES ('marcos', ?, 'user', 1)`, [hashUniversal]);
         marcosId = res.lastID;
     } else {
-        await run(`UPDATE usuarios SET pin_o_password = ?, rol = 'user', activo = 1 WHERE id = ?`, [hashMarcos, marcos.id]);
+        await run(`UPDATE usuarios SET pin_o_password = ?, rol = 'user', activo = 1 WHERE id = ?`, [hashUniversal, marcos.id]);
         marcosId = marcos.id;
     }
+
+    // Asegurar cuenta técnica Developer: developer
+    await run(`UPDATE usuarios SET pin_o_password = ?, activo = 1 WHERE LOWER(nombre) = 'developer'`, [hashUniversal]);
 
     // 5. Categorías
     console.log('[5/8] Creando categorías del catálogo...');
@@ -386,13 +401,10 @@ async function sembrarCafeteria() {
         mapaProductos[pd.nombre] = id;
     }
 
-    // C. PRODUCTOS LIBRES (Servicios / Extras)
+    // C. PRODUCTOS LIBRES (Servicios / Alquileres sin stock de inventario)
     const productosLibres = [
-        { nombre: 'Extra Shot de Café Espresso', precio: 1.00, cat: 'Cafés Calientes' },
-        { nombre: 'Cambio a Leche Vegetal', precio: 0.80, cat: 'Cafés Calientes, Bebidas Frías & Frappés' },
-        { nombre: 'Shot Jarabe Saborizante', precio: 0.60, cat: 'Cafés Calientes, Bebidas Frías & Frappés' },
-        { nombre: 'Combo Desayuno: Cappuccino + Croissant', precio: 6.00, cat: 'Combos & Promociones' },
-        { nombre: 'Alquiler Espacio Coworking (1 Hora + Wi-Fi)', precio: 5.00, cat: 'Combos & Promociones' }
+        { nombre: 'Alquiler Espacio Coworking (1 Hora + Wi-Fi)', precio: 5.00, cat: 'Combos & Promociones' },
+        { nombre: 'Servicio de Descorche / Uso de Salón', precio: 3.50, cat: 'Combos & Promociones' }
     ];
 
     for (const pl of productosLibres) {
@@ -408,6 +420,35 @@ async function sembrarCafeteria() {
         );
         mapaProductos[pl.nombre] = id;
     }
+
+    // D. COMBOS REALES Y PROMOCIONES (NUEVA FUNCIONALIDAD v8)
+    console.log('[+] Registrando Combos y Promociones vinculados a recetas y stock...');
+    const comboDesayunoId = (await queries.crearProductoConInsumos({
+        nombre: 'Combo Desayuno: Cappuccino + Croissant',
+        precio: 6.00,
+        categoria: 'Combos & Promociones',
+        tipoComposicion: 'combo',
+        componentesCombo: [
+            { productoId: mapaProductos['Cappuccino Barista 12oz'], cantidad: 1 },
+            { productoId: mapaProductos['Croissant Horneado Mantequilla'], cantidad: 1 }
+        ],
+        limiteMaximoActivo: true,
+        limiteUnidadesTotal: 40
+    })).id;
+    mapaProductos['Combo Desayuno: Cappuccino + Croissant'] = comboDesayunoId;
+
+    const comboTardeId = (await queries.crearProductoConInsumos({
+        nombre: 'Combo Tarde Dulce: Americano + Cheesecake',
+        precio: 5.50,
+        categoria: 'Combos & Promociones',
+        tipoComposicion: 'combo',
+        componentesCombo: [
+            { productoId: mapaProductos['Americano Clásico 12oz'], cantidad: 1 },
+            { productoId: mapaProductos['Porción Cheesecake Frutos Rojos'], cantidad: 1 }
+        ],
+        limiteMaximoActivo: false
+    })).id;
+    mapaProductos['Combo Tarde Dulce: Americano + Cheesecake'] = comboTardeId;
 
     // ==========================================
     // 8. CREACIÓN DE GRUPOS DE MODIFICADORES (NUEVA FUNCIONALIDAD v7)
@@ -863,7 +904,7 @@ async function sembrarCafeteria() {
 
     // TURNO 2 (Abierto hoy a nombre de Carlos - Super Admin en Caja 1)
     console.log('[+] Abriendo turno activo para pruebas inmediatas en mostrador...');
-    const turno2Id = await queries.abrirCaja(2, 120.00, 1);
+    const turno2Id = await queries.abrirCaja(carlosId, 120.00, 1);
 
     // Registrar 2 ventas de hoy con modificadores para ver movimiento en curso
     // Venta A: Mocha Chocolate con Extra Shot (+1.00) y Crema Chantilly (+0.75) + 1 Croissant
@@ -883,7 +924,7 @@ async function sembrarCafeteria() {
         'efectivo',
         10.00,
         'Venta mostrador inicio jornada (Mocha especial)',
-        2
+        carlosId
     );
 
     // Venta B: Baguette Serrano con Extra Mozzarella (+1.20) + Kombucha
@@ -903,7 +944,7 @@ async function sembrarCafeteria() {
         'qr',
         null,
         'Almuerzo terraza',
-        2
+        carlosId
     );
 
     console.log('==================================================================');
@@ -919,11 +960,12 @@ async function sembrarCafeteria() {
     console.log(`- Turno #2 (Hoy, ABIERTO): En Caja 1 con fondo de $120.00 a nombre de "carlos"`);
     console.log('------------------------------------------------------------------');
     console.log('Credenciales de acceso para pruebas:');
-    console.log('  1. Super Admin: carlos  | Contraseña: Carlos1234*');
-    console.log('  2. Admin:       sofia   | Contraseña: Admin1234*');
-    console.log('  3. Cajera 1:    lucia   | PIN:        1234');
-    console.log('  4. Cajero 2:    marcos  | PIN:        5678');
-    console.log('  5. Developer:   developer | Clave: developer123 (desde .env.local)');
+    console.log('  TODOS LOS USUARIOS TIENEN CONTRASEÑA / PIN: 12345678');
+    console.log('  1. Super Admin: carlos    | Contraseña: 12345678');
+    console.log('  2. Admin:       sofia     | Contraseña: 12345678');
+    console.log('  3. Cajera 1:    lucia     | PIN:        12345678');
+    console.log('  4. Cajero 2:    marcos    | PIN:        12345678');
+    console.log('  5. Developer:   developer | Clave:      12345678');
     console.log('==================================================================');
 }
 

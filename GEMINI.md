@@ -25,7 +25,7 @@
   - `README.md`: Punto de entrada, estructura general y comandos rápidos.
   - `docs/`: Documentación técnica (`ARQUITECTURA.md`) y checklist de pruebas (`PRUEBAS.md`).
   - `database/database.js`: Inicialización de SQLite, activación de claves foráneas (`PRAGMA foreign_keys = ON`), modo WAL, timeout y ejecución automática de migraciones.
-  - `database/migraciones.js`: Sistema de migraciones versionado con `PRAGMA user_version`. Toda mutación al esquema se aplica de forma transaccional e idempotente (migraciones v1 a v7).
+  - `database/migraciones.js`: Sistema de migraciones versionado con `PRAGMA user_version`. Toda mutación al esquema se aplica de forma transaccional e idempotente (migraciones v1 a v8).
   - `server/queries.js`: Lógica de negocio y consultas con promesas nativas (`async/await`) usando `runQuery`, `getQuery`, `allQuery` y `transaccion()`.
   - `server/sesion.js`: Manejo de sesión JWT del servidor (crear, validar, renovar y destruir cookies HttpOnly `pos_session`).
   - `server/mailer.js`: Servicio SMTP (`nodemailer`) con plantillas HTML responsivas y adjuntos en background.
@@ -62,9 +62,19 @@
   - Reabrir una caja cerrada es una operación privilegiada y restringida.
   - Cada reapertura incrementa el contador `veces_reabierta` y anexa un registro al campo `historial_reaperturas` (usuario que autorizó/ejecutó, fecha/hora y motivo documentado).
 - **Inventario Híbrido y Costo Promedio Ponderado (NIC 2):**
-  - Soporta productos de tipo `'libre'`, `'directo'` (reventa / unitario) y `'receta'` (escandallo multi-insumo para cafetería/restaurante).
-  - Las compras de insumos actualizan el costo unitario mediante Costo Promedio Ponderado y recalculan en cascada el costo de los productos asociados.
+  - Soporta productos de tipo `'libre'`, `'directo'` (reventa / unitario), `'receta'` (escandallo multi-insumo para cafetería/restaurante) y `'combo'` (v8: paquetes de productos y promociones).
+  - Las compras de insumos y artículos directos actualizan el costo unitario mediante Costo Promedio Ponderado y recalculan en cascada el costo de recetas y de combos que los contengan.
   - `detalle_movimientos` congela el `precio_unitario` y `costo_unitario` al momento de la venta.
+- **Combos y Promociones con Descuento Real de Inventario, Límites y Vigencia (v8):**
+  - Soporte de tipo de producto `combo` vinculado a múltiples componentes mediante `combo_componentes`.
+  - Descomposición atómica de inventario: descuenta stock directo de componentes `directo`, o insumos de las recetas de los componentes `receta`, agrupando consumos de insumos compartidos.
+  - Costo ponderado automático: se calcula dinámicamente como la suma de los costos reales de sus componentes y se congela al vender.
+  - Modos de venta excluyentes:
+    - *Sin límite*: limitado únicamente por el cuello de botella del inventario físico disponible de sus componentes.
+    - *Cantidad máxima*: límite de unidades fijas definido por el administrador con contador regresivo automático (`limite_unidades_restante`) que bloquea el combo al agotarse.
+  - Disponibilidad reactiva en el POS: calcula el mínimo entre el inventario físico disponible y el límite de unidades restante.
+  - Vigencia temporal: control de fechas y horas (`fecha_inicio_vigencia` y `fecha_fin_vigencia`) opcionales para bloquear o habilitar promociones automáticamente.
+  - Auditoría y anulación atómica: `detalle_movimientos_combos` congela componentes y cantidades de venta, y las anulaciones restituyen tanto el stock de inventario como el contador de combos restantes.
 - **Grupos de Modificadores, Reemplazos y Complementos de Recetas (v7):**
   - Soporte de grupos configurables vinculados a productos (`grupos_modificadores` y `producto_grupos_modificadores`).
   - Tipo de selección `unica` (radio button) o `multiple` (checkbox), con bandera `es_obligatorio`.

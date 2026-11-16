@@ -543,6 +543,11 @@ export default function CajaPage() {
     const productosSinCategoria = productos.filter((p) => !p.categoria || p.categoria.trim() === '');
 
     const productosFiltrados = productos.filter((p) => {
+        // Si es un combo con vigencia y no está vigente, no mostrarlo en el mostrador del POS
+        if (p.tipo_inventario === 'combo' && p.esta_vigente === false) {
+            return false;
+        }
+
         if (categoriasSeleccionadas.length === 0) return true;
         const catsProd = (p.categoria || '')
             .split(',')
@@ -1225,10 +1230,15 @@ export default function CajaPage() {
                                                             {esLibre ? (
                                                                 'Disponible (Libre)'
                                                             ) : sinStock ? (
-                                                                <span>⚠️ Sin stock disponible {cantidadEnCarrito > 0 ? `(${cantidadEnCarrito} en pedido)` : ''}</span>
+                                                                <span>⚠️ {p.insumo_limitante ? p.insumo_limitante : 'Sin stock disponible'} {cantidadEnCarrito > 0 ? `(${cantidadEnCarrito} en pedido)` : ''}</span>
                                                             ) : (
                                                                 <span>
                                                                     Stock: <strong>{disponiblesRestantes}</strong> disponibles
+                                                                    {p.tipo_inventario === 'combo' && Number(p.limite_maximo_activo) === 1 && (
+                                                                        <span style={{ color: '#0369a1', marginLeft: '0.25rem' }}>
+                                                                            ({p.limite_unidades_restante} rest.)
+                                                                        </span>
+                                                                    )}
                                                                     {cantidadEnCarrito > 0 && (
                                                                         <span style={{ color: '#0369a1', marginLeft: '0.25rem' }}>
                                                                             (de {p.unidades_disponibles})

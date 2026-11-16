@@ -644,7 +644,32 @@ async function recalcularCostoProductoPorReceta(productoId) {
     );
     const costoActualizado = Number((calculo.nuevo_costo || 0).toFixed(4));
     await runQuery(`UPDATE productos SET costo = ? WHERE id = ?`, [costoActualizado, productoId]);
+    await recalcularCostoCombosQueContienenProducto(productoId);
     return costoActualizado;
+}
+
+// Recalcula el costo de un combo sumando el costo de sus componentes
+async function recalcularCostoCombo(comboId) {
+    const calculo = await getQuery(
+        `SELECT COALESCE(SUM(cc.cantidad * p.costo), 0) as nuevo_costo
+         FROM combo_componentes cc
+         INNER JOIN productos p ON cc.componente_producto_id = p.id
+         WHERE cc.combo_producto_id = ?`,
+        [comboId]
+    );
+    const costoActualizado = Number((calculo.nuevo_costo || 0).toFixed(4));
+    await runQuery(`UPDATE productos SET costo = ? WHERE id = ?`, [costoActualizado, comboId]);
+    return costoActualizado;
+}
+
+async function recalcularCostoCombosQueContienenProducto(productoId) {
+    const combosAfectados = await allQuery(
+        `SELECT DISTINCT combo_producto_id FROM combo_componentes WHERE componente_producto_id = ?`,
+        [productoId]
+    );
+    for (const c of combosAfectados) {
+        await recalcularCostoCombo(c.combo_producto_id);
+    }
 }
 
 // Compra de insumo con Costo Promedio Ponderado (CPP) y actualización en cascada de recetas
@@ -988,6 +1013,92 @@ async function crearProductoConInsumos({
             const costoFinal = await recalcularCostoProductoPorReceta(productoId);
             return { id: productoId, nombre: nombre.trim(), precio: precioValidado, costo: costoFinal, categoria: catFinal };
 
+        } else if (tipoComposicion === 'combo') {
+            const componentes = Array.isArray(arguments[0].componentesCombo) ? arguments[0].componentesCombo : [];
+            const componentesLimpios = componentes.filter((c) => c && c.productoId && Number(c.cantidad) > 0);
+            if (componentesLimpios.length === 0) {
+                throw new Error('Debes agregar al menos un producto componente con cantidad mayor a 0 para el combo.');
+            }
+            if (componentesLimpios.length > 20) {
+                throw new Error('Límite excedido: No se pueden agregar más de 20 componentes en un solo combo.');
+            }
+
+            const limiteActivo = arguments[0].limiteMaximoActivo ? 1 : 0;
+            let limiteTotal = null;
+            let limiteRestante = null;
+            if (limiteActivo) {
+                limiteTotal = Math.floor(numeroPositivo(arguments[0].limiteUnidadesTotal, 'La cantidad máxima de venta del combo'));
+                limiteRestante = limiteTotal;
+            }
+
+            const fechaInicio = arguments[0].fechaInicioVigencia && String(arguments[0].fechaInicioVigencia).trim() !== ''
+                ? String(arguments[0].fechaInicioVigencia).trim()
+                : null;
+            const fechaFin = arguments[0].fechaFinVigencia && String(arguments[0].fechaFinVigencia).trim() !== ''
+                ? String(arguments[0].fechaFinVigencia).trim()
+                : null;
+
+            if (fechaInicio && fechaFin && new Date(fechaInicio) > new Date(fechaFin)) {
+                throw new Error('La fecha y hora de inicio de vigencia no puede ser posterior a la fecha y hora final.');
+            }
+
+            const resProd = await runQuery(
+                `INSERT INTO productos (
+                    nombre, precio, costo, categoria, unidad_medida, tipo_inventario,
+                    stock, stock_minimo, fecha_vencimiento,
+                    limite_maximo_activo, limite_unidades_total, limite_unidades_restante,
+                    fecha_inicio_vigencia, fecha_fin_vigencia
+                ) VALUES (?, ?, 0, ?, 'unidades', 'combo', NULL, 0, NULL, ?, ?, ?, ?, ?)`,
+                [
+                    nombre.trim(),
+                    precioValidado,
+                    catFinal,
+                    limiteActivo,
+                    limiteTotal,
+                    limiteRestante,
+                    fechaInicio,
+                    fechaFin
+                ]
+            );
+            const comboId = resProd.lastID;
+
+            const componentesUnicos = new Set();
+            for (const comp of componentesLimpios) {
+                const compProdId = Number(comp.productoId);
+                if (compProdId === comboId) {
+                    throw new Error('Un combo no puede contenerse a sí mismo.');
+                }
+                if (componentesUnicos.has(compProdId)) {
+                    throw new Error(`El producto ID ${compProdId} está duplicado en los componentes del combo.`);
+                }
+                componentesUnicos.add(compProdId);
+
+                const productoComp = await getQuery(`SELECT id, nombre, tipo_inventario, costo FROM productos WHERE id = ? AND activo = 1`, [compProdId]);
+                if (!productoComp) {
+                    throw new Error(`El producto componente con ID ${compProdId} no existe o está inactivo.`);
+                }
+                if (productoComp.tipo_inventario === 'combo') {
+                    throw new Error(`El producto "${productoComp.nombre}" es un combo. No se permiten combos anidados.`);
+                }
+
+                const cantVal = numeroPositivo(comp.cantidad, `La cantidad del componente ${productoComp.nombre}`);
+                await runQuery(
+                    `INSERT INTO combo_componentes (combo_producto_id, componente_producto_id, cantidad)
+                     VALUES (?, ?, ?)`,
+                    [comboId, compProdId, cantVal]
+                );
+            }
+
+            const costoFinal = await recalcularCostoCombo(comboId);
+            return {
+                id: comboId,
+                nombre: nombre.trim(),
+                precio: precioValidado,
+                costo: costoFinal,
+                categoria: catFinal,
+                tipo_inventario: 'combo'
+            };
+
         } else {
             // Venta libre / servicio sin insumo
             const resProd = await runQuery(
@@ -1055,6 +1166,8 @@ async function registrarCompraProductoDirecto(productoId, cantidadComprada, cost
              WHERE id = ?`,
             [Number(nuevoStock.toFixed(4)), Number(nuevoCostoUnitario.toFixed(4)), vencimientoActualizado, productoId]
         );
+
+        await recalcularCostoCombosQueContienenProducto(productoId);
 
         return {
             productoId,
@@ -1264,7 +1377,7 @@ async function asignarModificadoresAProducto(productoId, grupoIds, adminId) {
 }
 
 async function obtenerProductos() {
-    const [productos, gruposModificadores, enlaces] = await Promise.all([
+    const [productos, gruposModificadores, enlaces, todosInsumos, recetasTodas, componentesCombos] = await Promise.all([
         allQuery(`
             SELECT p.*,
                    COUNT(r.id) as num_ingredientes,
@@ -1280,7 +1393,17 @@ async function obtenerProductos() {
             ORDER BY p.categoria, p.nombre
         `),
         obtenerGruposModificadores(true),
-        allQuery(`SELECT producto_id, grupo_id FROM producto_grupos_modificadores`)
+        allQuery(`SELECT producto_id, grupo_id FROM producto_grupos_modificadores`),
+        allQuery(`SELECT id, nombre, unidad_medida, stock_actual, costo_por_unidad FROM insumos WHERE activo = 1`),
+        allQuery(`SELECT producto_id, insumo_id, cantidad_requerida FROM recetas`),
+        allQuery(`
+            SELECT cc.combo_producto_id, cc.componente_producto_id, cc.cantidad,
+                   p.nombre as componente_nombre, p.tipo_inventario as componente_tipo,
+                   p.stock as componente_stock, p.costo as componente_costo
+            FROM combo_componentes cc
+            INNER JOIN productos p ON cc.componente_producto_id = p.id
+            WHERE p.activo = 1
+        `)
     ]);
 
     const mapaGrupos = new Map(gruposModificadores.map((g) => [g.id, g]));
@@ -1290,9 +1413,29 @@ async function obtenerProductos() {
         gruposPorProducto[e.producto_id].push(e.grupo_id);
     }
 
+    const mapaInsumos = new Map(todosInsumos.map((i) => [i.id, i]));
+    const recetasPorProducto = {};
+    for (const r of recetasTodas) {
+        if (!recetasPorProducto[r.producto_id]) recetasPorProducto[r.producto_id] = [];
+        recetasPorProducto[r.producto_id].push(r);
+    }
+
+    const componentesPorCombo = {};
+    for (const cc of componentesCombos) {
+        if (!componentesPorCombo[cc.combo_producto_id]) componentesPorCombo[cc.combo_producto_id] = [];
+        componentesPorCombo[cc.combo_producto_id].push(cc);
+    }
+
+    // Mapa base de productos indexados por ID
+    const mapaProductosBase = new Map(productos.map((p) => [p.id, p]));
+
+    const ahora = new Date();
+
     return productos.map((p) => {
         let unidadesDisponibles = null;
         let insumoLimitante = null;
+        let estaVigente = true;
+        let motivoNoVigente = null;
 
         if (p.tipo_inventario === 'libre') {
             unidadesDisponibles = Infinity;
@@ -1306,6 +1449,111 @@ async function obtenerProductos() {
                 insumoLimitante = p.limitante_nombre
                     ? `${p.limitante_nombre} (${p.limitante_stock} ${p.limitante_unidad} disponibles)`
                     : null;
+            }
+        } else if (p.tipo_inventario === 'combo') {
+            // Validar vigencia temporal si tiene fechas configuradas
+            if (p.fecha_inicio_vigencia) {
+                const fInicio = new Date(p.fecha_inicio_vigencia);
+                if (!isNaN(fInicio.getTime()) && ahora < fInicio) {
+                    estaVigente = false;
+                    motivoNoVigente = `Promoción inicia el ${fInicio.toLocaleString()}`;
+                }
+            }
+            if (p.fecha_fin_vigencia) {
+                const fFin = new Date(p.fecha_fin_vigencia);
+                if (!isNaN(fFin.getTime()) && ahora > fFin) {
+                    estaVigente = false;
+                    motivoNoVigente = `Promoción finalizó el ${fFin.toLocaleString()}`;
+                }
+            }
+
+            const componentes = componentesPorCombo[p.id] || [];
+            if (componentes.length === 0) {
+                unidadesDisponibles = 0;
+                insumoLimitante = 'Sin componentes definidos';
+            } else {
+                // Sumar consumo total de insumos y stock directo requeridos por 1 unidad de combo
+                const insumosRequeridosCombo = {};
+                const productosDirectosRequeridosCombo = {};
+
+                for (const comp of componentes) {
+                    const prodComp = mapaProductosBase.get(comp.componente_producto_id);
+                    const cantComp = Number(comp.cantidad || 0);
+                    if (!prodComp) continue;
+
+                    if (prodComp.tipo_inventario === 'directo') {
+                        productosDirectosRequeridosCombo[prodComp.id] = {
+                            productoId: prodComp.id,
+                            nombre: prodComp.nombre,
+                            stock: Number(prodComp.stock || 0),
+                            requerido: Number(((productosDirectosRequeridosCombo[prodComp.id]?.requerido || 0) + cantComp).toFixed(4))
+                        };
+                    } else if (prodComp.tipo_inventario === 'receta') {
+                        const recs = recetasPorProducto[prodComp.id] || [];
+                        for (const r of recs) {
+                            const insumo = mapaInsumos.get(r.insumo_id);
+                            if (!insumo) continue;
+                            const cantTotalInsumo = Number((cantComp * r.cantidad_requerida).toFixed(4));
+                            if (!insumosRequeridosCombo[r.insumo_id]) {
+                                insumosRequeridosCombo[r.insumo_id] = {
+                                    insumoId: r.insumo_id,
+                                    nombre: insumo.nombre,
+                                    unidad: insumo.unidad_medida,
+                                    stock: Number(insumo.stock_actual || 0),
+                                    requerido: 0
+                                };
+                            }
+                            insumosRequeridosCombo[r.insumo_id].requerido = Number(
+                                (insumosRequeridosCombo[r.insumo_id].requerido + cantTotalInsumo).toFixed(4)
+                            );
+                        }
+                    }
+                }
+
+                let maxPorInventario = Infinity;
+                let limitanteDetectado = null;
+
+                // Evaluar limitantes directos
+                for (const pId in productosDirectosRequeridosCombo) {
+                    const info = productosDirectosRequeridosCombo[pId];
+                    if (info.requerido > 0) {
+                        const posible = Math.max(0, Math.floor(info.stock / info.requerido));
+                        if (posible < maxPorInventario) {
+                            maxPorInventario = posible;
+                            limitanteDetectado = `${info.nombre} (${info.stock} disponibles)`;
+                        }
+                    }
+                }
+
+                // Evaluar limitantes de insumos
+                for (const iId in insumosRequeridosCombo) {
+                    const info = insumosRequeridosCombo[iId];
+                    if (info.requerido > 0) {
+                        const posible = Math.max(0, Math.floor(info.stock / info.requerido));
+                        if (posible < maxPorInventario) {
+                            maxPorInventario = posible;
+                            limitanteDetectado = `${info.nombre} (${info.stock} ${info.unidad} disponibles)`;
+                        }
+                    }
+                }
+
+                if (maxPorInventario === Infinity) maxPorInventario = 0;
+
+                // Aplicar restricción de límite máximo si está activo
+                if (Number(p.limite_maximo_activo) === 1) {
+                    const restante = Math.max(0, Math.floor(p.limite_unidades_restante ?? 0));
+                    unidadesDisponibles = Math.min(maxPorInventario, restante);
+                    if (restante <= 0) {
+                        insumoLimitante = 'Límite de venta alcanzado (0 combos restantes)';
+                    } else if (restante < maxPorInventario) {
+                        insumoLimitante = `Límite configurado (${restante} restantes)`;
+                    } else {
+                        insumoLimitante = limitanteDetectado;
+                    }
+                } else {
+                    unidadesDisponibles = maxPorInventario;
+                    insumoLimitante = limitanteDetectado;
+                }
             }
         }
 
@@ -1327,6 +1575,9 @@ async function obtenerProductos() {
             ...productoLimpio,
             unidades_disponibles: unidadesDisponibles,
             insumo_limitante: insumoLimitante,
+            esta_vigente: estaVigente,
+            motivo_no_vigente: motivoNoVigente,
+            componentes_combo: componentesPorCombo[p.id] || [],
             grupos_modificadores_ids: idsGrupos,
             grupos_modificadores: gruposAsignados
         };
@@ -1627,11 +1878,46 @@ async function registrarVentaCompleta(cajaId, items, metodoPago, montoRecibido =
         let montoTotal = 0;
         const itemsProcesados = [];
         const consumoAcumuladoInsumos = {};
+        const consumoAcumuladoDirecto = {};
 
         for (const itemAgrupado of mapaItemsAgrupados.values()) {
             const { productoId: prodId, modificadoresIds, cantidadTotal } = itemAgrupado;
             const prod = await getQuery(`SELECT * FROM productos WHERE id = ? AND activo = 1`, [prodId]);
             if (!prod) throw new Error(`Producto con ID ${prodId} no existe.`);
+
+            // Validar vigencia temporal en caso de combos
+            if (prod.tipo_inventario === 'combo') {
+                const ahora = new Date();
+                if (prod.fecha_inicio_vigencia) {
+                    const fInicio = new Date(prod.fecha_inicio_vigencia);
+                    if (!isNaN(fInicio.getTime()) && ahora < fInicio) {
+                        throw new Error(`La promoción "${prod.nombre}" aún no está vigente (inicia el ${fInicio.toLocaleString()}).`);
+                    }
+                }
+                if (prod.fecha_fin_vigencia) {
+                    const fFin = new Date(prod.fecha_fin_vigencia);
+                    if (!isNaN(fFin.getTime()) && ahora > fFin) {
+                        throw new Error(`La promoción "${prod.nombre}" ha finalizado (expiró el ${fFin.toLocaleString()}).`);
+                    }
+                }
+            }
+
+            // Cargar componentes si es combo
+            let componentesCombo = [];
+            if (prod.tipo_inventario === 'combo') {
+                componentesCombo = await allQuery(
+                    `SELECT cc.componente_producto_id, cc.cantidad,
+                            p.nombre as componente_nombre, p.tipo_inventario as componente_tipo,
+                            p.costo as componente_costo, p.stock as componente_stock
+                     FROM combo_componentes cc
+                     INNER JOIN productos p ON cc.componente_producto_id = p.id
+                     WHERE cc.combo_producto_id = ? AND p.activo = 1`,
+                    [prod.id]
+                );
+                if (componentesCombo.length === 0) {
+                    throw new Error(`El combo "${prod.nombre}" no tiene componentes válidos configurados.`);
+                }
+            }
 
             // Cargar receta base si corresponde
             let recetaBase = [];
@@ -1737,6 +2023,61 @@ async function registrarVentaCompleta(cajaId, items, metodoPago, montoRecibido =
                 });
             }
 
+            let componentesDetalleCombo = [];
+            // Si el producto es combo, descomponer recursivamente sus componentes en insumos y stock directo
+            if (prod.tipo_inventario === 'combo') {
+                let costoCalculadoCombo = 0;
+                for (const comp of componentesCombo) {
+                    const cantTotalComp = Number((comp.cantidad * cantidadTotal).toFixed(4));
+                    componentesDetalleCombo.push({
+                        componenteProductoId: comp.componente_producto_id,
+                        cantidadUnitaria: comp.cantidad,
+                        cantidadTotal: cantTotalComp,
+                        costoUnitario: Number(comp.componente_costo || 0)
+                    });
+                    costoCalculadoCombo += comp.cantidad * Number(comp.componente_costo || 0);
+
+                    if (comp.componente_tipo === 'directo') {
+                        // Acumular consumo de stock directo por componente
+                        if (!consumoAcumuladoDirecto[comp.componente_producto_id]) {
+                            consumoAcumuladoDirecto[comp.componente_producto_id] = {
+                                productoId: comp.componente_producto_id,
+                                nombre: comp.componente_nombre,
+                                cantidadTotalRequerida: 0
+                            };
+                        }
+                        consumoAcumuladoDirecto[comp.componente_producto_id].cantidadTotalRequerida = Number(
+                            (consumoAcumuladoDirecto[comp.componente_producto_id].cantidadTotalRequerida + cantTotalComp).toFixed(4)
+                        );
+                    } else if (comp.componente_tipo === 'receta') {
+                        // Descomponer en sus insumos
+                        const recComp = await allQuery(
+                            `SELECT r.insumo_id, r.cantidad_requerida, i.nombre, i.unidad_medida, i.costo_por_unidad
+                             FROM recetas r
+                             INNER JOIN insumos i ON r.insumo_id = i.id
+                             WHERE r.producto_id = ?`,
+                            [comp.componente_producto_id]
+                        );
+                        for (const ing of recComp) {
+                            const cantInsumoTotal = Number((ing.cantidad_requerida * cantTotalComp).toFixed(4));
+                            if (!consumoAcumuladoInsumos[ing.insumo_id]) {
+                                consumoAcumuladoInsumos[ing.insumo_id] = {
+                                    insumoId: ing.insumo_id,
+                                    nombre: ing.nombre,
+                                    unidad: ing.unidad_medida,
+                                    costoUnitario: Number(ing.costo_por_unidad || 0),
+                                    cantidadTotalRequerida: 0
+                                };
+                            }
+                            consumoAcumuladoInsumos[ing.insumo_id].cantidadTotalRequerida = Number(
+                                (consumoAcumuladoInsumos[ing.insumo_id].cantidadTotalRequerida + cantInsumoTotal).toFixed(4)
+                            );
+                        }
+                    }
+                }
+                costoUnitario = redondear2(costoCalculadoCombo);
+            }
+
             // Si el producto es receta, su costo unitario exacto es la suma de los insumos efectivos
             if (prod.tipo_inventario === 'receta') {
                 let costoCalculado = 0;
@@ -1775,7 +2116,9 @@ async function registrarVentaCompleta(cajaId, items, metodoPago, montoRecibido =
                 subtotal,
                 tipoInventario: prod.tipo_inventario,
                 modificadores: modificadoresDetalle,
-                modificadoresTexto: textoModificadores
+                modificadoresTexto: textoModificadores,
+                componentesCombo: componentesDetalleCombo,
+                limiteMaximoActivo: Number(prod.limite_maximo_activo) === 1
             });
         }
 
@@ -1814,7 +2157,7 @@ async function registrarVentaCompleta(cajaId, items, metodoPago, montoRecibido =
         );
         const movimientoId = movRes.lastID;
 
-        // 4. Descuento atómico de stock directo en productos y registro de detalle con modificadores
+        // 4. Descuento atómico de stock directo en productos y registro de detalle con modificadores y combos
         for (const det of itemsProcesados) {
             const rDet = await runQuery(
                 `INSERT INTO detalle_movimientos (movimiento_id, producto_id, cantidad, precio_unitario, costo_unitario, subtotal)
@@ -1841,6 +2184,36 @@ async function registrarVentaCompleta(cajaId, items, metodoPago, montoRecibido =
                 );
             }
 
+            // Si es combo, registrar auditoría histórica y descontar su límite si está activo
+            if (det.tipoInventario === 'combo') {
+                for (const comp of det.componentesCombo) {
+                    await runQuery(
+                        `INSERT INTO detalle_movimientos_combos (
+                            detalle_movimiento_id, componente_producto_id, cantidad_unitaria, cantidad_total, costo_unitario_congelado
+                        ) VALUES (?, ?, ?, ?, ?)`,
+                        [
+                            detalleMovimientoId,
+                            comp.componenteProductoId,
+                            comp.cantidadUnitaria,
+                            comp.cantidadTotal,
+                            comp.costoUnitario
+                        ]
+                    );
+                }
+
+                if (det.limiteMaximoActivo) {
+                    const rLim = await runQuery(
+                        `UPDATE productos
+                         SET limite_unidades_restante = ROUND(limite_unidades_restante - ?, 4)
+                         WHERE id = ? AND limite_unidades_restante >= ?`,
+                        [det.cantidad, det.productoId, det.cantidad]
+                    );
+                    if (rLim.changes === 0) {
+                        throw new Error(`Se ha agotado el límite de venta disponible para la promoción "${det.nombre}".`);
+                    }
+                }
+            }
+
             if (det.tipoInventario === 'directo') {
                 const r = await runQuery(
                     `UPDATE productos SET stock = ROUND(stock - ?, 4) WHERE id = ? AND stock >= ?`,
@@ -1849,6 +2222,20 @@ async function registrarVentaCompleta(cajaId, items, metodoPago, montoRecibido =
                 if (r.changes === 0) {
                     throw new Error(`Stock insuficiente para ${det.nombre}`);
                 }
+            }
+        }
+
+        // 4.1 Descuento atómico de stock directo consumido por componentes de combos
+        for (const pId in consumoAcumuladoDirecto) {
+            const info = consumoAcumuladoDirecto[pId];
+            const r = await runQuery(
+                `UPDATE productos SET stock = ROUND(stock - ?, 4) WHERE id = ? AND stock >= ?`,
+                [info.cantidadTotalRequerida, info.productoId, info.cantidadTotalRequerida]
+            );
+            if (r.changes === 0) {
+                throw new Error(
+                    `Stock insuficiente del componente "${info.nombre}" para armar el combo (se requieren ${info.cantidadTotalRequerida} unidades).`
+                );
             }
         }
 
@@ -2001,6 +2388,31 @@ async function anularMovimientoConPermiso(adminId, movimientoId, motivoAnulacion
         for (const det of detalles) {
             if (det.tipo_inventario === 'directo') {
                 await runQuery(`UPDATE productos SET stock = ROUND(stock + ?, 4) WHERE id = ?`, [det.cantidad, det.producto_id]);
+            } else if (det.tipo_inventario === 'combo') {
+                // Si tenía límite activo, restituir el contador restante
+                await runQuery(
+                    `UPDATE productos
+                     SET limite_unidades_restante = ROUND(limite_unidades_restante + ?, 4)
+                     WHERE id = ? AND limite_maximo_activo = 1`,
+                    [det.cantidad, det.producto_id]
+                );
+
+                // Revertir stock de los componentes que eran directos leyendo detalle_movimientos_combos
+                const componentesCombosVendidos = await allQuery(
+                    `SELECT dmc.*, p.tipo_inventario
+                     FROM detalle_movimientos_combos dmc
+                     INNER JOIN productos p ON dmc.componente_producto_id = p.id
+                     WHERE dmc.detalle_movimiento_id = ?`,
+                    [det.id]
+                );
+                for (const comp of componentesCombosVendidos) {
+                    if (comp.tipo_inventario === 'directo') {
+                        await runQuery(
+                            `UPDATE productos SET stock = ROUND(stock + ?, 4) WHERE id = ?`,
+                            [comp.cantidad_total, comp.componente_producto_id]
+                        );
+                    }
+                }
             }
         }
 
