@@ -141,6 +141,10 @@
   ```bash
   npm run update
   ```
+- **Cargar datos de prueba integrales (Seed v11 con Régimen Fiscal, Kardex Dual, Combos y Modificadores):**
+  ```bash
+  npm run seed
+  ```
 - **Despliegue con PM2:**
   ```bash
   pm2 start ecosystem.config.js
@@ -275,6 +279,7 @@ Cuando se clona o actualiza este repositorio en un equipo nuevo, el agente y el 
     - Cobros en efectivo, QR y pagos mixtos (`efectivo` + `qr`) con campo de descuento en ticket, validación en vivo, vista de `Historial del Turno` y anulación en línea en `app/caja/page.js`.
     - Creación de productos en `app/admin/page.js` con modalidades `directo` (stock propio y Kardex directo), `unitario` (relación 1 a 1 con insumo), `receta` (escandallo multi-insumo), `combo` y `libre`.
     - Formularios completos de registro de mermas de productos directos (`merma_producto_directo`) y de insumos (`merma_insumo`) con consulta de stock/CPP en vivo, cálculo de pérdida estimada, paso de confirmación explícita y visualización del resultado, integrados con el visor cronológico de Kardex y verificador de integridad en `app/admin/page.js`.
+    - Batería integral de 16 escenarios de verificación funcional documentada en `docs/PRUEBAS.md` cubriendo combos, modificadores, régimen fiscal, pagos mixtos y Kardex.
     - Suites de pruebas automatizadas (`scratch/test_migracion_v8_v9.js` y `scratch/test_ventas_v9.js`) con 121 verificaciones contables, de concurrencia, casos borde, exportaciones (CSV, XLSX de 10 hojas, PDF) y transporte simulado Nodemailer.
 - **Pendiente (Sujeto a entorno externo / hardware):**
   - Prueba con credenciales SMTP reales de un proveedor de correo externo (cuando se configuren `SMTP_USER` y `SMTP_PASS` reales en `.env.local`).

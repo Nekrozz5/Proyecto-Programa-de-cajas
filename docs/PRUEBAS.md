@@ -1,12 +1,12 @@
 # Checklist de Pruebas Funcionales y de Concurrencia
 
-Lista de verificación manual para validar arranque, seguridad, control de caja, stock atómico, arqueo ciego, recetas, modificadores, anulaciones, multicaja, reportes, notificaciones, blindaje multi-dispositivo y actualizaciones seguras.
+Lista de verificación manual para validar arranque, seguridad, control de caja, stock atómico, arqueo ciego, recetas, modificadores, combos, régimen fiscal, pagos mixtos, Kardex dual cronológico, anulaciones, multicaja, reportes, notificaciones y actualizaciones seguras.
 
 ---
 
 ## 1. Arranque y Migraciones
 - [ ] Cierra y vuelve a correr `npm run dev`. No debe haber errores rojos en la terminal.
-- [ ] Reinícialo una segunda vez: las migraciones no deben volver a ejecutarse ni arrojar errores (`PRAGMA user_version` controlado hasta v7).
+- [ ] Reinícialo una segunda vez: las migraciones no deben volver a ejecutarse ni arrojar errores (`PRAGMA user_version` controlado hasta v11).
 
 ## 2. Seguridad y Sesión
 - [ ] Inicia sesión con una clave correcta y luego con una incorrecta. Después de 5 fallos seguidos debe bloquear temporalmente por rate limiting.
@@ -58,8 +58,8 @@ Lista de verificación manual para validar arranque, seguridad, control de caja,
 - [ ] Intenta desactivar la única caja física activa del establecimiento: el sistema debe bloquear la operación para garantizar que siempre exista al menos una estación disponible.
 
 ## 9. Reportes y Exportación Multiformato
-- [ ] En `/admin`, ingresa a la sección de reportes y descarga el reporte en formato **Excel (`.xlsx`)**: verifica que contenga la hoja *Movimientos* con costos y precios unitarios congelados, y la hoja *Arqueos de Caja* con el balance de cada turno.
-- [ ] En la auditoría de un turno específico, haz clic en **"Exportar PDF"**: verifica que el documento se genere correctamente con el resumen financiero, balance de caja y tabla de movimientos.
+- [ ] En `/admin`, ingresa a la sección de reportes y descarga el reporte en formato **Excel (`.xlsx`)**: verifica que contenga las 10 hojas contables completas con costos congelados, prorrateo de descuentos y Kardex detallado.
+- [ ] En la auditoría de un turno específico, haz clic en **"Exportar PDF"**: verifica que el documento se genere correctamente con el resumen financiero, liquidación de impuestos (Débito IVA, IT, Crédito Fiscal) y tabla de movimientos.
 - [ ] Descarga el reporte en formato **CSV** y confirma que se abra con la estructura de columnas esperada.
 - [ ] Valida que los gráficos interactivos de Recharts en `/admin` (7 días, flujo por hora, top productos y métodos de pago) reflejen los datos reales de ventas sin incluir anulaciones.
 
@@ -81,8 +81,8 @@ Lista de verificación manual para validar arranque, seguridad, control de caja,
 
 ## 12. Grupos de Modificadores, Reemplazos y Complementos de Recetas (v7)
 - [ ] **Configuración en Administrador (`/admin`):**
-  - Crea un grupo de selección única obligatorio (ej. "Tipo de Leche") con una opción por defecto (Leche Entera) y opciones de reemplazo con recargo (ej. Leche de Almendras `+0.50 Bs`, reemplazando el insumo base).
-  - Crea un grupo de selección múltiple opcional (ej. "Extras y Siropes") con opciones de adición de insumos (ej. Extra Shot Café `+1.00 Bs`, Sirope Vainilla `+0.75 Bs`) y opciones operativas (ej. "Sin Azúcar", "Tostado").
+  - Crea un grupo de selección única obligatorio (ej. "Tipo de Leche") con una opción por defecto (Leche Entera) y opciones de reemplazo con recargo (ej. Leche de Almendras `+1.50 Bs`, reemplazando el insumo base).
+  - Crea un grupo de selección múltiple opcional (ej. "Extras y Siropes") con opciones de adición de insumos (ej. Extra Shot Café `+3.00 Bs`, Sirope Vainilla `+2.00 Bs`) y opciones operativas (ej. "Sin Azúcar", "Tostado").
   - Asigna los grupos al producto con receta (ej. "Cappuccino Barista").
 - [ ] **Venta y Selección Interactiva en Caja (`/caja`):**
   - Haz clic en el producto configurado: se debe desplegar el modal interactivo de personalización.
@@ -91,5 +91,28 @@ Lista de verificación manual para validar arranque, seguridad, control de caja,
   - Completa el cobro y anota el stock de los insumos antes y después: verifica que el insumo base reemplazado **no** se descuente, que el insumo sustituto sí se descuente en la proporción exacta y que el insumo extra también se descuente.
 - [ ] **Anulación y Rollback con Modificadores:**
   - Anula el ticket de la venta anterior: verifica que el sistema reintegre el insumo de reemplazo y el insumo extra según lo registrado en `detalle_movimientos_modificadores`, manteniendo el stock de la leche entera intacto.
-- [ ] **Filtrado Multi-Categoría en POS:**
-  - En la vista de mostrador (`/caja`), prueba activar varias categorías simultáneamente: comprueba que el listado de productos y los contadores se actualicen reactivamente y que el filtro se reinicie automáticamente tras registrar la venta.
+- [ ] **Filtrado Multi-Categoría y Buscador en POS:**
+  - En la vista de mostrador (`/caja`), prueba activar varias categorías simultáneamente o escribir en el buscador: comprueba que el listado de productos y los contadores se actualicen reactivamente y que el filtro se reinicie automáticamente tras registrar la venta.
+
+## 13. Combos y Promociones con Descuento Atómico de Inventario y Límites (v8)
+- [ ] **Creación de Combo:** En `/admin` (pestaña Combos), crea un combo que combine un producto directo y un producto por receta (ej. "Combo Desayuno" = Cappuccino + Croissant). Verifica que el costo del combo se calcule dinámicamente como la suma de los costos de sus componentes.
+- [ ] **Modo con Límite de Unidades:** Configura un combo con límite máximo activo de 5 unidades. Realiza ventas y confirma que el contador regresivo disminuya y que, al llegar a 0, el combo se bloquee automáticamente en el POS impidiendo sobreventas.
+- [ ] **Vigencia Temporal:** Configura una promoción con fecha de inicio futura: verifica que no aparezca habilitada en el POS hasta que se alcance dicha fecha.
+- [ ] **Descomposición Atómica y Anulación:** Vende un combo y comprueba que se descuenten tanto los componentes directos como los insumos de las recetas. Al anular el ticket, verifica que tanto el stock de los componentes como el contador de unidades restantes del combo se reintegren atómicamente.
+
+## 14. Régimen Tributario, Facturación y Snapshot Fiscal Inmutable (v9-v10)
+- [ ] **Configuración Contable:** En `/admin` (pestaña Configuración), conmuta entre Régimen Simplificado y Régimen General: comprueba que en Simplificado el sistema impida terminantemente emitir facturas fiscales.
+- [ ] **Venta con Factura en Régimen General:** En `/caja`, activa la casilla "Emitir Factura", introduce NIT y Razón Social: comprueba que el movimiento se guarde con `tipo_comprobante = 'factura'`, N° Factura y CUF, y con el snapshot fiscal de IVA (13%) e IT (3%) congelado en la fila.
+- [ ] **Inmutabilidad de Snapshot:** Cambia las tasas de IVA o IT en la configuración del negocio. Consulta las ventas anteriores y confirma que sus importes de IVA e IT históricos permanezcan intactos.
+- [ ] **Validación de Permisos en Backend:** Intenta emitir una factura desde una caja física o con un cajero que tenga deshabilitado el permiso fiscal (`habilita_respaldo_fiscal = 0` o `puede_registrar_respaldo_fiscal = 0`): el servidor debe rechazar la transacción con un error 400 descriptivo.
+
+## 15. Pagos Mixtos (Efectivo + QR) y Descuentos con Prorrateo de Centavos
+- [ ] **Pago Mixto Exacto:** En `/caja`, selecciona método de pago Mixto en una comanda de `30 Bs`. Ingresa `10 Bs` en efectivo y `20 Bs` por QR: verifica que la transacción se complete y que `movimientos_pagos` registre ambas filas vinculadas al mismo movimiento.
+- [ ] **Cambio sobre Porción en Efectivo:** En una comanda de `30 Bs` con `10 Bs` en efectivo y `20 Bs` en QR, ingresa un billete recibido de `50 Bs`: el sistema debe calcular el cambio de `40 Bs` (`50 - 10`), sin restar la porción cubierta por QR.
+- [ ] **Descuento Comercial y Prorrateo de Centavos:** Aplica un descuento de `5 Bs` a un ticket con 3 productos de precios distintos. En la base de datos o en el libro Excel (hoja *Detalle Ventas (CMV)*), verifica que el descuento se haya distribuido proporcionalmente entre las líneas y que la suma de ingresos netos coincida al centavo con el total cobrado.
+
+## 16. Kardex Cronológico Dual y Auditoría de Integridad (v11)
+- [ ] **Kardex de Productos Directos:** Registra compras, ventas y una merma de un producto directo. Abre la pestaña Kardex en `/admin` y verifica que cada fila refleje el `stock_resultante` y el `costo_promedio_resultante`.
+- [ ] **Kardex de Insumos Métricos:** Revisa el Kardex de un insumo medido en mililitros o gramos (ej. Café en grano o Leche). Confirma que los costos unitarios preserven hasta 6 decimales sin truncamientos a 0.
+- [ ] **Compras de Insumos con Respaldo Fiscal:** Registra una compra de insumos con proveedor, NIT y N° Factura: confirma que aparezca en el Kardex y sume al Crédito Fiscal IVA de la hoja *Resumen Contable* de Excel y del PDF.
+- [ ] **Auditoría Matemática Automática:** En la consola o ejecutando `npm run seed`, verifica que las funciones `verificarIntegridadKardexDirecto()` y `verificarIntegridadKardexInsumos()` reporten `integridadOk: true` con 0 descuadres.

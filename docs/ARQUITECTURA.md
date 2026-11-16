@@ -1,6 +1,6 @@
 # Arquitectura Técnica del Sistema
 
-Este documento describe la arquitectura global del sistema POS, su modelo de seguridad, la estructura de base de datos relacional con SQLite3, el flujo multicaja, el motor de modificadores y recetas, las notificaciones automáticas y las reglas financieras e inventariales implementadas.
+Este documento describe la arquitectura global del sistema POS y Control de Cajas, su modelo de seguridad, la base de datos relacional con SQLite3, el esquema de migraciones versionadas (v1 a v11), el motor tributario modular, los pagos mixtos, el Kardex cronológico dual (NIC 2), los combos, los modificadores de recetas, y el sistema de reportes y notificaciones.
 
 ---
 
@@ -10,11 +10,11 @@ Este documento describe la arquitectura global del sistema POS, su modelo de seg
 - **Base de Datos:** SQLite3 local (`sqlite3@^6.0.1`) con SQL nativo parametrizado (`?`) sin ORMs.
 - **Autenticación y Criptografía:** JWT firmado con `jose` (`^6.2.17`) en cookies `HttpOnly` (`pos_session`) y hash de contraseñas con `bcryptjs` (`^3.0.3`) (10 rondas de salt).
 - **Reportes y Visualización:**
-  - `exceljs` (`^4.4.0`): Generación en servidor de libros Excel `.xlsx` multi-hoja (*Movimientos* y *Arqueos de Caja*).
-  - `jspdf` (`^4.2.1`) y `jspdf-autotable` (`^5.0.9`): Generación en cliente de reportes PDF de balance y auditoría de turno.
+  - `exceljs` (`^4.4.0`): Generación en servidor de libros Excel `.xlsx` con 10 hojas contables y de auditoría.
+  - `jspdf` (`^4.2.1`) y `jspdf-autotable` (`^5.0.9`): Generación en cliente de reportes PDF de balance fiscal, arqueo ciego y auditoría de turno.
   - `recharts` (`^3.10.1`): Gráficos interactivos de métricas financieras en `/admin` (flujo horario, balance de 7 días, top productos, métodos de pago).
-- **Servicio de Notificaciones:** `nodemailer` (`^10.5.0`): Envíos SMTP en segundo plano con plantilla HTML ejecutiva y adjuntos en caliente.
-- **Despliegue, Actualización y Respaldos:** PM2 (`ecosystem.config.js`), actualización automatizada (`scripts/update.js`) y respaldo en caliente con `VACUUM INTO` (`scripts/backup.js`).
+- **Servicio de Notificaciones:** `nodemailer` (`^10.5.0`): Envíos SMTP en segundo plano con plantilla HTML ejecutiva y libro Excel `.xlsx` adjunto en caliente.
+- **Despliegue, Actualización y Respaldos:** PM2 (`ecosystem.config.js`), actualización automatizada (`scripts/update.js`) y respaldo atómico en caliente con `VACUUM INTO` (`scripts/backup.js`).
 - **Blindaje Multi-Dispositivo:** Protección contra traducción automática del DOM (`notranslate` en `app/layout.js`) y encabezados `Cache-Control: no-store` en `/api/caja` para evitar datos obsoletos entre máquinas o tras actualizaciones.
 
 ---
@@ -35,28 +35,31 @@ Este documento describe la arquitectura global del sistema POS, su modelo de seg
 - **Instalación Inicial Protegida (`SETUP_TOKEN`):** El endpoint de instalación inicial exige un token preconfigurado en las variables de entorno, validado con comparación en tiempo constante (`crypto.timingSafeEqual`) para evitar fugas de información por canales laterales.
 - **Validación Temprana de Secretos (`instrumentation.js`):** El hook `register()` de Next.js ejecuta `validarOAbortarArranque()` al iniciar el servidor de producción. Si algún secreto obligatorio está ausente, usa valores por defecto o no cumple la longitud mínima requerida, aborta el arranque de inmediato con un mensaje descriptivo sin romper la fase de compilación (`next build`).
 - **Cuenta `developer`:** Sincronizada automáticamente con la variable `DEVELOPER_PASSWORD` y oculta de los listados estándar de usuarios.
+- **Permisos Fiscales Granulares:** Validación estricta en backend de permisos fiscales por negocio (`emite_factura`, `usa_respaldo_compras_egresos`), por operador (`puede_registrar_respaldo_fiscal`) y por estación física (`habilita_respaldo_fiscal`).
 
 ---
 
-## 3. Base de Datos y Migraciones (`database/`)
+## 3. Base de Datos y Sistema de Migraciones Versionadas (`database/`)
 
 - **`database/database.js`:**
   - Ruta de base de datos configurable mediante `DATABASE_PATH` (por defecto `./caja.db`).
   - Activa `PRAGMA foreign_keys = ON`.
   - Modo WAL (`PRAGMA journal_mode = WAL`) para lecturas concurrentes sin bloqueo.
   - `PRAGMA busy_timeout = 5000` para tolerar esperas de escritura sin bloqueos prematuros.
-- **`database/migraciones.js`:**
-  - Control de versión del esquema mediante `PRAGMA user_version` (versiones v1 a v7).
-  - Migraciones atómicas e idempotentes ejecutadas automáticamente al arrancar la aplicación.
-  - Historial de migraciones:
-    - **v1:** Esquema inicial de cajas, usuarios, movimientos y detalle de movimientos.
-    - **v2:** Módulo de insumos, compras con CPP, recetas de ensamble y configuración de negocio.
-    - **v3:** Auditoría de reaperturas (`veces_reabierta`, `historial_reaperturas`).
-    - **v4:** Tabla `categorias` para catálogo estructurado.
-    - **v5:** Normalización multicategoría de productos y saneamiento de registros legados.
-    - **v6:** Tabla `cajas_fisicas` (estaciones de cobro física/terminales) con vinculación a `cajas` (turnos).
-    - **v7:** Tablas `grupos_modificadores`, `modificadores_opciones`, `producto_grupos_modificadores` y `detalle_movimientos_modificadores` para personalización de recetas (reemplazos y complementos extra).
-- **Transacciones atómicas:** Toda mutación de negocio (aperturas, ventas, egresos, compras, cierres, anulaciones, modificadores) corre dentro de `transaccion(async (dbTx) => { ... })` en `server/queries.js`.
+  - Respaldo automático preventivo previo a la aplicación de cualquier migración (`VACUUM INTO backups/caja-pre-migracion-vX-a-vY-*.db`).
+- **`database/migraciones.js` (Evolución v1 a v11):**
+  - **v1:** Esquema base de cajas, usuarios, movimientos y detalle de movimientos.
+  - **v2:** Módulo de insumos, compras con CPP, recetas de ensamble y configuración de negocio.
+  - **v3:** Auditoría de reaperturas (`veces_reabierta`, `historial_reaperturas`).
+  - **v4:** Tabla `categorias` para catálogo interactivo estructurado.
+  - **v5:** Normalización multicategoría de productos y saneamiento de registros legados.
+  - **v6:** Tabla `cajas_fisicas` (estaciones de cobro física/terminales) con vinculación a `cajas` (turnos).
+  - **v7:** Tablas `grupos_modificadores`, `modificadores_opciones`, `producto_grupos_modificadores` y `detalle_movimientos_modificadores` para complementos y reemplazos de recetas.
+  - **v8:** Soporte de tipo de producto `combo`, tablas `combo_componentes` y `detalle_movimientos_combos`, límites de unidades máximas (`limite_unidades_restante`) y control de vigencia temporal.
+  - **v9:** Régimen tributario modular (`configuracion_negocio`), normalización de pagos en `movimientos_pagos`, compras con respaldo fiscal en `movimientos_insumos`, y creación del Kardex de productos directos (`movimientos_productos_directos`).
+  - **v10:** Snapshot fiscal por movimiento (`regimen_tributario`, alícuotas e importes IVA/IT congelados), parámetro configurable `it_base` ('todas_las_ventas' | 'solo_facturadas'), `costo_promedio_resultante` en productos directos y saldos de apertura.
+  - **v11:** Kardex cronológico dual enriquecido en `movimientos_insumos` (`stock_resultante`, `costo_promedio_resultante`, `monto_total_compra`), reparación de costos métricos truncados y recálculo en cascada de recetas/combos, e índice multicaja por estación física (`idx_cajas_abiertas_fisica`).
+- **Transacciones atómicas:** Toda mutación de negocio corre dentro de `transaccion(async (dbTx) => { ... })` en `server/queries.js`.
 - **Manejo de fechas:** Almacenadas en UTC (`CURRENT_TIMESTAMP`) y proyectadas con `'localtime'` en SQLite para filtros y visualización del usuario (`datetime(fecha_hora, 'localtime')`).
 
 ---
@@ -64,79 +67,94 @@ Este documento describe la arquitectura global del sistema POS, su modelo de seg
 ## 4. Reglas de Negocio Principales
 
 ### A. Estaciones Físicas de Caja y N° de Turno (`cajas_fisicas` vs `cajas`)
-- **Estación Física (`cajas_fisicas`):** Representa el punto de cobro o terminal física en el local (ej. "Caja 1 - Principal", "Caja 2 - Barra").
-- **Turno de Operación (`cajas`):** Representa una sesión contable con cajero asignado, fondo inicial y balance de cierre.
-- **Multicaja simultánea:** El sistema permite que múltiples cajas físicas operen con turnos abiertos en simultáneo por distintos cajeros.
-- **Regla de mínimo:** El negocio debe contar con al menos 1 caja física activa. No se puede desactivar la última terminal disponible.
-- **Baja lógica protegida:** No se permite desactivar una caja física si tiene un turno actualmente abierto. Se utiliza baja lógica (`activa = 0`) para preservar históricos de ventas y arqueos.
+- **Estación Física (`cajas_fisicas`):** Representa el punto de cobro físico (ej. "Caja 1 - Barra", "Caja 2 - Terraza").
+- **Turno de Operación (`cajas`):** Representa una sesión contable correlativa con cajero asignado, fondo inicial y balance de cierre.
+- **Multicaja simultánea:** Múltiples cajas físicas pueden operar con turnos abiertos en paralelo por distintos cajeros.
+- **Regla de mínimo y baja lógica:** Se requiere al menos 1 caja física activa. No se puede desactivar una terminal con un turno abierto en curso.
 
 ### B. Arqueo Ciego e Inyecciones de Efectivo
-- Solo se registran ventas y egresos en cajas con estado `'abierta'`.
-- Al cerrar turno, el cajero ingresa `efectivo_real` sin ver previamente `efectivo_esperado`.
-- Fórmula contable de arqueo:
+- Ventas y egresos restringidos exclusivamente a cajas en estado `'abierta'`.
+- Conteo a ciegas al cerrar turno (`efectivo_real`) sin ver previamente `efectivo_esperado`.
+- Fórmula contable de arqueo físico:
   ```text
   efectivo_esperado = monto_inicial + ingresos_efectivo (ventas + inyecciones de cambio) - egresos_efectivo
   diferencia_efectivo = efectivo_real - efectivo_esperado
   ```
-- **Inyecciones de sencillo (`ingreso_efectivo`):** Aumentan el efectivo físico esperado en cajón sin sumarse a las ventas de productos ni alterar los márgenes de utilidad.
+- **Inyecciones de sencillo (`ingreso_efectivo`):** Aumentan el dinero físico esperado en cajón sin sumarse a las ventas ni alterar las utilidades operativas.
 - **Cobros por QR:** Se concilian aparte (`qr_esperado`) sin mezclarse con el dinero físico del cajón.
-- **Reaperturas auditadas:** Reabrir una caja cerrada es una operación restringida que incrementa `veces_reabierta` y anexa un registro inmutable a `historial_reaperturas` (usuario responsable, fecha/hora y motivo documentado).
 
-### C. Inventario Híbrido y Costo Promedio Ponderado (NIC 2)
-- Modalidades de producto:
-  - `'libre'`: Sin control de inventario (servicios, productos abiertos).
-  - `'directo'`: Producto unitario de reventa con descuento atómico (`UPDATE ... WHERE stock >= ?`).
-  - `'receta'`: Escandallo multi-insumo que descuenta insumos proporcionalmente y calcula disponibilidad dinámica en base al insumo limitante.
-- Las compras de insumos actualizan el costo unitario mediante **Costo Promedio Ponderado (CPP)** y recalculan en cascada el costo de todos los productos y recetas asociados.
-- `detalle_movimientos` congela `precio_unitario` y `costo_unitario` en el momento exacto de la venta para garantizar precisión histórica en reportes, métricas y reintegración por anulación.
+### C. Régimen Tributario Modular y Snapshot Fiscal (v9-v11)
+- **Modalidades de Régimen:**
+  - `simplificado_control_interno`: IVA = 0, IT = 0. Prohibición estricta de emitir facturas tanto en frontend como en backend.
+  - `regimen_general`: Alícuotas configurables (`iva_porcentaje = 13%`, `it_porcentaje = 3%`), base del IT configurable (`it_base = 'todas_las_ventas'` o `'solo_facturadas'`), y emisión de facturas con NIT, razón social y CUF.
+- **Inmutabilidad Tributaria (Snapshot Fiscal):** Cada venta y egreso congela sus parámetros fiscales (`regimen_tributario`, `iva_porcentaje`, `it_porcentaje`, `iva_monto`, `it_monto`) en la fila de `movimientos`, garantizando que reportes históricos nunca se alteren ante futuros cambios de alícuotas o de régimen tributario.
 
-### D. Grupos de Modificadores, Reemplazos y Complementos de Recetas (v7)
-- **Grupos Configurables (`grupos_modificadores`):**
-  - Vinculables a uno o varios productos del catálogo (`producto_grupos_modificadores`).
-  - `tipo_seleccion`: `'unica'` (comportamiento de radio button, ej. tipo de leche o temperatura) o `'multiple'` (comportamiento de checkbox, ej. siropes, toppings o salsas extra).
-  - `es_obligatorio`: Cuando es verdadero, el POS exige seleccionar una opción antes de permitir agregar el producto al carrito.
+### D. Pagos Mixtos Flexibles (Efectivo + QR)
+- **Fuente de verdad:** `movimientos_pagos` almacena el desglose por método de pago para cada venta.
+- **Cálculo de cambio:** Cuando un cliente realiza un pago mixto (ej. Total 30 Bs: 10 Bs efectivo + 20 Bs QR) y entrega un billete mayor (ej. 20 Bs para la porción en efectivo), el sistema calcula el cambio (10 Bs) exclusivamente sobre la parte en efectivo.
+
+### E. Kardex Cronológico Dual y NIC 2 (Costo Promedio Ponderado)
+- **Kardex de Productos Directos (`movimientos_productos_directos`):** Registra `inventario_inicial`, `compra`, `venta`, `merma`, `reingreso_anulacion` y `ajuste`, manteniendo `stock_resultante` y `costo_promedio_resultante`.
+- **Kardex de Insumos de Receta (`movimientos_insumos`):** Registra todos los consumos por ventas de recetas, combos, compras y mermas. Preserva hasta 6 decimales de precisión en el costo unitario de insumos métricos (ej. `0.0015 Bs/ml`).
+- **Auditoría Matemática de Integridad:** Las funciones `verificarIntegridadKardexDirecto()` y `verificarIntegridadKardexInsumos()` comprueban algebraicamente que la sumatoria histórica de movimientos coincida exactamente con el stock actual y el último saldo de Kardex, detectando cualquier inconsistencia con 0 descuadres tolerados.
+
+### F. Combos y Promociones (v8)
+- Productos de tipo `combo` vinculados a múltiples componentes mediante `combo_componentes`.
+- **Descomposición atómica:** Al venderse un combo, el sistema descuenta el stock directo de los componentes unitarios, o los insumos de las recetas de los componentes de receta, agrupando consumos de ingredientes repetidos.
+- **Costeo dinámico en cascada:** El costo del combo es la suma exacta de los costos unitarios de sus componentes al momento de la venta y se congela en `detalle_movimientos`.
+- **Modos de venta:**
+  - *Sin límite:* La disponibilidad se determina por el cuello de botella de los insumos y productos que lo componen.
+  - *Con límite regresivo:* Límite de unidades fijas (`limite_unidades_restante`) que descuenta automáticamente y bloquea el combo al agotarse.
+- **Vigencia temporal:** Control de fecha y hora de inicio y fin para campañas promocionales.
+- **Auditoría y Anulación:** `detalle_movimientos_combos` congela los componentes y cantidades vendidas, permitiendo restituir el stock y el contador de combos restantes al anular el ticket.
+
+### G. Grupos de Modificadores, Reemplazos y Complementos de Recetas (v7)
+- **Grupos configurables (`grupos_modificadores`):** Selección `unica` (radio button) o `multiple` (checkbox), con indicador de obligatoriedad (`es_obligatorio`).
 - **Opciones de Modificador (`modificadores_opciones`):**
-  - **Reemplazos de Insumos (`insumo_reemplazado_id`):** Al elegir una opción que reemplaza un ingrediente (ej. Leche entera -> Leche de almendras o avena), el sistema descuenta de la receta el insumo base y añade el insumo de reemplazo (`insumo_id`) en la cantidad definida, recalculando el costo total de la línea de forma precisa.
-  - **Adiciones de Insumos:** Opciones sin reemplazo que definen `insumo_id` y `cantidad_insumo` descuentan stock adicional (ej. shot extra de café, queso extra).
-  - **Modificadores Operativos:** Opciones sin insumo vinculado (ej. "Tostado", "Sin azúcar", "Poco hielo") que permiten personalizar la comanda y, si corresponde, aplicar recargos de precio.
-  - **Precio Adicional (`precio_adicional`):** Se suma al precio base del producto en la línea de venta.
-- **Congelamiento y Trazabilidad (`detalle_movimientos_modificadores`):**
-  - Cada modificación seleccionada se registra con `precio_adicional`, `costo_adicional`, insumo consumido e insumo sustituido congelados.
-  - En caso de **anulación de venta**, la transacción repone exactamente los insumos consumidos según el detalle de modificadores registrado, independientemente de si la receta o los modificadores cambiaron después.
+  - **Reemplazos de Insumos (`insumo_reemplazado_id`):** Resta el insumo original de la receta y consume el insumo sustituto en la cantidad indicada (ej. Leche entera -> Almendras / Deslactosada), recalculando el costo total de la línea de forma atómica.
+  - **Adiciones de Insumos:** Consumen insumos extra (ej. Extra shot de espresso, crema chantilly).
+  - **Modificadores Operativos:** Sin insumo vinculado (ej. "Tostado", "Sin azúcar").
+  - **Precio adicional (`precio_adicional`):** Se adiciona al precio unitario base del producto.
+- **Trazabilidad y Congelamiento (`detalle_movimientos_modificadores`):** Congela precio y costo adicional por cada opción para garantizar restitución exacta en caso de anulación.
 
-### E. Cálculos Financieros
-- `Ventas Totales = SUM(subtotal)` de ventas completadas (incluye precios base y recargos por modificadores).
-- `Costo Total de Ventas = SUM(cantidad * costo_unitario)` (costos congelados que incluyen insumos base y complementos netos).
+### H. Cálculos Financieros y Prorrateo de Descuentos
+- `Ventas Totales = SUM(monto)` de movimientos completados de venta.
+- `Costo Total de Ventas (CMV) = SUM(cantidad * costo_unitario)` con costos congelados.
 - `Ganancia Bruta = Ventas Totales - Costo Total de Ventas`.
 - `Flujo Neto Operativo = Ganancia Bruta - Total Egresos`.
+- **Prorrateo Exacto de Descuentos:** En tickets con descuento, el sistema distribuye proporcionalmente el descuento entre las líneas de venta (`detalle_movimientos`) y absorbe cualquier residuo fraccionario en la última línea, garantizando matemáticamente que:
+  $$\sum \text{ingresos\_netos\_producto} \equiv \text{Ventas Totales}$$
+  $$\sum \text{ganancia\_producto} \equiv \text{Ganancia Bruta}$$
 
 ---
 
 ## 5. Servicio de Notificaciones por Correo (`server/mailer.js`)
 
-- **Envío en Segundo Plano:** Al cerrarse un turno mediante `cerrarCaja` en `/api/caja`, se despacha una tarea asíncrona de notificación que no bloquea la respuesta HTTP al cajero.
-- **Contenido Ejecutivo:**
-  - Datos de cabecera: Nombre de la estación física, N° de Turno correlativo, cajero responsable y horario de apertura/cierre.
-  - Resumen financiero: Ventas en Efectivo, Cobros QR, Inyecciones de Sencillo y Total Egresos.
-  - Tarjeta de Arqueo destacada: Efectivo Esperado vs. Contado Real, con indicación visual de Estado (Cuadrado exacto, Sobrante o Faltante).
+- **Despacho Asíncrono en Segundo Plano:** Al cerrarse un turno mediante `cerrarCaja` en `/api/caja`, se despacha la notificación SMTP sin bloquear la respuesta HTTP al cajero.
+- **Plantilla Ejecutiva Responsiva:** Estación física, turno, cajero, balance de ventas (Efectivo vs. QR), inyección de sencillo, egresos y tarjeta destacada con la diferencia de arqueo (cuadrado, sobrante o faltante).
 - **Adjunto Oficial Excel:** Genera en caliente con `exceljs` el libro oficial (`Reporte_Turno_XX.xlsx`) y lo anexa al correo electrónico.
-- **Resiliencia:** Si las credenciales SMTP no están configuradas o el servidor de correo no responde, el cierre de caja concluye exitosamente en la base de datos y se registra una advertencia en el log del servidor.
-- **Control Administrativo:**
-  - El panel `/admin` muestra el estado de configuración del servicio de correo.
-  - Permite enviar un correo de prueba de diagnóstico.
-  - Permite reenviar bajo demanda el reporte oficial por correo de cualquier turno previamente cerrado.
+- **Control Administrativo:** Diagnóstico SMTP con envío de prueba y reenvío bajo demanda de cualquier turno previo en `/admin`.
 
 ---
 
-## 6. Respaldos Atómicos y Actualizaciones Seguras
+## 6. Reportes Contables y Auditoría (Excel 10 Hojas y PDF Fiscal)
 
-- **Respaldos Atómicos (`scripts/backup.js`):**
-  - `npm run backup` ejecuta `VACUUM INTO` sobre la base de datos activa (copia atómica en caliente sin detener el POS ni interrumpir ventas).
-  - Guarda el archivo en la carpeta `backups/` con marca de tiempo local y purga automáticamente copias antiguas manteniendo las últimas `MAX_BACKUPS_LOCAL` (30 por defecto).
-- **Actualización Segura Automatizada (`scripts/update.js`):**
-  - `npm run update` ejecuta un ciclo de actualización seguro en 5 pasos:
-    1. Respaldo preventivo obligatorio de `caja.db`.
-    2. Descarga de código limpio (`git pull --ff-only`).
-    3. Instalación de dependencias reproducibles (`npm ci`).
-    4. Compilación de producción (`next build`).
-    5. Reinicio automático del servicio en PM2 si estuviera activo.
+- **Libro Excel `.xlsx` (`server/queries.js` con `exceljs`):** Servido desde `GET /api/reportes?formato=xlsx`:
+  1. *Movimientos:* Registro cronológico completo de ingresos y egresos.
+  2. *Arqueos de Caja:* Historial de turnos, diferencias y conciliación.
+  3. *Detalle Ventas (CMV):* Ventas línea por línea con costos congelados y descuento prorrateado.
+  4. *Rentabilidad por Producto:* Unidades vendidas, ingresos netos, costo total y margen porcentual.
+  5. *Compras y Mermas:* Entradas con crédito fiscal y salidas por desperdicio.
+  6. *Inventario Kardex:* Resumen consolidado de existencias y valorización.
+  7. *Kardex Productos:* Trazabilidad cronológica de productos directos.
+  8. *Kardex Insumos:* Trazabilidad cronológica de insumos con saldos acumulados.
+  9. *Historial Anulaciones:* Auditoría de tickets cancelados con responsable y motivo.
+  10. *Resumen Contable:* Balance general y liquidación impositiva.
+- **Reporte PDF de Auditoría de Caja (`app/admin/exportarPDF.js` con `jspdf`):** Resumen financiero de la caja auditada, desglose por método de pago, liquidación de impuestos (Débito IVA, IT, Crédito Fiscal IVA en compras/egresos), arqueo ciego y detalle de movimientos.
+
+---
+
+## 7. Respaldos Atómicos y Actualizaciones Seguras
+
+- **Respaldos Atómicos (`scripts/backup.js`):** `npm run backup` ejecuta `VACUUM INTO` sobre la base de datos activa (copia en caliente atómica sin interrumpir el servicio) y aplica purga local según `MAX_BACKUPS_LOCAL` (30 copias por defecto).
+- **Actualización Segura Automatizada (`scripts/update.js`):** `npm run update` ejecuta un ciclo seguro de 5 fases: respaldo preventivo de `caja.db`, descarga limpia con `git pull --ff-only`, instalación reproducible con `npm ci`, compilación con `next build` y reinicio automático de PM2 si estuviera activo.
