@@ -1064,21 +1064,231 @@ async function registrarCompraProductoDirecto(productoId, cantidadComprada, cost
     });
 }
 
-async function obtenerProductos() {
-    const productos = await allQuery(`
-        SELECT p.*,
-               COUNT(r.id) as num_ingredientes,
-               MIN(i.stock_actual / NULLIF(r.cantidad_requerida, 0)) as min_disponible,
-               i.nombre as limitante_nombre,
-               i.stock_actual as limitante_stock,
-               i.unidad_medida as limitante_unidad
-        FROM productos p
-        LEFT JOIN recetas r ON p.id = r.producto_id
-        LEFT JOIN insumos i ON r.insumo_id = i.id
-        WHERE p.activo = 1
-        GROUP BY p.id
-        ORDER BY p.categoria, p.nombre
+// ==========================================
+// 3.5 GESTIÓN DE MODIFICADORES, REEMPLAZOS Y COMPLEMENTOS
+// ==========================================
+async function obtenerGruposModificadores(soloActivos = true) {
+    const filtro = soloActivos ? 'WHERE g.activo = 1' : '';
+    const grupos = await allQuery(`
+        SELECT g.*
+        FROM grupos_modificadores g
+        ${filtro}
+        ORDER BY g.id ASC
     `);
+
+    if (grupos.length === 0) return [];
+
+    const opciones = await allQuery(`
+        SELECT o.*,
+               i.nombre as insumo_nombre, i.unidad_medida as insumo_unidad, i.costo_por_unidad as insumo_costo, i.stock_actual as insumo_stock,
+               ir.nombre as insumo_reemplazado_nombre, ir.unidad_medida as insumo_reemplazado_unidad
+        FROM modificadores_opciones o
+        LEFT JOIN insumos i ON o.insumo_id = i.id
+        LEFT JOIN insumos ir ON o.insumo_reemplazado_id = ir.id
+        WHERE o.activo = 1
+        ORDER BY o.es_default DESC, o.id ASC
+    `);
+
+    const mapaOpciones = {};
+    for (const op of opciones) {
+        if (!mapaOpciones[op.grupo_id]) mapaOpciones[op.grupo_id] = [];
+        mapaOpciones[op.grupo_id].push({
+            id: op.id,
+            grupo_id: op.grupo_id,
+            nombre: op.nombre,
+            insumo_id: op.insumo_id,
+            cantidad_insumo: Number(op.cantidad_insumo || 0),
+            precio_adicional: Number(op.precio_adicional || 0),
+            insumo_reemplazado_id: op.insumo_reemplazado_id,
+            es_default: Number(op.es_default) === 1,
+            insumo_nombre: op.insumo_nombre || null,
+            insumo_unidad: op.insumo_unidad || null,
+            insumo_costo: Number(op.insumo_costo || 0),
+            insumo_stock: op.insumo_stock !== null ? Number(op.insumo_stock) : null,
+            insumo_reemplazado_nombre: op.insumo_reemplazado_nombre || null,
+            insumo_reemplazado_unidad: op.insumo_reemplazado_unidad || null
+        });
+    }
+
+    return grupos.map((g) => ({
+        id: g.id,
+        nombre: g.nombre,
+        tipo_seleccion: g.tipo_seleccion,
+        es_obligatorio: Number(g.es_obligatorio) === 1,
+        activo: Number(g.activo) === 1,
+        opciones: mapaOpciones[g.id] || []
+    }));
+}
+
+async function crearGrupoModificadores(datos, adminId) {
+    const ejecutor = await obtenerUsuarioPorId(adminId);
+    if (!ejecutor || !esRolAdministrativo(ejecutor.rol)) {
+        throw new Error('Permiso denegado: solo un Administrador puede crear grupos de complementos.');
+    }
+
+    const nombreLimpio = String(datos.nombre || '').trim();
+    if (!nombreLimpio || nombreLimpio.length < 2) {
+        throw new Error('Debes ingresar un nombre válido para el grupo de complementos (mínimo 2 caracteres).');
+    }
+
+    const tipoSeleccion = datos.tipoSeleccion === 'multiple' ? 'multiple' : 'unica';
+    const esObligatorio = datos.esObligatorio ? 1 : 0;
+    const opciones = Array.isArray(datos.opciones) ? datos.opciones : [];
+
+    return await enTransaccion(async () => {
+        const res = await runQuery(
+            `INSERT INTO grupos_modificadores (nombre, tipo_seleccion, es_obligatorio, activo)
+             VALUES (?, ?, ?, 1)`,
+            [nombreLimpio, tipoSeleccion, esObligatorio]
+        );
+        const grupoId = res.lastID;
+
+        for (const op of opciones) {
+            if (!op || !String(op.nombre || '').trim()) continue;
+            const opNombre = String(op.nombre).trim();
+            const precioAdicional = redondear2(numeroNoNegativo(op.precioAdicional ?? 0, 'El precio adicional'));
+            const cantidadInsumo = redondear2(numeroNoNegativo(op.cantidadInsumo ?? 0, 'La cantidad de insumo'));
+            const insumoId = op.insumoId ? Number(op.insumoId) : null;
+            const insumoReemplazadoId = op.insumoReemplazadoId ? Number(op.insumoReemplazadoId) : null;
+            const esDefault = op.esDefault ? 1 : 0;
+
+            await runQuery(
+                `INSERT INTO modificadores_opciones (grupo_id, nombre, insumo_id, cantidad_insumo, precio_adicional, insumo_reemplazado_id, es_default, activo)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, 1)`,
+                [grupoId, opNombre, insumoId, cantidadInsumo, precioAdicional, insumoReemplazadoId, esDefault]
+            );
+        }
+
+        return grupoId;
+    });
+}
+
+async function actualizarGrupoModificadores(grupoId, datos, adminId) {
+    const ejecutor = await obtenerUsuarioPorId(adminId);
+    if (!ejecutor || !esRolAdministrativo(ejecutor.rol)) {
+        throw new Error('Permiso denegado: solo un Administrador puede modificar grupos de complementos.');
+    }
+
+    const idNum = Number(grupoId);
+    if (!Number.isFinite(idNum) || idNum <= 0) {
+        throw new Error('ID de grupo de modificador inválido.');
+    }
+
+    const nombreLimpio = String(datos.nombre || '').trim();
+    if (!nombreLimpio || nombreLimpio.length < 2) {
+        throw new Error('Debes ingresar un nombre válido para el grupo (mínimo 2 caracteres).');
+    }
+
+    const tipoSeleccion = datos.tipoSeleccion === 'multiple' ? 'multiple' : 'unica';
+    const esObligatorio = datos.esObligatorio ? 1 : 0;
+    const opciones = Array.isArray(datos.opciones) ? datos.opciones : [];
+
+    return await enTransaccion(async () => {
+        await runQuery(
+            `UPDATE grupos_modificadores
+             SET nombre = ?, tipo_seleccion = ?, es_obligatorio = ?
+             WHERE id = ?`,
+            [nombreLimpio, tipoSeleccion, esObligatorio, idNum]
+        );
+
+        // Desactivar opciones anteriores del grupo
+        await runQuery(`UPDATE modificadores_opciones SET activo = 0 WHERE grupo_id = ?`, [idNum]);
+
+        for (const op of opciones) {
+            if (!op || !String(op.nombre || '').trim()) continue;
+            const opNombre = String(op.nombre).trim();
+            const precioAdicional = redondear2(numeroNoNegativo(op.precioAdicional ?? 0, 'El precio adicional'));
+            const cantidadInsumo = redondear2(numeroNoNegativo(op.cantidadInsumo ?? 0, 'La cantidad de insumo'));
+            const insumoId = op.insumoId ? Number(op.insumoId) : null;
+            const insumoReemplazadoId = op.insumoReemplazadoId ? Number(op.insumoReemplazadoId) : null;
+            const esDefault = op.esDefault ? 1 : 0;
+
+            if (op.id) {
+                await runQuery(
+                    `UPDATE modificadores_opciones
+                     SET nombre = ?, insumo_id = ?, cantidad_insumo = ?, precio_adicional = ?,
+                         insumo_reemplazado_id = ?, es_default = ?, activo = 1
+                     WHERE id = ? AND grupo_id = ?`,
+                    [opNombre, insumoId, cantidadInsumo, precioAdicional, insumoReemplazadoId, esDefault, op.id, idNum]
+                );
+            } else {
+                await runQuery(
+                    `INSERT INTO modificadores_opciones (grupo_id, nombre, insumo_id, cantidad_insumo, precio_adicional, insumo_reemplazado_id, es_default, activo)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, 1)`,
+                    [idNum, opNombre, insumoId, cantidadInsumo, precioAdicional, insumoReemplazadoId, esDefault]
+                );
+            }
+        }
+
+        return true;
+    });
+}
+
+async function eliminarGrupoModificadores(grupoId, adminId) {
+    const ejecutor = await obtenerUsuarioPorId(adminId);
+    if (!ejecutor || !esRolAdministrativo(ejecutor.rol)) {
+        throw new Error('Permiso denegado: solo un Administrador puede eliminar grupos de complementos.');
+    }
+    const idNum = Number(grupoId);
+    return await enTransaccion(async () => {
+        await runQuery(`UPDATE grupos_modificadores SET activo = 0 WHERE id = ?`, [idNum]);
+        await runQuery(`UPDATE modificadores_opciones SET activo = 0 WHERE grupo_id = ?`, [idNum]);
+        await runQuery(`DELETE FROM producto_grupos_modificadores WHERE grupo_id = ?`, [idNum]);
+        return true;
+    });
+}
+
+async function asignarModificadoresAProducto(productoId, grupoIds, adminId) {
+    const ejecutor = await obtenerUsuarioPorId(adminId);
+    if (!ejecutor || !esRolAdministrativo(ejecutor.rol)) {
+        throw new Error('Permiso denegado: solo un Administrador puede asignar modificadores.');
+    }
+    const prodId = Number(productoId);
+    if (!Number.isFinite(prodId) || prodId <= 0) {
+        throw new Error('ID de producto inválido.');
+    }
+    const idsValidados = Array.isArray(grupoIds)
+        ? grupoIds.map(Number).filter((id) => Number.isFinite(id) && id > 0)
+        : [];
+
+    return await enTransaccion(async () => {
+        await runQuery(`DELETE FROM producto_grupos_modificadores WHERE producto_id = ?`, [prodId]);
+        for (const gId of idsValidados) {
+            await runQuery(
+                `INSERT OR IGNORE INTO producto_grupos_modificadores (producto_id, grupo_id) VALUES (?, ?)`,
+                [prodId, gId]
+            );
+        }
+        return true;
+    });
+}
+
+async function obtenerProductos() {
+    const [productos, gruposModificadores, enlaces] = await Promise.all([
+        allQuery(`
+            SELECT p.*,
+                   COUNT(r.id) as num_ingredientes,
+                   MIN(i.stock_actual / NULLIF(r.cantidad_requerida, 0)) as min_disponible,
+                   i.nombre as limitante_nombre,
+                   i.stock_actual as limitante_stock,
+                   i.unidad_medida as limitante_unidad
+            FROM productos p
+            LEFT JOIN recetas r ON p.id = r.producto_id
+            LEFT JOIN insumos i ON r.insumo_id = i.id
+            WHERE p.activo = 1
+            GROUP BY p.id
+            ORDER BY p.categoria, p.nombre
+        `),
+        obtenerGruposModificadores(true),
+        allQuery(`SELECT producto_id, grupo_id FROM producto_grupos_modificadores`)
+    ]);
+
+    const mapaGrupos = new Map(gruposModificadores.map((g) => [g.id, g]));
+    const gruposPorProducto = {};
+    for (const e of enlaces) {
+        if (!gruposPorProducto[e.producto_id]) gruposPorProducto[e.producto_id] = [];
+        gruposPorProducto[e.producto_id].push(e.grupo_id);
+    }
 
     return productos.map((p) => {
         let unidadesDisponibles = null;
@@ -1099,6 +1309,11 @@ async function obtenerProductos() {
             }
         }
 
+        const idsGrupos = gruposPorProducto[p.id] || [];
+        const gruposAsignados = idsGrupos
+            .map((id) => mapaGrupos.get(id))
+            .filter(Boolean);
+
         const {
             num_ingredientes,
             min_disponible,
@@ -1111,7 +1326,9 @@ async function obtenerProductos() {
         return {
             ...productoLimpio,
             unidades_disponibles: unidadesDisponibles,
-            insumo_limitante: insumoLimitante
+            insumo_limitante: insumoLimitante,
+            grupos_modificadores_ids: idsGrupos,
+            grupos_modificadores: gruposAsignados
         };
     });
 }
@@ -1357,7 +1574,7 @@ async function registrarVentaCompleta(cajaId, items, metodoPago, montoRecibido =
         throw new Error('El usuario que registra la venta es obligatorio.');
     }
 
-    // 1. Validar cantidad positiva de cada ítem y agrupar por productoId sumando cantidades
+    // 1. Validar ítems y agrupar por (productoId + modificadores) sumando cantidades
     const mapaItemsAgrupados = new Map();
     for (const item of items) {
         if (!item || item.productoId === undefined || item.productoId === null) {
@@ -1368,8 +1585,25 @@ async function registrarVentaCompleta(cajaId, items, metodoPago, montoRecibido =
             throw new Error('ID de producto inválido.');
         }
         const cant = numeroPositivo(item.cantidad, `La cantidad del producto ID ${prodId}`);
-        const acumulado = mapaItemsAgrupados.get(prodId) || 0;
-        mapaItemsAgrupados.set(prodId, Number((acumulado + cant).toFixed(4)));
+
+        // Normalizar modificadores ordenados numéricamente
+        const modsNormalizados = Array.isArray(item.modificadores)
+            ? item.modificadores
+                .map((m) => (typeof m === 'object' && m !== null ? Number(m.id || m.opcionId) : Number(m)))
+                .filter((id) => Number.isFinite(id) && id > 0)
+                .sort((a, b) => a - b)
+            : [];
+
+        const claveAgrupacion = `${prodId}__${modsNormalizados.join('_')}`;
+        if (!mapaItemsAgrupados.has(claveAgrupacion)) {
+            mapaItemsAgrupados.set(claveAgrupacion, {
+                productoId: prodId,
+                modificadoresIds: modsNormalizados,
+                cantidadTotal: 0
+            });
+        }
+        const agrupado = mapaItemsAgrupados.get(claveAgrupacion);
+        agrupado.cantidadTotal = Number((agrupado.cantidadTotal + cant).toFixed(4));
     }
 
     return await enTransaccion(async () => {
@@ -1394,37 +1628,141 @@ async function registrarVentaCompleta(cajaId, items, metodoPago, montoRecibido =
         const itemsProcesados = [];
         const consumoAcumuladoInsumos = {};
 
-        for (const [prodId, cantidadTotal] of mapaItemsAgrupados.entries()) {
+        for (const itemAgrupado of mapaItemsAgrupados.values()) {
+            const { productoId: prodId, modificadoresIds, cantidadTotal } = itemAgrupado;
             const prod = await getQuery(`SELECT * FROM productos WHERE id = ? AND activo = 1`, [prodId]);
             if (!prod) throw new Error(`Producto con ID ${prodId} no existe.`);
 
+            // Cargar receta base si corresponde
+            let recetaBase = [];
             if (prod.tipo_inventario === 'receta') {
-                const receta = await allQuery(
+                recetaBase = await allQuery(
                     `SELECT r.insumo_id, r.cantidad_requerida, i.nombre, i.stock_actual, i.unidad_medida, i.costo_por_unidad
                      FROM recetas r
                      INNER JOIN insumos i ON r.insumo_id = i.id
                      WHERE r.producto_id = ?`,
                     [prod.id]
                 );
-
-                for (const ing of receta) {
-                    const requeridoTotalItem = Number((ing.cantidad_requerida * cantidadTotal).toFixed(4));
-                    if (!consumoAcumuladoInsumos[ing.insumo_id]) {
-                        consumoAcumuladoInsumos[ing.insumo_id] = {
-                            insumoId: ing.insumo_id,
-                            nombre: ing.nombre,
-                            unidad: ing.unidad_medida,
-                            costoUnitario: ing.costo_por_unidad,
-                            cantidadTotalRequerida: 0
-                        };
-                    }
-                    consumoAcumuladoInsumos[ing.insumo_id].cantidadTotalRequerida = Number(
-                        (consumoAcumuladoInsumos[ing.insumo_id].cantidadTotalRequerida + requeridoTotalItem).toFixed(4)
-                    );
-                }
             }
 
-            const precioUnitario = redondear2(prod.precio);
+            // Validar y cargar modificadores
+            let opcionesModificadores = [];
+            if (modificadoresIds.length > 0) {
+                const placeholders = modificadoresIds.map(() => '?').join(',');
+                opcionesModificadores = await allQuery(
+                    `SELECT o.*, g.nombre as grupo_nombre, g.tipo_seleccion, g.es_obligatorio,
+                            i.nombre as insumo_nombre, i.stock_actual as insumo_stock, i.costo_por_unidad as insumo_costo, i.unidad_medida as insumo_unidad,
+                            ir.costo_por_unidad as insumo_reemplazado_costo, ir.nombre as insumo_reemplazado_nombre
+                     FROM modificadores_opciones o
+                     INNER JOIN grupos_modificadores g ON o.grupo_id = g.id
+                     LEFT JOIN insumos i ON o.insumo_id = i.id
+                     LEFT JOIN insumos ir ON o.insumo_reemplazado_id = ir.id
+                     WHERE o.id IN (${placeholders}) AND o.activo = 1 AND g.activo = 1`,
+                    modificadoresIds
+                );
+            }
+
+            // Insumos efectivos por unidad de producto
+            const mapaInsumosPorUnidad = new Map();
+            for (const ing of recetaBase) {
+                mapaInsumosPorUnidad.set(ing.insumo_id, {
+                    insumoId: ing.insumo_id,
+                    cantidad: ing.cantidad_requerida,
+                    nombre: ing.nombre,
+                    unidad: ing.unidad_medida,
+                    costoUnitario: Number(ing.costo_por_unidad || 0)
+                });
+            }
+
+            let precioUnitario = redondear2(prod.precio);
+            let costoUnitario = Number(prod.costo || 0);
+            const modificadoresDetalle = [];
+            const textoModificadores = [];
+
+            for (const modOp of opcionesModificadores) {
+                const recargo = redondear2(modOp.precio_adicional || 0);
+                precioUnitario = redondear2(precioUnitario + recargo);
+                textoModificadores.push(
+                    recargo > 0 ? `${modOp.nombre} (+Bs ${recargo.toFixed(2)})` : modOp.nombre
+                );
+
+                let costoDelta = 0;
+                if (modOp.insumo_id) {
+                    const cantMod = Number(modOp.cantidad_insumo || 0);
+                    const costoInsumoMod = Number(modOp.insumo_costo || 0);
+
+                    if (modOp.insumo_reemplazado_id) {
+                        // Reemplazo: quitar o sustituir el insumo base
+                        const cantReemplazada = mapaInsumosPorUnidad.has(modOp.insumo_reemplazado_id)
+                            ? mapaInsumosPorUnidad.get(modOp.insumo_reemplazado_id).cantidad
+                            : cantMod;
+                        const costoReemplazado = Number(modOp.insumo_reemplazado_costo || 0);
+
+                        mapaInsumosPorUnidad.delete(modOp.insumo_reemplazado_id);
+                        const cantEfectiva = cantMod > 0 ? cantMod : cantReemplazada;
+                        mapaInsumosPorUnidad.set(modOp.insumo_id, {
+                            insumoId: modOp.insumo_id,
+                            cantidad: cantEfectiva,
+                            nombre: modOp.insumo_nombre,
+                            unidad: modOp.insumo_unidad,
+                            costoUnitario: costoInsumoMod
+                        });
+                        costoDelta = Number((cantEfectiva * costoInsumoMod - cantReemplazada * costoReemplazado).toFixed(4));
+                    } else {
+                        // Extra / Adición
+                        const actual = mapaInsumosPorUnidad.get(modOp.insumo_id);
+                        if (actual) {
+                            actual.cantidad = Number((actual.cantidad + cantMod).toFixed(4));
+                        } else {
+                            mapaInsumosPorUnidad.set(modOp.insumo_id, {
+                                insumoId: modOp.insumo_id,
+                                cantidad: cantMod,
+                                nombre: modOp.insumo_nombre,
+                                unidad: modOp.insumo_unidad,
+                                costoUnitario: costoInsumoMod
+                            });
+                        }
+                        costoDelta = Number((cantMod * costoInsumoMod).toFixed(4));
+                    }
+                }
+
+                modificadoresDetalle.push({
+                    modificadorOpcionId: modOp.id,
+                    nombre: modOp.nombre,
+                    precioAdicional: recargo,
+                    costoAdicional: costoDelta,
+                    insumoId: modOp.insumo_id,
+                    cantidadInsumo: modOp.cantidad_insumo,
+                    insumoReemplazadoId: modOp.insumo_reemplazado_id
+                });
+            }
+
+            // Si el producto es receta, su costo unitario exacto es la suma de los insumos efectivos
+            if (prod.tipo_inventario === 'receta') {
+                let costoCalculado = 0;
+                for (const ins of mapaInsumosPorUnidad.values()) {
+                    costoCalculado += ins.cantidad * ins.costoUnitario;
+                }
+                costoUnitario = redondear2(costoCalculado);
+            }
+
+            // Acumular consumo total de insumos para este producto (multiplicado por cantidadTotal)
+            for (const ins of mapaInsumosPorUnidad.values()) {
+                const requeridoTotalItem = Number((ins.cantidad * cantidadTotal).toFixed(4));
+                if (!consumoAcumuladoInsumos[ins.insumoId]) {
+                    consumoAcumuladoInsumos[ins.insumoId] = {
+                        insumoId: ins.insumoId,
+                        nombre: ins.nombre,
+                        unidad: ins.unidad,
+                        costoUnitario: ins.costoUnitario,
+                        cantidadTotalRequerida: 0
+                    };
+                }
+                consumoAcumuladoInsumos[ins.insumoId].cantidadTotalRequerida = Number(
+                    (consumoAcumuladoInsumos[ins.insumoId].cantidadTotalRequerida + requeridoTotalItem).toFixed(4)
+                );
+            }
+
             const subtotal = redondear2(precioUnitario * cantidadTotal);
             montoTotal = redondear2(montoTotal + subtotal);
 
@@ -1433,9 +1771,11 @@ async function registrarVentaCompleta(cajaId, items, metodoPago, montoRecibido =
                 nombre: prod.nombre,
                 cantidad: cantidadTotal,
                 precioUnitario,
-                costoUnitario: Number(prod.costo || 0),
+                costoUnitario,
                 subtotal,
-                tipoInventario: prod.tipo_inventario
+                tipoInventario: prod.tipo_inventario,
+                modificadores: modificadoresDetalle,
+                modificadoresTexto: textoModificadores
             });
         }
 
@@ -1474,13 +1814,32 @@ async function registrarVentaCompleta(cajaId, items, metodoPago, montoRecibido =
         );
         const movimientoId = movRes.lastID;
 
-        // 4. Descuento atómico de stock directo en productos
+        // 4. Descuento atómico de stock directo en productos y registro de detalle con modificadores
         for (const det of itemsProcesados) {
-            await runQuery(
+            const rDet = await runQuery(
                 `INSERT INTO detalle_movimientos (movimiento_id, producto_id, cantidad, precio_unitario, costo_unitario, subtotal)
                  VALUES (?, ?, ?, ?, ?, ?)`,
                 [movimientoId, det.productoId, det.cantidad, det.precioUnitario, det.costoUnitario, det.subtotal]
             );
+            const detalleMovimientoId = rDet.lastID;
+
+            for (const mod of det.modificadores) {
+                await runQuery(
+                    `INSERT INTO detalle_movimientos_modificadores (
+                        detalle_movimiento_id, modificador_opcion_id, nombre, precio_adicional, costo_adicional, insumo_id, cantidad_insumo, insumo_reemplazado_id
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+                    [
+                        detalleMovimientoId,
+                        mod.modificadorOpcionId,
+                        mod.nombre,
+                        mod.precioAdicional,
+                        mod.costoAdicional,
+                        mod.insumoId,
+                        mod.cantidadInsumo,
+                        mod.insumoReemplazadoId
+                    ]
+                );
+            }
 
             if (det.tipoInventario === 'directo') {
                 const r = await runQuery(
@@ -1493,7 +1852,7 @@ async function registrarVentaCompleta(cajaId, items, metodoPago, montoRecibido =
             }
         }
 
-        // 5. Descuento atómico de stock_actual en insumos (recetas) y registro con movimiento_id
+        // 5. Descuento atómico de stock_actual en insumos (recetas y modificadores) y registro con movimiento_id
         for (const insumoId in consumoAcumuladoInsumos) {
             const info = consumoAcumuladoInsumos[insumoId];
             const r = await runQuery(
@@ -1517,7 +1876,15 @@ async function registrarVentaCompleta(cajaId, items, metodoPago, montoRecibido =
             montoTotal,
             metodoPago,
             montoRecibido: recibidoFinal,
-            cambio
+            cambio,
+            items: itemsProcesados.map((it) => ({
+                productoId: it.productoId,
+                nombre: it.nombre,
+                cantidad: it.cantidad,
+                precioUnitario: it.precioUnitario,
+                subtotal: it.subtotal,
+                modificadoresTexto: it.modificadoresTexto
+            }))
         };
     });
 }
@@ -2229,5 +2596,10 @@ module.exports = {
     generarReporteCSV,
     generarReporteExcel,
     sanitizarTextoCSV,
-    obtenerDatosCierreParaNotificacion
+    obtenerDatosCierreParaNotificacion,
+    obtenerGruposModificadores,
+    crearGrupoModificadores,
+    actualizarGrupoModificadores,
+    eliminarGrupoModificadores,
+    asignarModificadoresAProducto
 };

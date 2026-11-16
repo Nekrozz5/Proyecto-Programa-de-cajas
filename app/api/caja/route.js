@@ -39,7 +39,12 @@ import {
     crearInsumo,
     registrarCompraInsumo,
     registrarMermaInsumo,
-    asignarIngredienteReceta
+    asignarIngredienteReceta,
+    obtenerGruposModificadores,
+    crearGrupoModificadores,
+    actualizarGrupoModificadores,
+    eliminarGrupoModificadores,
+    asignarModificadoresAProducto
 } from '../../../server/queries';
 import {
     NOMBRE_COOKIE_SESION,
@@ -103,6 +108,7 @@ export async function GET(request) {
                 movimientos: [],
                 desglosePagos: [],
                 productos: [],
+                gruposModificadores: [],
                 insumos: [],
                 prediccionInsumos: []
             }, { headers: HEADERS_SIN_CACHE });
@@ -122,14 +128,15 @@ export async function GET(request) {
         // Listado completo de usuarios solo para roles administrativos; un cajero recibe la misma lista mínima pública
         const usuarios = esAdmin ? await obtenerUsuarios() : await obtenerCajerosParaLogin();
 
-        const [cajaUsuario, cajasAbiertas, cajasFisicas, historialCajas, productos, insumos, prediccionInsumos] = await Promise.all([
+        const [cajaUsuario, cajasAbiertas, cajasFisicas, historialCajas, productos, insumos, prediccionInsumos, gruposModificadores] = await Promise.all([
             obtenerCajaAbierta(usuarioSesion.id),
             obtenerCajasAbiertas(),
             obtenerCajasFisicas(!esAdmin),
             obtenerHistorialCajas(),
             obtenerProductos(),
             esAdmin ? obtenerInsumos() : Promise.resolve([]),
-            esAdmin ? obtenerPrediccionComprasInsumos() : Promise.resolve([])
+            esAdmin ? obtenerPrediccionComprasInsumos() : Promise.resolve([]),
+            obtenerGruposModificadores(!esAdmin)
         ]);
 
         const cajaActiva = cajaUsuario || (cajasAbiertas.length > 0 ? cajasAbiertas[0] : null);
@@ -149,6 +156,7 @@ export async function GET(request) {
                 movimientos: [],
                 desglosePagos: [],
                 productos,
+                gruposModificadores,
                 insumos,
                 usuarios,
                 categorias,
@@ -178,6 +186,7 @@ export async function GET(request) {
             movimientos,
             desglosePagos,
             productos,
+            gruposModificadores,
             insumos,
             usuarios,
             categorias,
@@ -436,6 +445,30 @@ export async function POST(request) {
                 body.unidadReceta || null
             );
             return NextResponse.json({ ok: true, receta: res });
+        }
+
+        if (accion === 'crear_grupo_modificador') {
+            await exigirUsuarioSesion(request, ROLES_ADMIN);
+            const id = await crearGrupoModificadores(body, usuarioSesion.id);
+            return NextResponse.json({ ok: true, grupoId: id });
+        }
+
+        if (accion === 'actualizar_grupo_modificador') {
+            await exigirUsuarioSesion(request, ROLES_ADMIN);
+            await actualizarGrupoModificadores(Number(body.grupoId), body, usuarioSesion.id);
+            return NextResponse.json({ ok: true });
+        }
+
+        if (accion === 'eliminar_grupo_modificador') {
+            await exigirUsuarioSesion(request, ROLES_ADMIN);
+            await eliminarGrupoModificadores(Number(body.grupoId), usuarioSesion.id);
+            return NextResponse.json({ ok: true });
+        }
+
+        if (accion === 'asignar_modificadores_producto') {
+            await exigirUsuarioSesion(request, ROLES_ADMIN);
+            await asignarModificadoresAProducto(Number(body.productoId), body.grupoIds, usuarioSesion.id);
+            return NextResponse.json({ ok: true });
         }
 
         return NextResponse.json({ error: 'Acción no reconocida' }, { status: 400 });

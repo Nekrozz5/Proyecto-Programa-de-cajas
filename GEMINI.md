@@ -25,7 +25,7 @@
   - `README.md`: Punto de entrada, estructura general y comandos rápidos.
   - `docs/`: Documentación técnica (`ARQUITECTURA.md`) y checklist de pruebas (`PRUEBAS.md`).
   - `database/database.js`: Inicialización de SQLite, activación de claves foráneas (`PRAGMA foreign_keys = ON`), modo WAL, timeout y ejecución automática de migraciones.
-  - `database/migraciones.js`: Sistema de migraciones versionado con `PRAGMA user_version`. Toda mutación al esquema se aplica de forma transaccional e idempotente (migraciones v1 a v6).
+  - `database/migraciones.js`: Sistema de migraciones versionado con `PRAGMA user_version`. Toda mutación al esquema se aplica de forma transaccional e idempotente (migraciones v1 a v7).
   - `server/queries.js`: Lógica de negocio y consultas con promesas nativas (`async/await`) usando `runQuery`, `getQuery`, `allQuery` y `transaccion()`.
   - `server/sesion.js`: Manejo de sesión JWT del servidor (crear, validar, renovar y destruir cookies HttpOnly `pos_session`).
   - `server/mailer.js`: Servicio SMTP (`nodemailer`) con plantillas HTML responsivas y adjuntos en background.
@@ -33,7 +33,7 @@
   - `instrumentation.js`: Gancho de arranque de Next.js para validación temprana de seguridad.
   - `scripts/backup.js`: Script de copia de seguridad atómica con retención configurable.
   - `scripts/update.js`: Script de actualización segura automatizada (`npm run update`: backup previo + `git pull` + `npm ci` + `build`).
-  - `app/api/caja/route.js`: Endpoint principal (`GET` de estado/sesión/catálogo/auditoría y `POST` por `accion`: `login`, `logout`, `instalacion_inicial`, `abrir`, `reabrir`, `vender`, `egreso`, `ingreso_efectivo`, `cerrar`, `anular`, `crear_usuario`, `borrar_usuario`, `cambiar_password`, `guardar_configuracion`, `crear_categoria`, `crear_producto`, `comprar_producto_directo`, `crear_insumo`, `comprar_insumo`, `merma_insumo`, `asignar_receta`, `crear_caja_fisica`, `desactivar_caja_fisica`, `reactivar_caja_fisica`, `test_email`, `reenviar_reporte_email`).
+  - `app/api/caja/route.js`: Endpoint principal (`GET` de estado/sesión/catálogo/auditoría y `POST` por `accion`: `login`, `logout`, `instalacion_inicial`, `abrir`, `reabrir`, `vender`, `egreso`, `ingreso_efectivo`, `cerrar`, `anular`, `crear_usuario`, `borrar_usuario`, `cambiar_password`, `guardar_configuracion`, `crear_categoria`, `crear_producto`, `comprar_producto_directo`, `crear_insumo`, `comprar_insumo`, `merma_insumo`, `asignar_receta`, `crear_caja_fisica`, `desactivar_caja_fisica`, `reactivar_caja_fisica`, `crear_grupo_modificador`, `actualizar_grupo_modificador`, `eliminar_grupo_modificador`, `asignar_modificadores_producto`, `test_email`, `reenviar_reporte_email`).
   - `app/api/reportes/route.js`: Endpoint administrativo (`GET`) para tendencias JSON, exportación CSV (`?formato=csv`) y exportación Excel (`?formato=xlsx`, con filtro opcional `?cajaId=`).
   - `app/caja/page.js` y `app/admin/page.js`: Vistas de operador y administrador.
   - `app/admin/GraficosFinancieros.js` y `app/admin/exportarPDF.js`: Módulos de visualización financiera y exportación PDF del panel administrativo.
@@ -65,6 +65,12 @@
   - Soporta productos de tipo `'libre'`, `'directo'` (reventa / unitario) y `'receta'` (escandallo multi-insumo para cafetería/restaurante).
   - Las compras de insumos actualizan el costo unitario mediante Costo Promedio Ponderado y recalculan en cascada el costo de los productos asociados.
   - `detalle_movimientos` congela el `precio_unitario` y `costo_unitario` al momento de la venta.
+- **Grupos de Modificadores, Reemplazos y Complementos de Recetas (v7):**
+  - Soporte de grupos configurables vinculados a productos (`grupos_modificadores` y `producto_grupos_modificadores`).
+  - Tipo de selección `unica` (radio button) o `multiple` (checkbox), con bandera `es_obligatorio`.
+  - Reemplazo de insumos de recetas (`insumo_reemplazado_id`): resta el insumo base de la receta y consume el insumo sustituto en la cantidad indicada, recalculando costo y stock de forma atómica.
+  - Adición de insumos (shots/toppings extra) o modificadores operativos/libres con recargo de precio adicional (`precio_adicional`).
+  - Auditoría atómica: `detalle_movimientos_modificadores` congela el precio y costo adicional al momento de la venta, garantizando trazabilidad y restitución exacta del stock en caso de anulación.
 - **Cálculo Financiero y Estadísticas de Ganancia:**
   - `Ventas Totales = SUM(subtotal)` de movimientos completados de venta.
   - `Costo Total de Ventas = SUM(cantidad * costo_unitario)` con costos congelados al momento de cada venta.
@@ -233,7 +239,9 @@ Cuando se clona o actualiza este repositorio en un equipo nuevo, el agente y el 
     - Creación de `.vscode/extensions.json` con recomendaciones (SQLite Viewer, ESLint, Prettier).
     - Creación de `.vscode/settings.json` optimizando observadores de archivos, exclusión de logs/backups y formateo.
     - Documentación de pautas de sincronización entre PC y laptop.
-  - **Migración a arquitectura con esquema versionado (`database/migraciones.js`, PRAGMA `user_version` hasta v6):**
+  - **Migración a arquitectura con esquema versionado (`database/migraciones.js`, PRAGMA `user_version` hasta v7):**
+    - Migración v7: Tablas `grupos_modificadores`, `modificadores_opciones`, `producto_grupos_modificadores` y `detalle_movimientos_modificadores`. Soporte integral de complementos y reemplazos de recetas (ej. Leche de almendras, extras de jarabes) con selección única/múltiple, obligatoriedad, recargos de precio, descuento atómico en `movimientos_insumos` y congelación de costos/precios en auditoría de ventas.
+    - Modal interactivo de personalización en la caja (`app/caja/page.js`) y panel de configuración de grupos y asignaciones en el administrador (`app/admin/page.js`).
     - Migración v6: Tabla `cajas_fisicas` para gestión multicaja de terminales/estaciones con "Caja 1 - Principal" por defecto, vinculación `caja_fisica_id` en `cajas`, soporte de múltiples cajas abiertas en simultáneo y reformulación de terminología de `Caja #` a `N° Turno` en UI, Excel (.xlsx) y PDF.
     - Gestión administrativa de estaciones físicas en `/admin` con regla de negocio de mínimo 1 caja física activa requerida y baja lógica protegida sin turnos abiertos en curso.
     - Migraciones v4 y v5: Tabla `categorias` para catálogo interactivo por pestañas, normalización multicategoría y limpieza de categoría 'General'.
@@ -244,11 +252,12 @@ Cuando se clona o actualiza este repositorio en un equipo nuevo, el agente y el 
   - **Operaciones de caja y catálogo:**
     - Acción `ingreso_efectivo` para inyección de cambio/sencillo al cajón sin inflar las ventas ni distorsionar utilidades.
     - Rediseño de creación de productos en `app/admin/page.js`: modalidades asistidas `unitario` (autocreación o enlace a insumo con proveedor y vencimiento), `receta` (escandallo multi-insumo dinámico) y `libre`.
-    - Optimización de catálogo en caja (`app/caja/page.js`): navegación por pestañas de categorías, inputs numéricos reactivos con debounce, validación atómica de stock en carrito y botón para eliminar ítems.
+    - Optimización de catálogo en caja (`app/caja/page.js`): barra interactiva de categorías en la vista de ventas (POS) con soporte de filtrado simple o múltiple simultáneo, contador reactivo de productos, opción para productos sin categoría, botón de restablecimiento rápido y reinicio automático del filtro tras completar cada venta.
+    - Inputs numéricos reactivos con debounce, validación atómica de stock en carrito y botón para eliminar ítems.
     - Implementación de transacciones atómicas seguras en `server/queries.js`.
     - Lógica de arqueo ciego, control de apertura única por usuario y trazabilidad de reaperturas auditadas.
     - Soporte de inventario híbrido (`libre`, `directo`, `receta`) con costeo ponderado y rollback garantizado en anulaciones.
-    - Batería completa de 11 escenarios de prueba documentada en `docs/PRUEBAS.md`.
+    - Batería completa de 12 escenarios de prueba documentada en `docs/PRUEBAS.md`.
 - **En Progreso:**
   - Validación y ejecución de la suite de pruebas funcionales y de concurrencia (`docs/PRUEBAS.md`).
   - Alineación de estilos y ergonomía responsiva para pantallas táctiles de POS y tablets.

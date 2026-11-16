@@ -1,12 +1,12 @@
 # Checklist de Pruebas Funcionales y de Concurrencia
 
-Lista de verificación manual para validar arranque, seguridad, control de caja, stock atómico, arqueo ciego, recetas, anulaciones, multicaja, reportes, notificaciones, blindaje multi-dispositivo y actualizaciones seguras.
+Lista de verificación manual para validar arranque, seguridad, control de caja, stock atómico, arqueo ciego, recetas, modificadores, anulaciones, multicaja, reportes, notificaciones, blindaje multi-dispositivo y actualizaciones seguras.
 
 ---
 
 ## 1. Arranque y Migraciones
 - [ ] Cierra y vuelve a correr `npm run dev`. No debe haber errores rojos en la terminal.
-- [ ] Reinícialo una segunda vez: las migraciones no deben volver a ejecutarse ni arrojar errores (`PRAGMA user_version` controlado).
+- [ ] Reinícialo una segunda vez: las migraciones no deben volver a ejecutarse ni arrojar errores (`PRAGMA user_version` controlado hasta v7).
 
 ## 2. Seguridad y Sesión
 - [ ] Inicia sesión con una clave correcta y luego con una incorrecta. Después de 5 fallos seguidos debe bloquear temporalmente por rate limiting.
@@ -78,3 +78,18 @@ Lista de verificación manual para validar arranque, seguridad, control de caja,
   - En Google Chrome, activa la traducción automática de páginas: comprueba que las directivas `notranslate` en `app/layout.js` eviten rupturas en el reconciliador del DOM de React en las pantallas de cobro y administración.
 - [ ] **Actualización segura automatizada (`npm run update`):**
   - Ejecuta `npm run update`: comprueba que el script realice un respaldo preventivo de `caja.db` en `backups/`, sincronice el código con `git pull --ff-only`, instale dependencias con `npm ci` y recompile con `npm run build` de forma limpia.
+
+## 12. Grupos de Modificadores, Reemplazos y Complementos de Recetas (v7)
+- [ ] **Configuración en Administrador (`/admin`):**
+  - Crea un grupo de selección única obligatorio (ej. "Tipo de Leche") con una opción por defecto (Leche Entera) y opciones de reemplazo con recargo (ej. Leche de Almendras `+0.50 Bs`, reemplazando el insumo base).
+  - Crea un grupo de selección múltiple opcional (ej. "Extras y Siropes") con opciones de adición de insumos (ej. Extra Shot Café `+1.00 Bs`, Sirope Vainilla `+0.75 Bs`) y opciones operativas (ej. "Sin Azúcar", "Tostado").
+  - Asigna los grupos al producto con receta (ej. "Cappuccino Barista").
+- [ ] **Venta y Selección Interactiva en Caja (`/caja`):**
+  - Haz clic en el producto configurado: se debe desplegar el modal interactivo de personalización.
+  - Verifica que no permita confirmar si no se ha completado la selección de grupos obligatorios.
+  - Selecciona un reemplazo (Leche de Almendras) y un extra (Extra Shot): comprueba que el precio total de la línea en el carrito aumente reactivamente con los recargos correspondientes.
+  - Completa el cobro y anota el stock de los insumos antes y después: verifica que el insumo base reemplazado **no** se descuente, que el insumo sustituto sí se descuente en la proporción exacta y que el insumo extra también se descuente.
+- [ ] **Anulación y Rollback con Modificadores:**
+  - Anula el ticket de la venta anterior: verifica que el sistema reintegre el insumo de reemplazo y el insumo extra según lo registrado en `detalle_movimientos_modificadores`, manteniendo el stock de la leche entera intacto.
+- [ ] **Filtrado Multi-Categoría en POS:**
+  - En la vista de mostrador (`/caja`), prueba activar varias categorías simultáneamente: comprueba que el listado de productos y los contadores se actualicen reactivamente y que el filtro se reinicie automáticamente tras registrar la venta.

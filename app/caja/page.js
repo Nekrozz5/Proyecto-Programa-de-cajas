@@ -13,6 +13,8 @@ export default function CajaPage() {
     const [cajaFisicaSeleccionada, setCajaFisicaSeleccionada] = useState('');
     const [historialCajas, setHistorialCajas] = useState([]);
     const [productos, setProductos] = useState([]);
+    const [categorias, setCategorias] = useState([]);
+    const [categoriasSeleccionadas, setCategoriasSeleccionadas] = useState([]);
     const [usuarios, setUsuarios] = useState([]);
     const [movimientos, setMovimientos] = useState([]);
 
@@ -50,6 +52,10 @@ export default function CajaPage() {
     const [efectivoReal, setEfectivoReal] = useState('');
     const [confirmacionCierreCiego, setConfirmacionCierreCiego] = useState(null);
 
+    // Estado para personalización de complementos / modificadores en el POS
+    const [productoParaPersonalizar, setProductoParaPersonalizar] = useState(null);
+    const [opcionesSeleccionadas, setOpcionesSeleccionadas] = useState({});
+
     // Mensajes de feedback
     const [mensaje, setMensaje] = useState(null);
     const [error, setError] = useState(null);
@@ -70,6 +76,7 @@ export default function CajaPage() {
             setCajasFisicas(data.cajasFisicas || []);
             setHistorialCajas(data.historialCajas || []);
             setProductos(data.productos || []);
+            setCategorias(data.categorias || []);
             setUsuarios(data.usuarios || []);
             setMovimientos(data.cajaAbierta ? (data.movimientos || []) : []);
             if (data.usuarioSesion) {
@@ -181,6 +188,7 @@ export default function CajaPage() {
         });
         setUsuarioActual(null);
         setCarrito([]);
+        setCategoriasSeleccionadas([]);
         setSeccionActiva('pos');
     }
 
@@ -209,54 +217,140 @@ export default function CajaPage() {
         }
     }
 
-    function agregarAlCarrito(prod) {
+    function iniciarAgregarAlCarrito(prod) {
         limpiarAlertas();
+        if (prod.grupos_modificadores && prod.grupos_modificadores.length > 0) {
+            const inicial = {};
+            for (const g of prod.grupos_modificadores) {
+                if (g.tipo_seleccion === 'unica') {
+                    const opDef = g.opciones.find((o) => o.es_default) || (g.es_obligatorio && g.opciones.length > 0 ? g.opciones[0] : null);
+                    if (opDef) inicial[g.id] = opDef.id;
+                } else {
+                    const opsDef = g.opciones.filter((o) => o.es_default).map((o) => o.id);
+                    inicial[g.id] = opsDef;
+                }
+            }
+            setOpcionesSeleccionadas(inicial);
+            setProductoParaPersonalizar(prod);
+        } else {
+            ejecutarAgregarAlCarrito(prod, []);
+        }
+    }
+
+    function ejecutarAgregarAlCarrito(prod, opcionesElegidas = []) {
+        limpiarAlertas();
+        const sortedModIds = opcionesElegidas.map((o) => o.id).sort((a, b) => a - b);
+        const itemKey = `${prod.id}__${sortedModIds.join('_')}`;
+
+        const sumaAdicionales = opcionesElegidas.reduce((sum, o) => sum + (Number(o.precio_adicional) || 0), 0);
+        const precioUnitario = Math.round((Number(prod.precio) + sumaAdicionales) * 100) / 100;
+
         setCarrito((prev) => {
-            const existe = prev.find((item) => item.productoId === prod.id);
+            const existe = prev.find((item) => (item.itemKey || String(item.productoId)) === itemKey);
             const cantidadActual = existe ? (Number(existe.cantidad) || 0) : 0;
             const nuevaCantidad = cantidadActual + 1;
             const maxDisponible = (prod.tipo_inventario !== 'libre' && prod.unidades_disponibles !== null)
                 ? prod.unidades_disponibles
                 : Infinity;
 
-            if (maxDisponible !== Infinity && nuevaCantidad > maxDisponible) {
-                setError(`⚠️ Stock máximo alcanzado para "${prod.nombre}" (${maxDisponible} productos disponibles).`);
+            const totalProdEnCarrito = prev
+                .filter((it) => it.productoId === prod.id)
+                .reduce((sum, it) => sum + (Number(it.cantidad) || 0), 0);
+
+            if (maxDisponible !== Infinity && (totalProdEnCarrito + 1) > maxDisponible) {
+                setError(`⚠️ Stock máximo alcanzado para "${prod.nombre}" (${maxDisponible} productos disponibles en total).`);
                 return prev;
             }
 
             if (existe) {
                 return prev.map((item) =>
-                    item.productoId === prod.id
+                    (item.itemKey || String(item.productoId)) === itemKey
                         ? { ...item, cantidad: nuevaCantidad, cantidadTexto: String(nuevaCantidad), maximoDisponible: maxDisponible }
                         : item
                 );
             }
+
             return [
                 ...prev,
                 {
+                    itemKey,
                     productoId: prod.id,
                     nombre: prod.nombre,
-                    precio: prod.precio,
+                    precio: precioUnitario,
+                    precioBase: prod.precio,
                     cantidad: 1,
                     cantidadTexto: '1',
-                    maximoDisponible: maxDisponible
+                    maximoDisponible: maxDisponible,
+                    modificadores: opcionesElegidas
                 }
             ];
         });
     }
 
-    function cambiarCantidad(productoId, delta) {
+    function calcularTotalPersonalizado() {
+        if (!productoParaPersonalizar) return 0;
+        let total = Number(productoParaPersonalizar.precio) || 0;
+        for (const grupo of productoParaPersonalizar.grupos_modificadores || []) {
+            const sel = opcionesSeleccionadas[grupo.id];
+            if (grupo.tipo_seleccion === 'unica') {
+                const op = grupo.opciones.find((o) => o.id === sel);
+                if (op) total += Number(op.precio_adicional) || 0;
+            } else if (Array.isArray(sel)) {
+                for (const opId of sel) {
+                    const op = grupo.opciones.find((o) => o.id === opId);
+                    if (op) total += Number(op.precio_adicional) || 0;
+                }
+            }
+        }
+        return Math.round(total * 100) / 100;
+    }
+
+    function confirmarPersonalizacionYAgregar() {
+        if (!productoParaPersonalizar) return;
+
+        for (const grupo of productoParaPersonalizar.grupos_modificadores || []) {
+            if (grupo.es_obligatorio) {
+                const sel = opcionesSeleccionadas[grupo.id];
+                const vacio = grupo.tipo_seleccion === 'unica' ? !sel : !Array.isArray(sel) || sel.length === 0;
+                if (vacio) {
+                    setError(`Debes elegir una opción obligatoria para "${grupo.nombre}".`);
+                    return;
+                }
+            }
+        }
+
+        const opcionesElegidas = [];
+        for (const grupo of productoParaPersonalizar.grupos_modificadores || []) {
+            const sel = opcionesSeleccionadas[grupo.id];
+            if (grupo.tipo_seleccion === 'unica') {
+                const op = grupo.opciones.find((o) => o.id === sel);
+                if (op) opcionesElegidas.push(op);
+            } else if (Array.isArray(sel)) {
+                for (const opId of sel) {
+                    const op = grupo.opciones.find((o) => o.id === opId);
+                    if (op) opcionesElegidas.push(op);
+                }
+            }
+        }
+
+        const prod = productoParaPersonalizar;
+        setProductoParaPersonalizar(null);
+        setOpcionesSeleccionadas({});
+        ejecutarAgregarAlCarrito(prod, opcionesElegidas);
+    }
+
+    function cambiarCantidad(itemKey, delta) {
         limpiarAlertas();
-        if (typingTimers.current[productoId]) {
-            clearTimeout(typingTimers.current[productoId]);
-            delete typingTimers.current[productoId];
+        if (typingTimers.current[itemKey]) {
+            clearTimeout(typingTimers.current[itemKey]);
+            delete typingTimers.current[itemKey];
         }
 
         setCarrito((prev) => {
-            const item = prev.find((i) => i.productoId === productoId);
+            const item = prev.find((i) => (i.itemKey || String(i.productoId)) === String(itemKey));
             if (!item) return prev;
 
-            const prodOriginal = productos.find((p) => p.id === productoId);
+            const prodOriginal = productos.find((p) => p.id === item.productoId);
             const maxDisponible = (prodOriginal && prodOriginal.tipo_inventario !== 'libre' && prodOriginal.unidades_disponibles !== null)
                 ? prodOriginal.unidades_disponibles
                 : (item.maximoDisponible ?? Infinity);
@@ -264,63 +358,66 @@ export default function CajaPage() {
             const nuevaCantidad = (Number(item.cantidad) || 0) + delta;
 
             if (nuevaCantidad <= 0) {
-                return prev.filter((i) => i.productoId !== productoId);
+                return prev.filter((i) => (i.itemKey || String(i.productoId)) !== String(itemKey));
             }
 
-            if (maxDisponible !== Infinity && nuevaCantidad > maxDisponible) {
+            const totalProdEnCarrito = prev
+                .filter((it) => it.productoId === item.productoId)
+                .reduce((sum, it) => (it.itemKey || String(it.productoId)) === String(itemKey) ? sum + nuevaCantidad : sum + (Number(it.cantidad) || 0), 0);
+
+            if (maxDisponible !== Infinity && totalProdEnCarrito > maxDisponible) {
                 setError(`⚠️ Límite alcanzado: La cantidad máxima disponible para "${item.nombre}" es de ${maxDisponible} productos.`);
                 return prev;
             }
 
             return prev.map((i) =>
-                i.productoId === productoId
+                (i.itemKey || String(i.productoId)) === String(itemKey)
                     ? { ...i, cantidad: nuevaCantidad, cantidadTexto: String(nuevaCantidad), maximoDisponible: maxDisponible }
                     : i
             );
         });
     }
 
-    function handleInputCantidad(productoId, rawValor) {
+    function handleInputCantidad(itemKey, rawValor) {
         limpiarAlertas();
 
         // 1. Reflejar de inmediato el texto tipeado para fluidez total del teclado
         setCarrito((prev) =>
             prev.map((item) =>
-                item.productoId === productoId
+                (item.itemKey || String(item.productoId)) === String(itemKey)
                     ? { ...item, cantidadTexto: rawValor }
                     : item
             )
         );
 
-        if (typingTimers.current[productoId]) {
-            clearTimeout(typingTimers.current[productoId]);
+        if (typingTimers.current[itemKey]) {
+            clearTimeout(typingTimers.current[itemKey]);
         }
 
         // 2. Al terminar de escribir (pausa de 500ms) se valida y actualiza
-        typingTimers.current[productoId] = setTimeout(() => {
-            finalizarEdicionCantidad(productoId, rawValor);
+        typingTimers.current[itemKey] = setTimeout(() => {
+            finalizarEdicionCantidad(itemKey, rawValor);
         }, 500);
     }
 
-    function finalizarEdicionCantidad(productoId, valor) {
-        if (typingTimers.current[productoId]) {
-            clearTimeout(typingTimers.current[productoId]);
-            delete typingTimers.current[productoId];
+    function finalizarEdicionCantidad(itemKey, valor) {
+        if (typingTimers.current[itemKey]) {
+            clearTimeout(typingTimers.current[itemKey]);
+            delete typingTimers.current[itemKey];
         }
 
         setCarrito((prev) => {
-            const item = prev.find((i) => i.productoId === productoId);
+            const item = prev.find((i) => (i.itemKey || String(i.productoId)) === String(itemKey));
             if (!item) return prev;
 
-            const prodOriginal = productos.find((p) => p.id === productoId);
+            const prodOriginal = productos.find((p) => p.id === item.productoId);
             const maxDisponible = (prodOriginal && prodOriginal.tipo_inventario !== 'libre' && prodOriginal.unidades_disponibles !== null)
                 ? prodOriginal.unidades_disponibles
                 : (item.maximoDisponible ?? Infinity);
 
-            // Si el usuario lo dejó en blanco
             if (valor === '' || valor === null || valor === undefined) {
                 return prev.map((i) =>
-                    i.productoId === productoId
+                    (i.itemKey || String(i.productoId)) === String(itemKey)
                         ? { ...i, cantidadTexto: '', cantidad: 0 }
                         : i
                 );
@@ -331,39 +428,41 @@ export default function CajaPage() {
             if (isNaN(num) || num <= 0) {
                 setError(`Ingresa una cantidad numérica mayor a 0 para "${item.nombre}".`);
                 return prev.map((i) =>
-                    i.productoId === productoId
+                    (i.itemKey || String(i.productoId)) === String(itemKey)
                         ? { ...i, cantidadTexto: '', cantidad: 0 }
                         : i
                 );
             }
 
-            if (maxDisponible !== Infinity && num > maxDisponible) {
-                // REBASA EL LÍMITE: Borra la cantidad y dice cuál es la cantidad máxima disponible
-                setError(`⚠️ Cantidad máxima superada: Para "${item.nombre}" el límite máximo disponible es de ${maxDisponible} productos. Se ha borrado la cantidad ingresada.`);
+            const totalProdEnCarrito = prev
+                .filter((it) => it.productoId === item.productoId)
+                .reduce((sum, it) => (it.itemKey || String(it.productoId)) === String(itemKey) ? sum + num : sum + (Number(it.cantidad) || 0), 0);
+
+            if (maxDisponible !== Infinity && totalProdEnCarrito > maxDisponible) {
+                setError(`⚠️ Cantidad máxima superada: Para "${item.nombre}" el límite máximo disponible es de ${maxDisponible} productos.`);
                 return prev.map((i) =>
-                    i.productoId === productoId
+                    (i.itemKey || String(i.productoId)) === String(itemKey)
                         ? { ...i, cantidadTexto: '', cantidad: 0 }
                         : i
                 );
             }
 
-            // Cantidad válida dentro de stock
             limpiarAlertas();
             return prev.map((i) =>
-                i.productoId === productoId
+                (i.itemKey || String(i.productoId)) === String(itemKey)
                     ? { ...i, cantidad: num, cantidadTexto: String(num), maximoDisponible: maxDisponible }
                     : i
             );
         });
     }
 
-    function eliminarDelCarrito(productoId) {
+    function eliminarDelCarrito(itemKey) {
         limpiarAlertas();
-        if (typingTimers.current[productoId]) {
-            clearTimeout(typingTimers.current[productoId]);
-            delete typingTimers.current[productoId];
+        if (typingTimers.current[itemKey]) {
+            clearTimeout(typingTimers.current[itemKey]);
+            delete typingTimers.current[itemKey];
         }
-        setCarrito((prev) => prev.filter((i) => i.productoId !== productoId));
+        setCarrito((prev) => prev.filter((i) => (i.itemKey || String(i.productoId)) !== String(itemKey)));
     }
 
     const totalCarrito = Number(
@@ -400,6 +499,71 @@ export default function CajaPage() {
         } else if (valor === '') {
             setCambioManual('');
         }
+    }
+
+    function toggleFiltroCategoria(nombreCat) {
+        const nomLower = nombreCat.toLowerCase();
+        setCategoriasSeleccionadas((prev) => {
+            const existe = prev.some((c) => c.toLowerCase() === nomLower);
+            if (existe) {
+                return prev.filter((c) => c.toLowerCase() !== nomLower);
+            } else {
+                return [...prev, nombreCat];
+            }
+        });
+    }
+
+    function resetearFiltroCategorias() {
+        setCategoriasSeleccionadas([]);
+    }
+
+    const listaCategoriasDisponibles = (() => {
+        const catsMap = new Map();
+        (categorias || []).forEach((c) => {
+            if (c.nombre && c.nombre.trim()) {
+                const nomLimpio = c.nombre.trim();
+                catsMap.set(nomLimpio.toLowerCase(), nomLimpio);
+            }
+        });
+        (productos || []).forEach((p) => {
+            if (p.categoria && typeof p.categoria === 'string') {
+                p.categoria.split(',').forEach((c) => {
+                    const nomLimpio = c.trim();
+                    if (nomLimpio && nomLimpio.toLowerCase() !== 'todas') {
+                        if (!catsMap.has(nomLimpio.toLowerCase())) {
+                            catsMap.set(nomLimpio.toLowerCase(), nomLimpio);
+                        }
+                    }
+                });
+            }
+        });
+        return Array.from(catsMap.values()).sort((a, b) => a.localeCompare(b));
+    })();
+
+    const productosSinCategoria = productos.filter((p) => !p.categoria || p.categoria.trim() === '');
+
+    const productosFiltrados = productos.filter((p) => {
+        if (categoriasSeleccionadas.length === 0) return true;
+        const catsProd = (p.categoria || '')
+            .split(',')
+            .map((c) => c.trim().toLowerCase())
+            .filter(Boolean);
+
+        return categoriasSeleccionadas.some((catSel) => {
+            const catSelLower = catSel.toLowerCase();
+            if (catSelLower === 'sin categoría' || catSelLower === 'sin categoria') {
+                return catsProd.length === 0;
+            }
+            return catsProd.includes(catSelLower);
+        });
+    });
+
+    function contarProductosEnCategoria(catNombre) {
+        const catLower = catNombre.toLowerCase();
+        return productos.filter((p) => {
+            const cats = (p.categoria || '').split(',').map((c) => c.trim().toLowerCase());
+            return cats.includes(catLower);
+        }).length;
     }
 
     async function handleAbrirCaja(e) {
@@ -445,7 +609,11 @@ export default function CajaPage() {
                 body: JSON.stringify({
                     accion: 'vender',
                     cajaId: cajaAbierta.id,
-                    items: carrito.map((i) => ({ productoId: i.productoId, cantidad: i.cantidad })),
+                    items: carrito.map((i) => ({
+                        productoId: i.productoId,
+                        cantidad: i.cantidad,
+                        modificadores: (i.modificadores || []).map((m) => m.id)
+                    })),
                     metodoPago,
                     montoRecibido: metodoPago === 'efectivo' && montoRecibido !== '' ? Number(montoRecibido) : null,
                     cambioEntregado: metodoPago === 'efectivo' ? Number(cambioQueSaleDeCaja) : 0,
@@ -460,6 +628,7 @@ export default function CajaPage() {
             setMontoRecibido('');
             setCambioManual('');
             setDescripcionVenta('Venta en mostrador');
+            setCategoriasSeleccionadas([]);
             setMensaje(`Venta #${data.venta.movimientoId} registrada. Cambio entregado de caja: Bs ${data.venta.cambio.toFixed(2)}`);
             await cargarDatos();
         } catch (err) {
@@ -827,25 +996,189 @@ export default function CajaPage() {
                             <div style={{ display: 'grid', gridTemplateColumns: '1.35fr 1fr', gap: '1.25rem', alignItems: 'start' }}>
                                 {/* Catálogo de Productos */}
                                 <section style={cardStyle}>
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
                                         <h2 style={{ margin: 0, fontSize: '1.2rem' }}>Catálogo de Productos</h2>
                                         <span style={{ fontSize: '0.85rem', color: '#64748b' }}>Haz clic en un producto para agregarlo</span>
                                     </div>
+
+                                    {/* Barra de Categorías */}
+                                    {(listaCategoriasDisponibles.length > 0 || productosSinCategoria.length > 0) && (
+                                        <div style={{
+                                            background: '#f8fafc',
+                                            border: '1px solid #e2e8f0',
+                                            borderRadius: '8px',
+                                            padding: '0.75rem',
+                                            marginBottom: '1rem',
+                                            display: 'flex',
+                                            flexDirection: 'column',
+                                            gap: '0.5rem'
+                                        }}>
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                                                    <span style={{ fontSize: '0.84rem', fontWeight: 600, color: '#334155' }}>
+                                                        🏷️ Categorías:
+                                                    </span>
+                                                    {categoriasSeleccionadas.length > 0 && (
+                                                        <span style={{ fontSize: '0.74rem', background: '#e0f2fe', color: '#0369a1', padding: '0.15rem 0.5rem', borderRadius: '999px', fontWeight: 600 }}>
+                                                            {categoriasSeleccionadas.length} seleccionada{categoriasSeleccionadas.length > 1 ? 's' : ''}
+                                                        </span>
+                                                    )}
+                                                </div>
+                                                {categoriasSeleccionadas.length > 0 && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={resetearFiltroCategorias}
+                                                        style={{
+                                                            background: 'transparent',
+                                                            border: 'none',
+                                                            color: '#dc2626',
+                                                            fontSize: '0.78rem',
+                                                            fontWeight: 600,
+                                                            cursor: 'pointer',
+                                                            padding: '0.15rem 0.35rem',
+                                                            borderRadius: '4px',
+                                                            textDecoration: 'underline'
+                                                        }}
+                                                    >
+                                                        Restablecer a todas
+                                                    </button>
+                                                )}
+                                            </div>
+
+                                            <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                                                <button
+                                                    type="button"
+                                                    onClick={resetearFiltroCategorias}
+                                                    style={{
+                                                        padding: '0.35rem 0.75rem',
+                                                        borderRadius: '999px',
+                                                        border: categoriasSeleccionadas.length === 0 ? '1px solid #0284c7' : '1px solid #cbd5e1',
+                                                        fontWeight: categoriasSeleccionadas.length === 0 ? 'bold' : 500,
+                                                        fontSize: '0.82rem',
+                                                        cursor: 'pointer',
+                                                        background: categoriasSeleccionadas.length === 0 ? '#0284c7' : '#ffffff',
+                                                        color: categoriasSeleccionadas.length === 0 ? '#ffffff' : '#475569',
+                                                        boxShadow: categoriasSeleccionadas.length === 0 ? '0 1px 3px rgba(2,132,199,0.3)' : 'none',
+                                                        transition: 'all 0.15s ease'
+                                                    }}
+                                                >
+                                                    🌐 Todas ({productos.length})
+                                                </button>
+
+                                                {listaCategoriasDisponibles.map((catNombre) => {
+                                                    const estaSeleccionada = categoriasSeleccionadas.some(
+                                                        (c) => c.toLowerCase() === catNombre.toLowerCase()
+                                                    );
+                                                    const cantidadEnCat = contarProductosEnCategoria(catNombre);
+
+                                                    return (
+                                                        <button
+                                                            key={catNombre}
+                                                            type="button"
+                                                            onClick={() => toggleFiltroCategoria(catNombre)}
+                                                            title={estaSeleccionada ? 'Clic para quitar filtro' : 'Clic para filtrar (selección múltiple permitida)'}
+                                                            style={{
+                                                                padding: '0.35rem 0.75rem',
+                                                                borderRadius: '999px',
+                                                                border: estaSeleccionada ? '1px solid #0284c7' : '1px solid #cbd5e1',
+                                                                fontWeight: estaSeleccionada ? 'bold' : 500,
+                                                                fontSize: '0.82rem',
+                                                                cursor: 'pointer',
+                                                                background: estaSeleccionada ? '#0284c7' : '#ffffff',
+                                                                color: estaSeleccionada ? '#ffffff' : '#334155',
+                                                                display: 'inline-flex',
+                                                                alignItems: 'center',
+                                                                gap: '0.35rem',
+                                                                boxShadow: estaSeleccionada ? '0 1px 3px rgba(2,132,199,0.3)' : 'none',
+                                                                transition: 'all 0.15s ease'
+                                                            }}
+                                                        >
+                                                            {estaSeleccionada && <span>✓</span>}
+                                                            <span>{catNombre}</span>
+                                                            <span style={{
+                                                                fontSize: '0.72rem',
+                                                                opacity: estaSeleccionada ? 0.9 : 0.7,
+                                                                background: estaSeleccionada ? 'rgba(255,255,255,0.25)' : '#f1f5f9',
+                                                                padding: '0.05rem 0.35rem',
+                                                                borderRadius: '999px'
+                                                            }}>
+                                                                {cantidadEnCat}
+                                                            </span>
+                                                        </button>
+                                                    );
+                                                })}
+
+                                                {productosSinCategoria.length > 0 && (() => {
+                                                    const estaSeleccionada = categoriasSeleccionadas.some(
+                                                        (c) => c.toLowerCase() === 'sin categoría' || c.toLowerCase() === 'sin categoria'
+                                                    );
+                                                    return (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => toggleFiltroCategoria('Sin categoría')}
+                                                            title={estaSeleccionada ? 'Clic para quitar filtro' : 'Clic para filtrar productos sin categoría'}
+                                                            style={{
+                                                                padding: '0.35rem 0.75rem',
+                                                                borderRadius: '999px',
+                                                                border: estaSeleccionada ? '1px solid #0284c7' : '1px solid #cbd5e1',
+                                                                fontWeight: estaSeleccionada ? 'bold' : 500,
+                                                                fontSize: '0.82rem',
+                                                                cursor: 'pointer',
+                                                                background: estaSeleccionada ? '#0284c7' : '#ffffff',
+                                                                color: estaSeleccionada ? '#ffffff' : '#64748b',
+                                                                display: 'inline-flex',
+                                                                alignItems: 'center',
+                                                                gap: '0.35rem',
+                                                                boxShadow: estaSeleccionada ? '0 1px 3px rgba(2,132,199,0.3)' : 'none',
+                                                                transition: 'all 0.15s ease'
+                                                            }}
+                                                        >
+                                                            {estaSeleccionada && <span>✓</span>}
+                                                            <span>Sin categoría</span>
+                                                            <span style={{
+                                                                fontSize: '0.72rem',
+                                                                background: estaSeleccionada ? 'rgba(255,255,255,0.25)' : '#f1f5f9',
+                                                                padding: '0.05rem 0.35rem',
+                                                                borderRadius: '999px'
+                                                            }}>
+                                                                {productosSinCategoria.length}
+                                                            </span>
+                                                        </button>
+                                                    );
+                                                })()}
+                                            </div>
+                                        </div>
+                                    )}
+
                                     {productos.length === 0 ? (
                                         <p>No hay productos registrados. Créalos desde el Panel Admin.</p>
+                                    ) : productosFiltrados.length === 0 ? (
+                                        <div style={{ textAlign: 'center', padding: '2rem 1rem', background: '#f8fafc', borderRadius: '8px', border: '1px dashed #cbd5e1' }}>
+                                            <p style={{ margin: '0 0 0.5rem', color: '#64748b' }}>
+                                                No hay productos registrados que coincidan con las categorías seleccionadas.
+                                            </p>
+                                            <button
+                                                type="button"
+                                                onClick={resetearFiltroCategorias}
+                                                style={{ ...btnSecundario, padding: '0.4rem 0.8rem', fontSize: '0.82rem' }}
+                                            >
+                                                Mostrar todos los productos
+                                            </button>
+                                        </div>
                                     ) : (
                                         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(175px, 1fr))', gap: '0.75rem' }}>
-                                            {productos.map((p) => {
-                                                const itemEnCarrito = carrito.find((item) => item.productoId === p.id);
-                                                const cantidadEnCarrito = itemEnCarrito ? (Number(itemEnCarrito.cantidad) || 0) : 0;
+                                            {productosFiltrados.map((p) => {
+                                                const itemsEnCarrito = carrito.filter((item) => item.productoId === p.id);
+                                                const cantidadEnCarrito = itemsEnCarrito.reduce((sum, item) => sum + (Number(item.cantidad) || 0), 0);
                                                 const esLibre = p.tipo_inventario === 'libre' || p.unidades_disponibles === null || p.unidades_disponibles === Infinity;
                                                 const disponiblesRestantes = esLibre ? Infinity : Math.max(0, p.unidades_disponibles - cantidadEnCarrito);
                                                 const sinStock = !esLibre && disponiblesRestantes <= 0;
+                                                const tieneModificadores = p.grupos_modificadores && p.grupos_modificadores.length > 0;
 
                                                 return (
                                                     <button
                                                         key={p.id}
-                                                        onClick={() => agregarAlCarrito(p)}
+                                                        onClick={() => iniciarAgregarAlCarrito(p)}
                                                         disabled={sinStock}
                                                         style={{
                                                             textAlign: 'left',
@@ -876,6 +1209,11 @@ export default function CajaPage() {
                                                         )}
                                                         <div style={{ fontSize: '0.72rem', color: '#64748b', textTransform: 'uppercase' }}>
                                                             {(p.categoria && p.categoria.trim()) ? p.categoria : 'Sin categoría'} • {p.tipo_inventario}
+                                                            {tieneModificadores && (
+                                                                <span style={{ marginLeft: '0.35rem', color: '#0284c7', fontWeight: 'bold' }}>
+                                                                    ✨ Con opciones
+                                                                </span>
+                                                            )}
                                                         </div>
                                                         <div style={{ fontWeight: 'bold', fontSize: '0.98rem', margin: '0.2rem 0', color: '#0f172a' }}>
                                                             {p.nombre}
@@ -1026,38 +1364,59 @@ export default function CajaPage() {
                                         </p>
                                     ) : (
                                         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-                                            {carrito.map((item) => (
-                                                <div
-                                                    key={item.productoId}
-                                                    style={{
-                                                        display: 'flex',
-                                                        justifyContent: 'space-between',
-                                                        alignItems: 'center',
-                                                        padding: '0.5rem 0',
-                                                        borderBottom: '1px solid #f1f5f9',
-                                                        fontSize: '0.9rem',
-                                                        gap: '0.5rem'
-                                                    }}
-                                                >
-                                                    <div style={{ flex: 1, minWidth: 0 }}>
-                                                        <div style={{ fontWeight: 'bold', color: '#1e293b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                                            {item.nombre}
-                                                        </div>
-                                                        <div style={{ fontSize: '0.8rem', color: '#64748b' }}>
-                                                            Bs {Number(item.precio).toFixed(2)} x {item.cantidad || 0} = <strong style={{ color: '#0f172a' }}>Bs {((Number(item.precio) || 0) * (Number(item.cantidad) || 0)).toFixed(2)}</strong>
-                                                        </div>
-                                                        {item.maximoDisponible !== null && item.maximoDisponible !== Infinity && (
-                                                            <div style={{ fontSize: '0.72rem', color: '#0369a1' }}>
-                                                                Máx. disponible: {item.maximoDisponible} u.
+                                            {carrito.map((item) => {
+                                                const itemClave = item.itemKey || String(item.productoId);
+                                                return (
+                                                    <div
+                                                        key={itemClave}
+                                                        style={{
+                                                            display: 'flex',
+                                                            justifyContent: 'space-between',
+                                                            alignItems: 'center',
+                                                            padding: '0.5rem 0',
+                                                            borderBottom: '1px solid #f1f5f9',
+                                                            fontSize: '0.9rem',
+                                                            gap: '0.5rem'
+                                                        }}
+                                                    >
+                                                        <div style={{ flex: 1, minWidth: 0 }}>
+                                                            <div style={{ fontWeight: 'bold', color: '#1e293b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                                                {item.nombre}
                                                             </div>
-                                                        )}
-                                                    </div>
+                                                            {item.modificadores && item.modificadores.length > 0 && (
+                                                                <div style={{ margin: '0.15rem 0 0.25rem', display: 'flex', flexWrap: 'wrap', gap: '0.25rem' }}>
+                                                                    {item.modificadores.map((m, idx) => (
+                                                                        <span
+                                                                            key={idx}
+                                                                            style={{
+                                                                                fontSize: '0.72rem',
+                                                                                background: '#e0f2fe',
+                                                                                color: '#0369a1',
+                                                                                borderRadius: '4px',
+                                                                                padding: '0.05rem 0.35rem',
+                                                                                fontWeight: 500
+                                                                            }}
+                                                                        >
+                                                                            {m.nombre} {Number(m.precio_adicional || 0) > 0 ? `(+Bs ${Number(m.precio_adicional).toFixed(2)})` : ''}
+                                                                        </span>
+                                                                    ))}
+                                                                </div>
+                                                            )}
+                                                            <div style={{ fontSize: '0.8rem', color: '#64748b' }}>
+                                                                Bs {Number(item.precio).toFixed(2)} x {item.cantidad || 0} = <strong style={{ color: '#0f172a' }}>Bs {((Number(item.precio) || 0) * (Number(item.cantidad) || 0)).toFixed(2)}</strong>
+                                                            </div>
+                                                            {item.maximoDisponible !== null && item.maximoDisponible !== Infinity && (
+                                                                <div style={{ fontSize: '0.72rem', color: '#0369a1' }}>
+                                                                    Máx. disponible: {item.maximoDisponible} u.
+                                                                </div>
+                                                            )}
+                                                        </div>
 
                                                     {/* Controles de cantidad: restar, escribir por teclado, sumar, borrar */}
                                                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', flexShrink: 0 }}>
                                                         <button
                                                             type="button"
-                                                            onClick={() => cambiarCantidad(item.productoId, -1)}
+                                                            onClick={() => cambiarCantidad(itemClave, -1)}
                                                             style={{
                                                                 ...btnMini,
                                                                 width: '28px',
@@ -1078,12 +1437,12 @@ export default function CajaPage() {
                                                             min="1"
                                                             max={item.maximoDisponible !== Infinity ? item.maximoDisponible : undefined}
                                                             value={item.cantidadTexto ?? item.cantidad ?? ''}
-                                                            onChange={(e) => handleInputCantidad(item.productoId, e.target.value)}
-                                                            onBlur={(e) => finalizarEdicionCantidad(item.productoId, e.target.value)}
+                                                            onChange={(e) => handleInputCantidad(itemClave, e.target.value)}
+                                                            onBlur={(e) => finalizarEdicionCantidad(itemClave, e.target.value)}
                                                             onKeyDown={(e) => {
                                                                 if (e.key === 'Enter') {
                                                                     e.preventDefault();
-                                                                    finalizarEdicionCantidad(item.productoId, e.target.value);
+                                                                    finalizarEdicionCantidad(itemClave, e.target.value);
                                                                     e.target.blur();
                                                                 }
                                                             }}
@@ -1106,7 +1465,7 @@ export default function CajaPage() {
 
                                                         <button
                                                             type="button"
-                                                            onClick={() => cambiarCantidad(item.productoId, 1)}
+                                                            onClick={() => cambiarCantidad(itemClave, 1)}
                                                             style={{
                                                                 ...btnMini,
                                                                 width: '28px',
@@ -1124,7 +1483,7 @@ export default function CajaPage() {
 
                                                         <button
                                                             type="button"
-                                                            onClick={() => eliminarDelCarrito(item.productoId)}
+                                                            onClick={() => eliminarDelCarrito(itemClave)}
                                                             style={{
                                                                 background: 'none',
                                                                 border: 'none',
@@ -1141,7 +1500,8 @@ export default function CajaPage() {
                                                         </button>
                                                     </div>
                                                 </div>
-                                            ))}
+                                            );
+                                        })}
                                         </div>
                                     )}
 
@@ -1275,47 +1635,168 @@ export default function CajaPage() {
                             </section>
                         )}
 
-                        {/* SECCIÓN 4: HISTORIAL DEL TURNO (SOLO ADMIN / SUPERADMIN) */}
-                        {seccionActiva === 'movimientos' && usuarioActual.rol !== 'user' && (
-                            <section style={cardStyle}>
-                                <h2 style={{ marginTop: 0 }}>📋 Movimientos del Turno Actual (Vista Admin)</h2>
-                                {movimientos.length === 0 ? (
-                                    <p style={{ color: '#666' }}>Aún no hay movimientos en este turno.</p>
-                                ) : (
-                                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' }}>
-                                        <thead>
-                                            <tr style={{ borderBottom: '2px solid #e5e7eb', textAlign: 'left' }}>
-                                                <th style={thTd}>#</th>
-                                                <th style={thTd}>Fecha/Hora</th>
-                                                <th style={thTd}>Operador</th>
-                                                <th style={thTd}>Tipo</th>
-                                                <th style={thTd}>Método</th>
-                                                <th style={thTd}>Monto</th>
-                                                <th style={thTd}>Cambio Entregado</th>
-                                                <th style={thTd}>Estado</th>
-                                                <th style={thTd}>Descripción</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {movimientos.map((m) => (
-                                                <tr key={m.id} style={{ borderBottom: '1px solid #f3f4f6', opacity: m.estado === 'anulado' ? 0.55 : 1 }}>
-                                                    <td style={thTd}>{m.id}</td>
-                                                    <td style={thTd}>{m.fecha_hora}</td>
-                                                    <td style={thTd}><strong>{m.usuario_nombre || 'Sistema'}</strong></td>
-                                                    <td style={{ ...thTd, fontWeight: 'bold', color: m.tipo === 'ingreso' ? '#166534' : '#b91c1c' }}>
-                                                        {m.tipo.toUpperCase()}
-                                                    </td>
-                                                    <td style={thTd}>{m.metodo_pago.toUpperCase()}</td>
-                                                    <td style={thTd}>Bs {Number(m.monto).toFixed(2)}</td>
-                                                    <td style={thTd}>Bs {Number(m.cambio || 0).toFixed(2)}</td>
-                                                    <td style={thTd}>{m.estado}</td>
-                                                    <td style={thTd}>{m.descripcion}</td>
-                                                </tr>
-                                            ))}
-                                        </tbody>
-                                    </table>
-                                )}
-                            </section>
+                        {/* MODAL DE PERSONALIZACIÓN / COMPLEMENTOS PARA EL POS */}
+                        {productoParaPersonalizar && (
+                            <div style={{
+                                position: 'fixed',
+                                inset: 0,
+                                backgroundColor: 'rgba(15, 23, 42, 0.65)',
+                                backdropFilter: 'blur(3px)',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                zIndex: 9999,
+                                padding: '1rem'
+                            }}>
+                                <div style={{
+                                    background: '#ffffff',
+                                    borderRadius: '12px',
+                                    maxWidth: '520px',
+                                    width: '100%',
+                                    maxHeight: '90vh',
+                                    display: 'flex',
+                                    flexDirection: 'column',
+                                    boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.25)',
+                                    overflow: 'hidden'
+                                }}>
+                                    {/* Cabecera */}
+                                    <div style={{ padding: '1rem 1.25rem', borderBottom: '1px solid #e2e8f0', background: '#f8fafc', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                        <div>
+                                            <h3 style={{ margin: 0, fontSize: '1.2rem', color: '#0f172a' }}>
+                                                Personalizar: {productoParaPersonalizar.nombre}
+                                            </h3>
+                                            <div style={{ fontSize: '0.88rem', color: '#64748b', marginTop: '0.2rem' }}>
+                                                Precio base: <strong style={{ color: '#0f172a' }}>Bs {Number(productoParaPersonalizar.precio).toFixed(2)}</strong>
+                                            </div>
+                                        </div>
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                setProductoParaPersonalizar(null);
+                                                setOpcionesSeleccionadas({});
+                                            }}
+                                            style={{
+                                                background: 'none',
+                                                border: 'none',
+                                                fontSize: '1.2rem',
+                                                cursor: 'pointer',
+                                                color: '#64748b',
+                                                padding: '0.2rem 0.5rem',
+                                                borderRadius: '4px'
+                                            }}
+                                        >
+                                            ✕
+                                        </button>
+                                    </div>
+
+                                    {/* Lista de grupos de opciones */}
+                                    <div style={{ padding: '1.25rem', overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+                                        {productoParaPersonalizar.grupos_modificadores.map((grupo) => {
+                                            const seleccion = opcionesSeleccionadas[grupo.id];
+                                            return (
+                                                <div key={grupo.id} style={{ background: '#f8fafc', padding: '0.9rem', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                                                        <span style={{ fontWeight: 'bold', fontSize: '0.95rem', color: '#1e293b' }}>
+                                                            {grupo.nombre}
+                                                        </span>
+                                                        <span style={{
+                                                            fontSize: '0.72rem',
+                                                            padding: '0.15rem 0.5rem',
+                                                            borderRadius: '999px',
+                                                            background: grupo.es_obligatorio ? '#fee2e2' : '#e0f2fe',
+                                                            color: grupo.es_obligatorio ? '#991b1b' : '#0369a1',
+                                                            fontWeight: 600
+                                                        }}>
+                                                            {grupo.tipo_seleccion === 'unica' ? 'Una sola opción' : 'Múltiples extras'}
+                                                            {grupo.es_obligatorio ? ' • Obligatorio' : ''}
+                                                        </span>
+                                                    </div>
+
+                                                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: '0.5rem' }}>
+                                                        {grupo.opciones.map((op) => {
+                                                            const esSeleccionado = grupo.tipo_seleccion === 'unica'
+                                                                ? seleccion === op.id
+                                                                : Array.isArray(seleccion) && seleccion.includes(op.id);
+
+                                                            return (
+                                                                <button
+                                                                    key={op.id}
+                                                                    type="button"
+                                                                    onClick={() => {
+                                                                        if (grupo.tipo_seleccion === 'unica') {
+                                                                            setOpcionesSeleccionadas((prev) => ({ ...prev, [grupo.id]: op.id }));
+                                                                        } else {
+                                                                            setOpcionesSeleccionadas((prev) => {
+                                                                                const actuales = Array.isArray(prev[grupo.id]) ? prev[grupo.id] : [];
+                                                                                const nuevo = actuales.includes(op.id)
+                                                                                    ? actuales.filter((id) => id !== op.id)
+                                                                                    : [...actuales, op.id];
+                                                                                return { ...prev, [grupo.id]: nuevo };
+                                                                            });
+                                                                        }
+                                                                    }}
+                                                                    style={{
+                                                                        padding: '0.6rem 0.75rem',
+                                                                        borderRadius: '6px',
+                                                                        border: esSeleccionado ? '2px solid #0284c7' : '1px solid #cbd5e1',
+                                                                        background: esSeleccionado ? '#e0f2fe' : '#ffffff',
+                                                                        color: esSeleccionado ? '#0369a1' : '#334155',
+                                                                        fontWeight: esSeleccionado ? 'bold' : 500,
+                                                                        fontSize: '0.85rem',
+                                                                        cursor: 'pointer',
+                                                                        textAlign: 'left',
+                                                                        transition: 'all 0.1s ease'
+                                                                    }}
+                                                                >
+                                                                    <div>{op.nombre}</div>
+                                                                    <div style={{
+                                                                        fontSize: '0.75rem',
+                                                                        color: Number(op.precio_adicional || 0) > 0 ? '#166534' : '#64748b',
+                                                                        fontWeight: 'bold',
+                                                                        marginTop: '0.2rem'
+                                                                    }}>
+                                                                        {Number(op.precio_adicional || 0) > 0 ? `+Bs ${Number(op.precio_adicional).toFixed(2)}` : 'Sin recargo'}
+                                                                    </div>
+                                                                </button>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+
+                                    {/* Pie del modal con total y confirmación */}
+                                    <div style={{ padding: '1rem 1.25rem', borderTop: '1px solid #e2e8f0', background: '#f8fafc', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                        <div>
+                                            <div style={{ fontSize: '0.78rem', color: '#64748b' }}>Total ítem con opciones:</div>
+                                            <div style={{ fontSize: '1.25rem', fontWeight: 'bold', color: '#0f172a' }}>
+                                                Bs {calcularTotalPersonalizado().toFixed(2)}
+                                            </div>
+                                        </div>
+
+                                        <div style={{ display: 'flex', gap: '0.5rem' }}>
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    setProductoParaPersonalizar(null);
+                                                    setOpcionesSeleccionadas({});
+                                                }}
+                                                style={{ ...btnSecundario, padding: '0.55rem 0.9rem', fontSize: '0.88rem' }}
+                                            >
+                                                Cancelar
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={confirmarPersonalizacionYAgregar}
+                                                style={{ ...btnPrimario, padding: '0.55rem 1.2rem', fontSize: '0.92rem' }}
+                                            >
+                                                ✓ Agregar al Pedido
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
                         )}
                     </>
                 )}

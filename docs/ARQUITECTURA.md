@@ -1,6 +1,6 @@
 # Arquitectura Técnica del Sistema
 
-Este documento describe la arquitectura global del sistema POS, su modelo de seguridad, la estructura de base de datos relacional con SQLite3, el flujo multicaja, las notificaciones automáticas y las reglas financieras e inventariales implementadas.
+Este documento describe la arquitectura global del sistema POS, su modelo de seguridad, la estructura de base de datos relacional con SQLite3, el flujo multicaja, el motor de modificadores y recetas, las notificaciones automáticas y las reglas financieras e inventariales implementadas.
 
 ---
 
@@ -33,7 +33,7 @@ Este documento describe la arquitectura global del sistema POS, su modelo de seg
   - Por cuenta de usuario individual en memoria (límite de intentos fallidos con caducidad autónoma para frenar ataques de fuerza bruta).
 - **Cookie `Secure` adaptativa:** En producción, `server/sesion.js` activa `secure: true` cuando la conexión proviene de HTTPS (como el acceso móvil remoto por túnel) y permite `secure: false` en conexiones HTTP locales (`localhost` o LAN sin internet) para que ambos entornos operen en paralelo sin bloqueos de sesión.
 - **Instalación Inicial Protegida (`SETUP_TOKEN`):** El endpoint de instalación inicial exige un token preconfigurado en las variables de entorno, validado con comparación en tiempo constante (`crypto.timingSafeEqual`) para evitar fugas de información por canales laterales.
-- **Validación Temprana de Secretos (`instrumentation.js`):** El hook `register()` de Next.js ejecuta `validarEntornoArranqueProduccion()` al iniciar el servidor de producción. Si algún secreto obligatorio está ausente, usa valores por defecto o no cumple la longitud mínima requerida, aborta el arranque de inmediato con un mensaje descriptivo sin romper la fase de compilación (`next build`).
+- **Validación Temprana de Secretos (`instrumentation.js`):** El hook `register()` de Next.js ejecuta `validarOAbortarArranque()` al iniciar el servidor de producción. Si algún secreto obligatorio está ausente, usa valores por defecto o no cumple la longitud mínima requerida, aborta el arranque de inmediato con un mensaje descriptivo sin romper la fase de compilación (`next build`).
 - **Cuenta `developer`:** Sincronizada automáticamente con la variable `DEVELOPER_PASSWORD` y oculta de los listados estándar de usuarios.
 
 ---
@@ -46,7 +46,7 @@ Este documento describe la arquitectura global del sistema POS, su modelo de seg
   - Modo WAL (`PRAGMA journal_mode = WAL`) para lecturas concurrentes sin bloqueo.
   - `PRAGMA busy_timeout = 5000` para tolerar esperas de escritura sin bloqueos prematuros.
 - **`database/migraciones.js`:**
-  - Control de versión del esquema mediante `PRAGMA user_version` (versiones v1 a v6).
+  - Control de versión del esquema mediante `PRAGMA user_version` (versiones v1 a v7).
   - Migraciones atómicas e idempotentes ejecutadas automáticamente al arrancar la aplicación.
   - Historial de migraciones:
     - **v1:** Esquema inicial de cajas, usuarios, movimientos y detalle de movimientos.
@@ -55,7 +55,8 @@ Este documento describe la arquitectura global del sistema POS, su modelo de seg
     - **v4:** Tabla `categorias` para catálogo estructurado.
     - **v5:** Normalización multicategoría de productos y saneamiento de registros legados.
     - **v6:** Tabla `cajas_fisicas` (estaciones de cobro física/terminales) con vinculación a `cajas` (turnos).
-- **Transacciones atómicas:** Toda mutación de negocio (aperturas, ventas, egresos, compras, cierres, anulaciones) corre dentro de `transaccion(async (dbTx) => { ... })` en `server/queries.js`.
+    - **v7:** Tablas `grupos_modificadores`, `modificadores_opciones`, `producto_grupos_modificadores` y `detalle_movimientos_modificadores` para personalización de recetas (reemplazos y complementos extra).
+- **Transacciones atómicas:** Toda mutación de negocio (aperturas, ventas, egresos, compras, cierres, anulaciones, modificadores) corre dentro de `transaccion(async (dbTx) => { ... })` en `server/queries.js`.
 - **Manejo de fechas:** Almacenadas en UTC (`CURRENT_TIMESTAMP`) y proyectadas con `'localtime'` en SQLite para filtros y visualización del usuario (`datetime(fecha_hora, 'localtime')`).
 
 ---
@@ -89,9 +90,23 @@ Este documento describe la arquitectura global del sistema POS, su modelo de seg
 - Las compras de insumos actualizan el costo unitario mediante **Costo Promedio Ponderado (CPP)** y recalculan en cascada el costo de todos los productos y recetas asociados.
 - `detalle_movimientos` congela `precio_unitario` y `costo_unitario` en el momento exacto de la venta para garantizar precisión histórica en reportes, métricas y reintegración por anulación.
 
-### D. Cálculos Financieros
-- `Ventas Totales = SUM(subtotal)` de ventas completadas.
-- `Costo Total de Ventas = SUM(cantidad * costo_unitario)` (costos congelados por línea).
+### D. Grupos de Modificadores, Reemplazos y Complementos de Recetas (v7)
+- **Grupos Configurables (`grupos_modificadores`):**
+  - Vinculables a uno o varios productos del catálogo (`producto_grupos_modificadores`).
+  - `tipo_seleccion`: `'unica'` (comportamiento de radio button, ej. tipo de leche o temperatura) o `'multiple'` (comportamiento de checkbox, ej. siropes, toppings o salsas extra).
+  - `es_obligatorio`: Cuando es verdadero, el POS exige seleccionar una opción antes de permitir agregar el producto al carrito.
+- **Opciones de Modificador (`modificadores_opciones`):**
+  - **Reemplazos de Insumos (`insumo_reemplazado_id`):** Al elegir una opción que reemplaza un ingrediente (ej. Leche entera -> Leche de almendras o avena), el sistema descuenta de la receta el insumo base y añade el insumo de reemplazo (`insumo_id`) en la cantidad definida, recalculando el costo total de la línea de forma precisa.
+  - **Adiciones de Insumos:** Opciones sin reemplazo que definen `insumo_id` y `cantidad_insumo` descuentan stock adicional (ej. shot extra de café, queso extra).
+  - **Modificadores Operativos:** Opciones sin insumo vinculado (ej. "Tostado", "Sin azúcar", "Poco hielo") que permiten personalizar la comanda y, si corresponde, aplicar recargos de precio.
+  - **Precio Adicional (`precio_adicional`):** Se suma al precio base del producto en la línea de venta.
+- **Congelamiento y Trazabilidad (`detalle_movimientos_modificadores`):**
+  - Cada modificación seleccionada se registra con `precio_adicional`, `costo_adicional`, insumo consumido e insumo sustituido congelados.
+  - En caso de **anulación de venta**, la transacción repone exactamente los insumos consumidos según el detalle de modificadores registrado, independientemente de si la receta o los modificadores cambiaron después.
+
+### E. Cálculos Financieros
+- `Ventas Totales = SUM(subtotal)` de ventas completadas (incluye precios base y recargos por modificadores).
+- `Costo Total de Ventas = SUM(cantidad * costo_unitario)` (costos congelados que incluyen insumos base y complementos netos).
 - `Ganancia Bruta = Ventas Totales - Costo Total de Ventas`.
 - `Flujo Neto Operativo = Ganancia Bruta - Total Egresos`.
 
@@ -113,9 +128,15 @@ Este documento describe la arquitectura global del sistema POS, su modelo de seg
 
 ---
 
-## 6. Respaldos Atómicos (`scripts/backup.js`)
+## 6. Respaldos Atómicos y Actualizaciones Seguras
 
-El comando `npm run backup`:
-1. Ejecuta `VACUUM INTO` sobre la base de datos activa (copia atómica en caliente sin detener el POS ni interrumpir ventas).
-2. Guarda el archivo en la carpeta `backups/` con marca de tiempo local.
-3. Purga automáticamente copias antiguas manteniendo las últimas `MAX_BACKUPS_LOCAL` (30 por defecto).
+- **Respaldos Atómicos (`scripts/backup.js`):**
+  - `npm run backup` ejecuta `VACUUM INTO` sobre la base de datos activa (copia atómica en caliente sin detener el POS ni interrumpir ventas).
+  - Guarda el archivo en la carpeta `backups/` con marca de tiempo local y purga automáticamente copias antiguas manteniendo las últimas `MAX_BACKUPS_LOCAL` (30 por defecto).
+- **Actualización Segura Automatizada (`scripts/update.js`):**
+  - `npm run update` ejecuta un ciclo de actualización seguro en 5 pasos:
+    1. Respaldo preventivo obligatorio de `caja.db`.
+    2. Descarga de código limpio (`git pull --ff-only`).
+    3. Instalación de dependencias reproducibles (`npm ci`).
+    4. Compilación de producción (`next build`).
+    5. Reinicio automático del servicio en PM2 si estuviera activo.

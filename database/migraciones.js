@@ -523,6 +523,70 @@ const MIGRACIONES = [
                 UPDATE cajas SET caja_fisica_id = 1 WHERE caja_fisica_id IS NULL
             `);
         }
+    },
+    {
+        version: 7,
+        descripcion: 'Tablas para grupos de modificadores, opciones (reemplazos y extras de recetas), asignación a productos y detalle de venta auditado',
+        up: async (conn) => {
+            await runRaw(conn, `
+                CREATE TABLE IF NOT EXISTS grupos_modificadores (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    nombre TEXT NOT NULL,
+                    tipo_seleccion TEXT CHECK(tipo_seleccion IN ('unica', 'multiple')) NOT NULL DEFAULT 'unica',
+                    es_obligatorio INTEGER NOT NULL DEFAULT 0,
+                    activo INTEGER NOT NULL DEFAULT 1,
+                    creado_en DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            `);
+
+            await runRaw(conn, `
+                CREATE TABLE IF NOT EXISTS modificadores_opciones (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    grupo_id INTEGER NOT NULL,
+                    nombre TEXT NOT NULL,
+                    insumo_id INTEGER,
+                    cantidad_insumo REAL DEFAULT 0,
+                    precio_adicional REAL NOT NULL DEFAULT 0,
+                    insumo_reemplazado_id INTEGER DEFAULT NULL,
+                    es_default INTEGER NOT NULL DEFAULT 0,
+                    activo INTEGER NOT NULL DEFAULT 1,
+                    FOREIGN KEY (grupo_id) REFERENCES grupos_modificadores(id),
+                    FOREIGN KEY (insumo_id) REFERENCES insumos(id),
+                    FOREIGN KEY (insumo_reemplazado_id) REFERENCES insumos(id)
+                )
+            `);
+
+            await runRaw(conn, `
+                CREATE TABLE IF NOT EXISTS producto_grupos_modificadores (
+                    producto_id INTEGER NOT NULL,
+                    grupo_id INTEGER NOT NULL,
+                    PRIMARY KEY (producto_id, grupo_id),
+                    FOREIGN KEY (producto_id) REFERENCES productos(id),
+                    FOREIGN KEY (grupo_id) REFERENCES grupos_modificadores(id)
+                )
+            `);
+
+            await runRaw(conn, `
+                CREATE TABLE IF NOT EXISTS detalle_movimientos_modificadores (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    detalle_movimiento_id INTEGER NOT NULL,
+                    modificador_opcion_id INTEGER,
+                    nombre TEXT NOT NULL,
+                    precio_adicional REAL NOT NULL DEFAULT 0,
+                    costo_adicional REAL NOT NULL DEFAULT 0,
+                    insumo_id INTEGER,
+                    cantidad_insumo REAL DEFAULT 0,
+                    insumo_reemplazado_id INTEGER DEFAULT NULL,
+                    FOREIGN KEY (detalle_movimiento_id) REFERENCES detalle_movimientos(id),
+                    FOREIGN KEY (modificador_opcion_id) REFERENCES modificadores_opciones(id),
+                    FOREIGN KEY (insumo_id) REFERENCES insumos(id)
+                )
+            `);
+
+            await runRaw(conn, `CREATE INDEX IF NOT EXISTS idx_mod_opc_grupo ON modificadores_opciones(grupo_id)`);
+            await runRaw(conn, `CREATE INDEX IF NOT EXISTS idx_prod_grupos_mod ON producto_grupos_modificadores(producto_id)`);
+            await runRaw(conn, `CREATE INDEX IF NOT EXISTS idx_det_mov_mod ON detalle_movimientos_modificadores(detalle_movimiento_id)`);
+        }
     }
 ];
 

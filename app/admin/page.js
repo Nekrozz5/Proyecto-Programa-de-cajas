@@ -90,6 +90,17 @@ export default function AdminPage() {
     const [recetaCantidad, setRecetaCantidad] = useState('');
     const [recetaUnidad, setRecetaUnidad] = useState('');
 
+    // Gestión de Modificadores / Complementos
+    const [subSeccionCatalogo, setSubSeccionCatalogo] = useState('articulos'); // 'articulos' | 'modificadores'
+    const [nombreGrupoMod, setNombreGrupoMod] = useState('');
+    const [tipoSeleccionGrupoMod, setTipoSeleccionGrupoMod] = useState('unica');
+    const [esObligatorioGrupoMod, setEsObligatorioGrupoMod] = useState(false);
+    const [opcionesGrupoMod, setOpcionesGrupoMod] = useState([
+        { nombre: '', insumoId: '', cantidadInsumo: '0.2', precioAdicional: '0', insumoReemplazadoId: '', esDefault: false }
+    ]);
+    const [productoAsignarModId, setProductoAsignarModId] = useState('');
+    const [gruposAsignarIds, setGruposAsignarIds] = useState([]);
+
     // Nuevo usuario
     const [nuevoUsuarioNombre, setNuevoUsuarioNombre] = useState('');
     const [nuevoUsuarioPin, setNuevoUsuarioPin] = useState('');
@@ -488,6 +499,122 @@ export default function AdminPage() {
             }
         }
         setFilasReceta(copia);
+    }
+
+    function agregarOpcionGrupoMod() {
+        const primerInsumo = (datos.insumos || [])[0];
+        setOpcionesGrupoMod((prev) => [
+            ...prev,
+            {
+                nombre: '',
+                insumoId: primerInsumo ? String(primerInsumo.id) : '',
+                cantidadInsumo: '0.2',
+                precioAdicional: '0',
+                insumoReemplazadoId: '',
+                esDefault: false
+            }
+        ]);
+    }
+
+    function quitarOpcionGrupoMod(idx) {
+        if (opcionesGrupoMod.length <= 1) return;
+        setOpcionesGrupoMod((prev) => prev.filter((_, i) => i !== idx));
+    }
+
+    function cambiarOpcionGrupoMod(idx, campo, valor) {
+        const copia = [...opcionesGrupoMod];
+        copia[idx] = { ...copia[idx], [campo]: valor };
+        setOpcionesGrupoMod(copia);
+    }
+
+    async function handleCrearGrupoModificador(e) {
+        e.preventDefault();
+        limpiarAlertas();
+        const nom = nombreGrupoMod.trim();
+        if (!nom) {
+            setError('Ingresa un nombre para el grupo de modificadores.');
+            return;
+        }
+        const opsValidadas = opcionesGrupoMod
+            .filter((o) => o.nombre && o.nombre.trim())
+            .map((o) => ({
+                nombre: o.nombre.trim(),
+                insumoId: o.insumoId ? Number(o.insumoId) : null,
+                cantidadInsumo: Number(o.cantidadInsumo || 0),
+                precioAdicional: Number(o.precioAdicional || 0),
+                insumoReemplazadoId: o.insumoReemplazadoId ? Number(o.insumoReemplazadoId) : null,
+                esDefault: Boolean(o.esDefault)
+            }));
+
+        if (opsValidadas.length === 0) {
+            setError('Debes agregar al menos una opción válida para el grupo.');
+            return;
+        }
+
+        const ok = await ejecutarAccion(
+            {
+                accion: 'crear_grupo_modificador',
+                nombre: nom,
+                tipoSeleccion: tipoSeleccionGrupoMod,
+                esObligatorio: esObligatorioGrupoMod,
+                opciones: opsValidadas
+            },
+            `Grupo "${nom}" creado exitosamente con ${opsValidadas.length} opción(es).`
+        );
+
+        if (ok) {
+            setNombreGrupoMod('');
+            setTipoSeleccionGrupoMod('unica');
+            setEsObligatorioGrupoMod(false);
+            const primerInsumo = (datos.insumos || [])[0];
+            setOpcionesGrupoMod([
+                {
+                    nombre: '',
+                    insumoId: primerInsumo ? String(primerInsumo.id) : '',
+                    cantidadInsumo: '0.2',
+                    precioAdicional: '0',
+                    insumoReemplazadoId: '',
+                    esDefault: false
+                }
+            ]);
+        }
+    }
+
+    async function handleEliminarGrupoModificador(grupoId, nombre) {
+        if (!confirm(`¿Eliminar el grupo "${nombre}"? Sus opciones no se ofrecerán en nuevas ventas.`)) {
+            return;
+        }
+        await ejecutarAccion(
+            {
+                accion: 'eliminar_grupo_modificador',
+                grupoId
+            },
+            `Grupo de complementos "${nombre}" eliminado.`
+        );
+    }
+
+    async function handleGuardarAsignacionModificadores(e) {
+        e.preventDefault();
+        limpiarAlertas();
+        if (!productoAsignarModId) {
+            setError('Selecciona un producto con receta para asignarle grupos de complementos.');
+            return;
+        }
+        await ejecutarAccion(
+            {
+                accion: 'asignar_modificadores_producto',
+                productoId: Number(productoAsignarModId),
+                grupoIds: gruposAsignarIds
+            },
+            'Grupos de complementos asignados al producto exitosamente.'
+        );
+    }
+
+    function toggleGrupoAsignar(grupoId) {
+        const idNum = Number(grupoId);
+        setGruposAsignarIds((prev) =>
+            prev.includes(idNum) ? prev.filter((id) => id !== idNum) : [...prev, idNum]
+        );
     }
 
     async function handleCrearProducto(e) {
@@ -1612,8 +1739,358 @@ export default function AdminPage() {
 
                             return (
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-                                    {/* PESTAÑAS HORIZONTALES DE CATEGORÍAS */}
-                                    <div style={{ background: '#fff', padding: '0.85rem 1.25rem', borderRadius: '10px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', border: '1px solid #e2e8f0' }}>
+                                    {/* SELECTOR DE SUB-SECCIÓN: ARTÍCULOS O MODIFICADORES */}
+                                    <div style={{ display: 'flex', gap: '0.5rem', background: '#e2e8f0', padding: '0.35rem', borderRadius: '8px', alignSelf: 'flex-start' }}>
+                                        <button
+                                            type="button"
+                                            onClick={() => setSubSeccionCatalogo('articulos')}
+                                            style={{
+                                                padding: '0.45rem 1rem',
+                                                borderRadius: '6px',
+                                                border: 'none',
+                                                fontWeight: 'bold',
+                                                fontSize: '0.88rem',
+                                                cursor: 'pointer',
+                                                background: subSeccionCatalogo === 'articulos' ? '#ffffff' : 'transparent',
+                                                color: subSeccionCatalogo === 'articulos' ? '#0f172a' : '#64748b',
+                                                boxShadow: subSeccionCatalogo === 'articulos' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none'
+                                            }}
+                                        >
+                                            📦 Artículos y Catálogo ({(datos.productos || []).length})
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => setSubSeccionCatalogo('modificadores')}
+                                            style={{
+                                                padding: '0.45rem 1rem',
+                                                borderRadius: '6px',
+                                                border: 'none',
+                                                fontWeight: 'bold',
+                                                fontSize: '0.88rem',
+                                                cursor: 'pointer',
+                                                background: subSeccionCatalogo === 'modificadores' ? '#ffffff' : 'transparent',
+                                                color: subSeccionCatalogo === 'modificadores' ? '#0284c7' : '#64748b',
+                                                boxShadow: subSeccionCatalogo === 'modificadores' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none'
+                                            }}
+                                        >
+                                            ✨ Complementos y Modificadores ({(datos.gruposModificadores || []).length})
+                                        </button>
+                                    </div>
+
+                                    {subSeccionCatalogo === 'modificadores' ? (
+                                        <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 0.8fr', gap: '1.5rem', alignItems: 'start' }}>
+                                            {/* COLUMNA IZQUIERDA: CREAR NUEVO GRUPO */}
+                                            <section style={cardStyle}>
+                                                <h3 style={{ marginTop: 0, marginBottom: '0.35rem' }}>✨ Crear Grupo de Complementos / Modificadores</h3>
+                                                <p style={{ color: '#64748b', fontSize: '0.85rem', marginTop: 0, marginBottom: '1rem' }}>
+                                                    Configura grupos como <em>"Tipo de Leche"</em> (reemplazo) o <em>"Extras / Jarabes"</em> (adiciones) con sus precios e insumos.
+                                                </p>
+
+                                                <form onSubmit={handleCrearGrupoModificador} style={formCol}>
+                                                    <label style={{ fontSize: '0.85rem', color: '#334155' }}>
+                                                        Nombre del Grupo:
+                                                        <input
+                                                            type="text"
+                                                            placeholder="Ej. Tipo de Leche, Extras / Jarabes, Adicionales"
+                                                            required
+                                                            value={nombreGrupoMod}
+                                                            onChange={(e) => setNombreGrupoMod(e.target.value)}
+                                                            style={inputStyle}
+                                                        />
+                                                    </label>
+
+                                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginTop: '0.2rem' }}>
+                                                        <div>
+                                                            <label style={{ fontSize: '0.85rem', color: '#334155', fontWeight: 'bold' }}>Tipo de Selección:</label>
+                                                            <select
+                                                                value={tipoSeleccionGrupoMod}
+                                                                onChange={(e) => setTipoSeleccionGrupoMod(e.target.value)}
+                                                                style={inputStyle}
+                                                            >
+                                                                <option value="unica">🔘 Selección Única (Excluyente / Reemplazo)</option>
+                                                                <option value="multiple">☑️ Múltiples Opciones (Extras / Agregados)</option>
+                                                            </select>
+                                                        </div>
+
+                                                        <div style={{ display: 'flex', alignItems: 'center', marginTop: '1.4rem' }}>
+                                                            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem', color: '#334155', cursor: 'pointer' }}>
+                                                                <input
+                                                                    type="checkbox"
+                                                                    checked={esObligatorioGrupoMod}
+                                                                    onChange={(e) => setEsObligatorioGrupoMod(e.target.checked)}
+                                                                />
+                                                                <strong>¿Obligatorio al cobrar?</strong>
+                                                            </label>
+                                                        </div>
+                                                    </div>
+
+                                                    {/* OPCIONES DEL GRUPO */}
+                                                    <div style={{ marginTop: '0.75rem', background: '#f8fafc', padding: '0.85rem', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                                                            <span style={{ fontSize: '0.85rem', fontWeight: 'bold', color: '#334155' }}>
+                                                                Opciones del Grupo ({opcionesGrupoMod.length})
+                                                            </span>
+                                                            <span style={{ fontSize: '0.75rem', color: '#64748b' }}>
+                                                                Insumo, cantidad y recargo al cliente
+                                                            </span>
+                                                        </div>
+
+                                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
+                                                            {opcionesGrupoMod.map((op, idx) => {
+                                                                const insumoActual = (datos.insumos || []).find((i) => String(i.id) === String(op.insumoId));
+                                                                return (
+                                                                    <div key={idx} style={{ background: '#fff', padding: '0.75rem', borderRadius: '6px', border: '1px solid #cbd5e1', display: 'flex', flexDirection: 'column', gap: '0.45rem' }}>
+                                                                        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                                                                            <input
+                                                                                type="text"
+                                                                                placeholder="Nombre de la opción (Ej. Leche de Almendras, Shot Extra)"
+                                                                                required
+                                                                                value={op.nombre}
+                                                                                onChange={(e) => cambiarOpcionGrupoMod(idx, 'nombre', e.target.value)}
+                                                                                style={{ ...inputStyle, margin: 0, flex: 2 }}
+                                                                            />
+                                                                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', flex: 1 }}>
+                                                                                <span style={{ fontSize: '0.8rem', color: '#64748b' }}>+Bs</span>
+                                                                                <input
+                                                                                    type="number"
+                                                                                    step="0.01"
+                                                                                    min="0"
+                                                                                    placeholder="0.00"
+                                                                                    value={op.precioAdicional}
+                                                                                    onChange={(e) => cambiarOpcionGrupoMod(idx, 'precioAdicional', e.target.value)}
+                                                                                    style={{ ...inputStyle, margin: 0 }}
+                                                                                    title="Recargo adicional para el cliente"
+                                                                                />
+                                                                            </div>
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={() => quitarOpcionGrupoMod(idx)}
+                                                                                disabled={opcionesGrupoMod.length <= 1}
+                                                                                style={{
+                                                                                    background: '#fee2e2',
+                                                                                    color: '#b91c1c',
+                                                                                    border: '1px solid #fecaca',
+                                                                                    borderRadius: '4px',
+                                                                                    padding: '0.4rem 0.6rem',
+                                                                                    cursor: opcionesGrupoMod.length <= 1 ? 'not-allowed' : 'pointer',
+                                                                                    fontSize: '0.85rem'
+                                                                                }}
+                                                                                title="Quitar opción"
+                                                                            >
+                                                                                ✕
+                                                                            </button>
+                                                                        </div>
+
+                                                                        {/* Configuración de Insumo y Descuento */}
+                                                                        <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr 1.5fr auto', gap: '0.4rem', alignItems: 'center', fontSize: '0.8rem' }}>
+                                                                            <div>
+                                                                                <span style={{ fontSize: '0.72rem', color: '#64748b' }}>Insumo que descuenta:</span>
+                                                                                <select
+                                                                                    value={op.insumoId}
+                                                                                    onChange={(e) => cambiarOpcionGrupoMod(idx, 'insumoId', e.target.value)}
+                                                                                    style={{ ...inputStyle, margin: 0, fontSize: '0.8rem', padding: '0.35rem' }}
+                                                                                >
+                                                                                    <option value="">-- Sin insumo físico --</option>
+                                                                                    {(datos.insumos || []).map((ins) => (
+                                                                                        <option key={ins.id} value={ins.id}>
+                                                                                            {ins.nombre} ({ins.unidad_medida})
+                                                                                        </option>
+                                                                                    ))}
+                                                                                </select>
+                                                                            </div>
+
+                                                                            <div>
+                                                                                <span style={{ fontSize: '0.72rem', color: '#64748b' }}>Cantidad ({insumoActual?.unidad_medida || 'u.'}):</span>
+                                                                                <input
+                                                                                    type="number"
+                                                                                    step="0.001"
+                                                                                    min="0"
+                                                                                    placeholder="0.2"
+                                                                                    value={op.cantidadInsumo}
+                                                                                    onChange={(e) => cambiarOpcionGrupoMod(idx, 'cantidadInsumo', e.target.value)}
+                                                                                    style={{ ...inputStyle, margin: 0, fontSize: '0.8rem', padding: '0.35rem' }}
+                                                                                />
+                                                                            </div>
+
+                                                                            <div>
+                                                                                <span style={{ fontSize: '0.72rem', color: '#64748b' }}>Insumo que sustituye:</span>
+                                                                                <select
+                                                                                    value={op.insumoReemplazadoId}
+                                                                                    onChange={(e) => cambiarOpcionGrupoMod(idx, 'insumoReemplazadoId', e.target.value)}
+                                                                                    style={{ ...inputStyle, margin: 0, fontSize: '0.8rem', padding: '0.35rem' }}
+                                                                                >
+                                                                                    <option value="">-- Ninguno (Es extra/adicional) --</option>
+                                                                                    {(datos.insumos || []).map((ins) => (
+                                                                                        <option key={ins.id} value={ins.id}>
+                                                                                            Sustituye a: {ins.nombre}
+                                                                                        </option>
+                                                                                    ))}
+                                                                                </select>
+                                                                            </div>
+
+                                                                            <label style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', marginTop: '1rem', cursor: 'pointer' }}>
+                                                                                <input
+                                                                                    type="checkbox"
+                                                                                    checked={op.esDefault}
+                                                                                    onChange={(e) => cambiarOpcionGrupoMod(idx, 'esDefault', e.target.checked)}
+                                                                                />
+                                                                                <span style={{ fontSize: '0.72rem', color: '#334155' }}>Por defecto</span>
+                                                                            </label>
+                                                                        </div>
+                                                                    </div>
+                                                                );
+                                                            })}
+
+                                                            <button
+                                                                type="button"
+                                                                onClick={agregarOpcionGrupoMod}
+                                                                style={{
+                                                                    width: '100%',
+                                                                    padding: '0.45rem',
+                                                                    background: '#f1f5f9',
+                                                                    color: '#0284c7',
+                                                                    border: '1px dashed #cbd5e1',
+                                                                    borderRadius: '6px',
+                                                                    cursor: 'pointer',
+                                                                    fontSize: '0.82rem',
+                                                                    fontWeight: 'bold'
+                                                                }}
+                                                            >
+                                                                ➕ Agregar otra opción al grupo
+                                                            </button>
+                                                        </div>
+                                                    </div>
+
+                                                    <button type="submit" style={{ ...btnPrimario, marginTop: '0.75rem', padding: '0.7rem' }}>
+                                                        ✅ Guardar Grupo de Modificadores
+                                                    </button>
+                                                </form>
+                                            </section>
+
+                                            {/* COLUMNA DERECHA: ASIGNACIÓN A PRODUCTOS Y LISTADO EXISTENTE */}
+                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+                                                {/* ASIGNACIÓN A PRODUCTOS */}
+                                                <section style={cardStyle}>
+                                                    <h3 style={{ marginTop: 0, fontSize: '1rem' }}>🔗 Asignar a Productos con Receta</h3>
+                                                    <p style={{ color: '#64748b', fontSize: '0.84rem', marginTop: 0 }}>
+                                                        Indica qué productos con receta ofrecerán estos modificadores en la pantalla de cobro.
+                                                    </p>
+
+                                                    <form onSubmit={handleGuardarAsignacionModificadores} style={formCol}>
+                                                        <label style={{ fontSize: '0.85rem', color: '#334155' }}>
+                                                            Selecciona el Producto con Receta:
+                                                            <select
+                                                                value={productoAsignarModId}
+                                                                onChange={(e) => {
+                                                                    const pId = e.target.value;
+                                                                    setProductoAsignarModId(pId);
+                                                                    const prod = (datos.productos || []).find((p) => String(p.id) === String(pId));
+                                                                    setGruposAsignarIds(prod?.grupos_modificadores_ids || []);
+                                                                }}
+                                                                style={inputStyle}
+                                                                required
+                                                            >
+                                                                <option value="">-- Elige un producto con receta --</option>
+                                                                {(datos.productos || [])
+                                                                    .filter((p) => p.tipo_inventario === 'receta')
+                                                                    .map((p) => (
+                                                                        <option key={p.id} value={p.id}>
+                                                                            {p.nombre} (Bs {Number(p.precio).toFixed(2)})
+                                                                        </option>
+                                                                    ))}
+                                                            </select>
+                                                        </label>
+
+                                                        {productoAsignarModId && (
+                                                            <div style={{ background: '#f8fafc', padding: '0.75rem', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
+                                                                <div style={{ fontSize: '0.8rem', fontWeight: 'bold', color: '#334155', marginBottom: '0.4rem' }}>
+                                                                    Grupos que aplican a este producto:
+                                                                </div>
+                                                                {(datos.gruposModificadores || []).length === 0 ? (
+                                                                    <p style={{ fontSize: '0.8rem', color: '#94a3b8', margin: 0 }}>No hay grupos creados todavía.</p>
+                                                                ) : (
+                                                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                                                                        {(datos.gruposModificadores || []).map((g) => (
+                                                                            <label key={g.id} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.84rem', color: '#334155', cursor: 'pointer' }}>
+                                                                                <input
+                                                                                    type="checkbox"
+                                                                                    checked={gruposAsignarIds.includes(g.id)}
+                                                                                    onChange={() => toggleGrupoAsignar(g.id)}
+                                                                                />
+                                                                                <strong>{g.nombre}</strong>
+                                                                                <span style={{ fontSize: '0.75rem', color: '#64748b' }}>
+                                                                                    ({g.tipo_seleccion === 'unica' ? 'Única' : 'Múltiple'} • {g.opciones?.length || 0} opciones)
+                                                                                </span>
+                                                                            </label>
+                                                                        ))}
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        )}
+
+                                                        <button type="submit" disabled={!productoAsignarModId} style={{ ...btnOscuro, padding: '0.5rem', fontSize: '0.85rem' }}>
+                                                            Guardar Asignación
+                                                        </button>
+                                                    </form>
+                                                </section>
+
+                                                {/* LISTADO DE GRUPOS ACTIVOS */}
+                                                <section style={cardStyle}>
+                                                    <h3 style={{ marginTop: 0, fontSize: '1rem' }}>
+                                                        📋 Grupos Registrados ({(datos.gruposModificadores || []).length})
+                                                    </h3>
+                                                    {(datos.gruposModificadores || []).length === 0 ? (
+                                                        <p style={{ color: '#94a3b8', fontSize: '0.85rem', margin: 0 }}>No hay grupos registrados.</p>
+                                                    ) : (
+                                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                                                            {(datos.gruposModificadores || []).map((g) => (
+                                                                <div key={g.id} style={{ border: '1px solid #e2e8f0', borderRadius: '8px', padding: '0.75rem', background: '#f8fafc' }}>
+                                                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                                                        <span style={{ fontWeight: 'bold', fontSize: '0.92rem', color: '#0f172a' }}>
+                                                                            {g.nombre}
+                                                                        </span>
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => handleEliminarGrupoModificador(g.id, g.nombre)}
+                                                                            style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: '0.8rem' }}
+                                                                            title="Eliminar grupo"
+                                                                        >
+                                                                            🗑️ Eliminar
+                                                                        </button>
+                                                                    </div>
+                                                                    <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '0.2rem' }}>
+                                                                        {g.tipo_seleccion === 'unica' ? '🔘 Selección única' : '☑️ Selección múltiple'}
+                                                                        {g.es_obligatorio ? ' • Obligatorio' : ' • Opcional'}
+                                                                    </div>
+                                                                    <div style={{ marginTop: '0.4rem', display: 'flex', flexWrap: 'wrap', gap: '0.3rem' }}>
+                                                                        {(g.opciones || []).map((op) => (
+                                                                            <span
+                                                                                key={op.id}
+                                                                                style={{
+                                                                                    fontSize: '0.72rem',
+                                                                                    background: '#ffffff',
+                                                                                    border: '1px solid #cbd5e1',
+                                                                                    padding: '0.15rem 0.45rem',
+                                                                                    borderRadius: '4px',
+                                                                                    color: '#334155'
+                                                                                }}
+                                                                            >
+                                                                                {op.nombre} {Number(op.precio_adicional || 0) > 0 ? `(+Bs ${Number(op.precio_adicional).toFixed(2)})` : ''}
+                                                                                {op.insumo_reemplazado_nombre ? ` (Sustituye: ${op.insumo_reemplazado_nombre})` : ''}
+                                                                            </span>
+                                                                        ))}
+                                                                    </div>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    )}
+                                                </section>
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <>
+                                            {/* PESTAÑAS HORIZONTALES DE CATEGORÍAS */}
+                                            <div style={{ background: '#fff', padding: '0.85rem 1.25rem', borderRadius: '10px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', border: '1px solid #e2e8f0' }}>
                                         <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
                                             <span style={{ fontSize: '0.85rem', fontWeight: 'bold', color: '#475569', marginRight: '0.25rem' }}>
                                                 Categorías:
@@ -2182,7 +2659,18 @@ export default function AdminPage() {
                                                         return (
                                                             <tr key={p.id} style={{ borderBottom: '1px solid #f3f4f6' }}>
                                                                 <td style={thTd}>#{p.id}</td>
-                                                                <td style={thTd}><strong>{p.nombre}</strong></td>
+                                                                <td style={thTd}>
+                                                                    <strong>{p.nombre}</strong>
+                                                                    {p.grupos_modificadores && p.grupos_modificadores.length > 0 && (
+                                                                        <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap', marginTop: '0.25rem' }}>
+                                                                            {p.grupos_modificadores.map((g) => (
+                                                                                <span key={g.id} style={{ fontSize: '0.68rem', background: '#e0f2fe', color: '#0369a1', padding: '0.1rem 0.35rem', borderRadius: '4px', fontWeight: 600 }}>
+                                                                                    ✨ {g.nombre}
+                                                                                </span>
+                                                                            ))}
+                                                                        </div>
+                                                                    )}
+                                                                </td>
                                                                 <td style={thTd}>
                                                                     {p.categoria && p.categoria.trim() ? (
                                                                         <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap' }}>
@@ -2234,6 +2722,8 @@ export default function AdminPage() {
                                             </tbody>
                                         </table>
                                     </section>
+                                        </>
+                                    )}
                                 </div>
                             );
                         })()}
