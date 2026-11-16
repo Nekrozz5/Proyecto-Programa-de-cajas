@@ -41,8 +41,8 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
-# Archivos temporales de pruebas en scratch
-scratch/tmp/
+# Entorno de pruebas y scripts efímeros locales
+scratch/
 
 # Archivos del sistema operativo y editores
 .DS_Store
