@@ -6,6 +6,26 @@
 
 const db = require('../../database/database');
 const { redondear2 } = require('../domain/costos');
+const {
+    db: drizzleDb,
+    schema,
+    eq,
+    ne,
+    gt,
+    gte,
+    lt,
+    lte,
+    and,
+    or,
+    sql,
+    desc,
+    asc,
+    like,
+    inArray,
+    notInArray,
+    isNull,
+    isNotNull
+} = require('../../database/drizzle');
 
 function runQuery(sql, params = []) {
     return new Promise((resolve, reject) => {
@@ -80,6 +100,26 @@ async function enTransaccion(fn) {
 
 module.exports = {
     db,
+    // Drizzle ORM
+    drizzleDb,
+    schema,
+    eq,
+    ne,
+    gt,
+    gte,
+    lt,
+    lte,
+    and,
+    or,
+    sql,
+    desc,
+    asc,
+    like,
+    inArray,
+    notInArray,
+    isNull,
+    isNotNull,
+    // Helpers tradicionales
     runQuery,
     getQuery,
     allQuery,

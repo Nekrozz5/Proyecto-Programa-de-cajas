@@ -10,7 +10,12 @@ const NOMBRE_COOKIE_SESION = 'pos_session';
 // Identificador único en memoria generado por cada arranque del servidor/proyecto.
 // Si el servidor se detiene o reinicia (npm run dev), cualquier sesión previa
 // de developer o administradores queda automáticamente invalidada.
-const INSTANCE_BOOT_ID = crypto.randomUUID();
+// Se preserva en globalThis para garantizar consistencia absoluta entre todos los bundles
+// de Next.js (Route Handlers, Server Actions, Server Components) durante la vida del proceso.
+if (!globalThis.__POS_INSTANCE_BOOT_ID__) {
+    globalThis.__POS_INSTANCE_BOOT_ID__ = crypto.randomUUID();
+}
+const INSTANCE_BOOT_ID = globalThis.__POS_INSTANCE_BOOT_ID__;
 
 const ROLES_ADMINISTRATIVOS_O_TECNICOS = ['developer', 'superadmin', 'admin'];
 
@@ -23,22 +28,20 @@ const TTL_POR_ROL = {
 
 const DURACION_SESION_SEGUNDOS = TTL_POR_ROL.user;
 
-let secretoCache = null;
-
 // Validación perezosa: se ejecuta en el primer uso real (crear/verificar token), nunca al importar
 // el módulo, para no romper `next build` (que también corre con NODE_ENV=production).
 function obtenerSecretoSesion() {
-    if (secretoCache) return secretoCache;
+    if (globalThis.__POS_SECRETO_CACHE__) return globalThis.__POS_SECRETO_CACHE__;
 
     // Producción: el secreto debe venir del entorno y ser apto. Nunca se genera ni se escribe .env.local.
     if (esProduccion()) {
-        secretoCache = new TextEncoder().encode(exigirSecretoSesionProduccion());
-        return secretoCache;
+        globalThis.__POS_SECRETO_CACHE__ = new TextEncoder().encode(exigirSecretoSesionProduccion());
+        return globalThis.__POS_SECRETO_CACHE__;
     }
 
     if (process.env.SESSION_SECRET && String(process.env.SESSION_SECRET).trim().length >= 32) {
-        secretoCache = new TextEncoder().encode(String(process.env.SESSION_SECRET).trim());
-        return secretoCache;
+        globalThis.__POS_SECRETO_CACHE__ = new TextEncoder().encode(String(process.env.SESSION_SECRET).trim());
+        return globalThis.__POS_SECRETO_CACHE__;
     }
 
     const envLocalPath = path.resolve(process.cwd(), '.env.local');
@@ -53,8 +56,8 @@ function obtenerSecretoSesion() {
                     const valor = match[1].trim().replace(/^['"]|['"]$/g, '');
                     if (valor.length >= 32) {
                         process.env.SESSION_SECRET = valor;
-                        secretoCache = new TextEncoder().encode(valor);
-                        return secretoCache;
+                        globalThis.__POS_SECRETO_CACHE__ = new TextEncoder().encode(valor);
+                        return globalThis.__POS_SECRETO_CACHE__;
                     }
                 }
             }
@@ -65,13 +68,13 @@ function obtenerSecretoSesion() {
         const prefijo = fs.existsSync(envLocalPath) && !fs.readFileSync(envLocalPath, 'utf8').endsWith('\n') ? '\n' : '';
         fs.appendFileSync(envLocalPath, `${prefijo}SESSION_SECRET=${nuevoSecreto}\n`, 'utf8');
         process.env.SESSION_SECRET = nuevoSecreto;
-        secretoCache = new TextEncoder().encode(nuevoSecreto);
-        return secretoCache;
+        globalThis.__POS_SECRETO_CACHE__ = new TextEncoder().encode(nuevoSecreto);
+        return globalThis.__POS_SECRETO_CACHE__;
     } catch (err) {
         // Respaldo en memoria si el sistema de archivos fuera de solo lectura
         const secretoMemoria = crypto.randomBytes(32).toString('hex');
-        secretoCache = new TextEncoder().encode(secretoMemoria);
-        return secretoCache;
+        globalThis.__POS_SECRETO_CACHE__ = new TextEncoder().encode(secretoMemoria);
+        return globalThis.__POS_SECRETO_CACHE__;
     }
 }
 
@@ -111,18 +114,31 @@ async function verificarTokenSesion(token) {
         });
         if (!payload || !payload.id) return null;
 
-        // Si es rol administrativo o developer, invalidar inmediatamente si el proyecto se reinició
+        // Si es rol administrativo o developer, invalidar inmediatamente si el proceso del servidor se reinició
         if (ROLES_ADMINISTRATIVOS_O_TECNICOS.includes(payload.rol)) {
             if (!payload.bootId || payload.bootId !== INSTANCE_BOOT_ID) {
+                console.warn(`[Sesión] Token administrativo invalidado por reinicio de proceso (usuario ${payload.nombre || payload.id}).`);
                 return null;
             }
         }
 
         return payload;
     } catch (err) {
-        // Token inválido, expirado o con firma alterada
+        console.warn('[Sesión] Token inválido o expirado:', err && err.message ? err.message : err);
         return null;
     }
+}
+
+/**
+ * Determina si un token válido ha superado el 50% de su TTL para renovarlo de forma transparente
+ * mientras el operador mantenga actividad en el sistema.
+ */
+function tokenRequiereRenovacion(payload) {
+    if (!payload || !payload.exp || !payload.iat) return false;
+    const ahora = Math.floor(Date.now() / 1000);
+    const vidaTotal = payload.exp - payload.iat;
+    const tiempoRestante = payload.exp - ahora;
+    return tiempoRestante < (vidaTotal * 0.5);
 }
 
 function extraerTokenDeRequest(request) {
@@ -298,6 +314,8 @@ module.exports = {
     ROLES_ADMINISTRATIVOS_O_TECNICOS,
     crearTokenSesion,
     verificarTokenSesion,
+    tokenRequiereRenovacion,
+    extraerTokenDeRequest,
     obtenerUsuarioSesion,
     exigirUsuarioSesion,
     exigirUsuarioSesionAction,

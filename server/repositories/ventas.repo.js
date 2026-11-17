@@ -1,0 +1,1150 @@
+/**
+ * server/repositories/ventas.repo.js
+ * Repositorio para la gestión de ventas, cobros mixtos (efectivo + QR),
+ * egresos operativos, ingresos/aportes de sencillo, anulaciones y movimientos de turno.
+ * Asegura atomicidad transaccional, inmutabilidad fiscal y control estricto de caja.
+ */
+
+const {
+    runQuery,
+    getQuery,
+    allQuery,
+    enTransaccion,
+    redondear2,
+    numeroPositivo,
+    numeroNoNegativo
+} = require('./db');
+const { obtenerUsuarioPorId, esRolAdministrativo } = require('./auth.repo');
+const { obtenerConfiguracionNegocio } = require('./configuracion.repo');
+const { prorratearDescuentoTicket } = require('../domain/costos');
+const {
+    validarRegimenYPermisosVenta,
+    validarRegimenYPermisosEgreso,
+    calcularSnapshotFiscalVenta,
+    calcularSnapshotFiscalEgreso
+} = require('../domain/fiscal');
+
+async function registrarVentaCompleta(cajaId, items, metodoPago, montoRecibido = null, descripcion = 'Venta en mostrador', usuarioId = null, cambioEntregado = null, opcionesExtra = {}) {
+    if (!items || !Array.isArray(items) || items.length === 0) {
+        throw new Error('La venta debe incluir al menos un producto.');
+    }
+
+    if (usuarioId === null || usuarioId === undefined || usuarioId === '') {
+        throw new Error('El usuario que registra la venta es obligatorio.');
+    }
+
+    if (!['efectivo', 'qr', 'mixto'].includes(metodoPago)) {
+        throw new Error("Método de pago inválido. Debe ser 'efectivo', 'qr' o 'mixto'.");
+    }
+
+    // 1. Validar ítems y agrupar por (productoId + modificadores) sumando cantidades
+    const mapaItemsAgrupados = new Map();
+    for (const item of items) {
+        if (!item || item.productoId === undefined || item.productoId === null) {
+            throw new Error('Cada ítem debe especificar un productoId válido.');
+        }
+        const prodId = Number(item.productoId);
+        if (!Number.isFinite(prodId) || prodId <= 0) {
+            throw new Error('ID de producto inválido.');
+        }
+        const cant = numeroPositivo(item.cantidad, `La cantidad del producto ID ${prodId}`);
+
+        // Normalizar modificadores ordenados numéricamente
+        const modsNormalizados = Array.isArray(item.modificadores)
+            ? item.modificadores
+                .map((m) => (typeof m === 'object' && m !== null ? Number(m.id || m.opcionId) : Number(m)))
+                .filter((id) => Number.isFinite(id) && id > 0)
+                .sort((a, b) => a - b)
+            : [];
+
+        const claveAgrupacion = `${prodId}__${modsNormalizados.join('_')}`;
+        if (!mapaItemsAgrupados.has(claveAgrupacion)) {
+            mapaItemsAgrupados.set(claveAgrupacion, {
+                productoId: prodId,
+                modificadoresIds: modsNormalizados,
+                cantidadTotal: 0
+            });
+        }
+        const agrupado = mapaItemsAgrupados.get(claveAgrupacion);
+        agrupado.cantidadTotal = Number((agrupado.cantidadTotal + cant).toFixed(4));
+    }
+
+    return await enTransaccion(async () => {
+        const operador = await obtenerUsuarioPorId(usuarioId);
+        if (!operador) {
+            throw new Error('El usuario que intenta registrar la venta no existe o está inactivo.');
+        }
+
+        // 2. Verificar que la caja exista, esté abierta y quien vende sea el dueño de la caja o un administrador
+        const caja = await getQuery(
+            `SELECT c.id, c.usuario_id, c.estado, c.caja_fisica_id,
+                    COALESCE(cf.nombre, 'Caja Principal') as caja_fisica_nombre,
+                    COALESCE(cf.habilita_respaldo_fiscal, 1) as habilita_respaldo_fiscal
+             FROM cajas c
+             LEFT JOIN cajas_fisicas cf ON c.caja_fisica_id = cf.id
+             WHERE c.id = ?`,
+            [cajaId]
+        );
+        if (!caja) {
+            throw new Error('La caja indicada no existe.');
+        }
+        if (caja.estado !== 'abierta') {
+            throw new Error('No se puede registrar una venta porque la caja no está abierta.');
+        }
+        if (Number(caja.usuario_id) !== Number(operador.id) && !esRolAdministrativo(operador.rol)) {
+            throw new Error('Permiso denegado: solo el cajero titular de la caja abierta o un Administrador puede registrar ventas en este turno.');
+        }
+
+        let subtotalBruto = 0;
+        const itemsProcesados = [];
+        const consumoAcumuladoInsumos = {};
+        const consumoAcumuladoDirecto = {};
+
+        for (const itemAgrupado of mapaItemsAgrupados.values()) {
+            const { productoId: prodId, modificadoresIds, cantidadTotal } = itemAgrupado;
+            const prod = await getQuery(`SELECT * FROM productos WHERE id = ? AND activo = 1`, [prodId]);
+            if (!prod) throw new Error(`Producto con ID ${prodId} no existe.`);
+
+            // Validar vigencia temporal en caso de combos
+            if (prod.tipo_inventario === 'combo') {
+                const ahora = new Date();
+                if (prod.fecha_inicio_vigencia) {
+                    const fInicio = new Date(prod.fecha_inicio_vigencia);
+                    if (!isNaN(fInicio.getTime()) && ahora < fInicio) {
+                        throw new Error(`La promoción "${prod.nombre}" aún no está vigente (inicia el ${fInicio.toLocaleString()}).`);
+                    }
+                }
+                if (prod.fecha_fin_vigencia) {
+                    const fFin = new Date(prod.fecha_fin_vigencia);
+                    if (!isNaN(fFin.getTime()) && ahora > fFin) {
+                        throw new Error(`La promoción "${prod.nombre}" ha finalizado (expiró el ${fFin.toLocaleString()}).`);
+                    }
+                }
+            }
+
+            // Cargar componentes si es combo
+            let componentesCombo = [];
+            if (prod.tipo_inventario === 'combo') {
+                componentesCombo = await allQuery(
+                    `SELECT cc.componente_producto_id, cc.cantidad,
+                            p.nombre as componente_nombre, p.tipo_inventario as componente_tipo,
+                            p.costo as componente_costo, p.stock as componente_stock
+                      FROM combo_componentes cc
+                      INNER JOIN productos p ON cc.componente_producto_id = p.id
+                      WHERE cc.combo_producto_id = ? AND p.activo = 1`,
+                    [prod.id]
+                );
+                if (componentesCombo.length === 0) {
+                    throw new Error(`El combo "${prod.nombre}" no tiene componentes válidos configurados.`);
+                }
+            }
+
+            // Cargar receta base si corresponde
+            let recetaBase = [];
+            if (prod.tipo_inventario === 'receta') {
+                recetaBase = await allQuery(
+                    `SELECT r.insumo_id, r.cantidad_requerida, i.nombre, i.stock_actual, i.unidad_medida, i.costo_por_unidad
+                     FROM recetas r
+                     INNER JOIN insumos i ON r.insumo_id = i.id
+                     WHERE r.producto_id = ?`,
+                    [prod.id]
+                );
+            }
+
+            // Validar y cargar modificadores
+            let opcionesModificadores = [];
+            if (modificadoresIds.length > 0) {
+                const placeholders = modificadoresIds.map(() => '?').join(',');
+                opcionesModificadores = await allQuery(
+                    `SELECT o.*, g.nombre as grupo_nombre, g.tipo_seleccion, g.es_obligatorio,
+                            i.nombre as insumo_nombre, i.stock_actual as insumo_stock, i.costo_por_unidad as insumo_costo, i.unidad_medida as insumo_unidad,
+                            ir.costo_por_unidad as insumo_reemplazado_costo, ir.nombre as insumo_reemplazado_nombre
+                     FROM modificadores_opciones o
+                     INNER JOIN grupos_modificadores g ON o.grupo_id = g.id
+                     LEFT JOIN insumos i ON o.insumo_id = i.id
+                     LEFT JOIN insumos ir ON o.insumo_reemplazado_id = ir.id
+                     WHERE o.id IN (${placeholders}) AND o.activo = 1 AND g.activo = 1`,
+                    modificadoresIds
+                );
+            }
+
+            // Insumos efectivos por unidad de producto
+            const mapaInsumosPorUnidad = new Map();
+            for (const ing of recetaBase) {
+                mapaInsumosPorUnidad.set(ing.insumo_id, {
+                    insumoId: ing.insumo_id,
+                    cantidad: ing.cantidad_requerida,
+                    nombre: ing.nombre,
+                    unidad: ing.unidad_medida,
+                    costoUnitario: Number(ing.costo_por_unidad || 0)
+                });
+            }
+
+            let precioUnitario = redondear2(prod.precio);
+            let costoUnitario = Number(prod.costo || 0);
+            const modificadoresDetalle = [];
+            const textoModificadores = [];
+
+            for (const modOp of opcionesModificadores) {
+                const recargo = redondear2(modOp.precio_adicional || 0);
+                precioUnitario = redondear2(precioUnitario + recargo);
+                textoModificadores.push(
+                    recargo > 0 ? `${modOp.nombre} (+Bs ${recargo.toFixed(2)})` : modOp.nombre
+                );
+
+                let costoDelta = 0;
+                if (modOp.insumo_id) {
+                    const cantMod = Number(modOp.cantidad_insumo || 0);
+                    const costoInsumoMod = Number(modOp.insumo_costo || 0);
+
+                    if (modOp.insumo_reemplazado_id) {
+                        // Reemplazo: quitar o sustituir el insumo base
+                        const cantReemplazada = mapaInsumosPorUnidad.has(modOp.insumo_reemplazado_id)
+                            ? mapaInsumosPorUnidad.get(modOp.insumo_reemplazado_id).cantidad
+                            : cantMod;
+                        const costoReemplazado = Number(modOp.insumo_reemplazado_costo || 0);
+
+                        mapaInsumosPorUnidad.delete(modOp.insumo_reemplazado_id);
+                        const cantEfectiva = cantMod > 0 ? cantMod : cantReemplazada;
+                        mapaInsumosPorUnidad.set(modOp.insumo_id, {
+                            insumoId: modOp.insumo_id,
+                            cantidad: cantEfectiva,
+                            nombre: modOp.insumo_nombre,
+                            unidad: modOp.insumo_unidad,
+                            costoUnitario: costoInsumoMod
+                        });
+                        costoDelta = Number((cantEfectiva * costoInsumoMod - cantReemplazada * costoReemplazado).toFixed(4));
+                    } else {
+                        // Extra / Adición
+                        const actual = mapaInsumosPorUnidad.get(modOp.insumo_id);
+                        if (actual) {
+                            actual.cantidad = Number((actual.cantidad + cantMod).toFixed(4));
+                        } else {
+                            mapaInsumosPorUnidad.set(modOp.insumo_id, {
+                                insumoId: modOp.insumo_id,
+                                cantidad: cantMod,
+                                nombre: modOp.insumo_nombre,
+                                unidad: modOp.insumo_unidad,
+                                costoUnitario: costoInsumoMod
+                            });
+                        }
+                        costoDelta = Number((cantMod * costoInsumoMod).toFixed(4));
+                    }
+                }
+
+                modificadoresDetalle.push({
+                    modificadorOpcionId: modOp.id,
+                    nombre: modOp.nombre,
+                    precioAdicional: recargo,
+                    costoAdicional: costoDelta,
+                    insumoId: modOp.insumo_id,
+                    cantidadInsumo: modOp.cantidad_insumo,
+                    insumoReemplazadoId: modOp.insumo_reemplazado_id
+                });
+            }
+
+            let componentesDetalleCombo = [];
+            // Si el producto es combo, descomponer recursivamente sus componentes en insumos y stock directo
+            if (prod.tipo_inventario === 'combo') {
+                let costoCalculadoCombo = 0;
+                for (const comp of componentesCombo) {
+                    const cantTotalComp = Number((comp.cantidad * cantidadTotal).toFixed(4));
+                    componentesDetalleCombo.push({
+                        componenteProductoId: comp.componente_producto_id,
+                        cantidadUnitaria: comp.cantidad,
+                        cantidadTotal: cantTotalComp,
+                        costoUnitario: Number(comp.componente_costo || 0)
+                    });
+                    costoCalculadoCombo += comp.cantidad * Number(comp.componente_costo || 0);
+
+                    if (comp.componente_tipo === 'directo') {
+                        // Acumular consumo de stock directo por componente
+                        if (!consumoAcumuladoDirecto[comp.componente_producto_id]) {
+                            consumoAcumuladoDirecto[comp.componente_producto_id] = {
+                                productoId: comp.componente_producto_id,
+                                nombre: comp.componente_nombre,
+                                costoUnitario: Number(comp.componente_costo || 0),
+                                cantidadTotalRequerida: 0
+                            };
+                        }
+                        consumoAcumuladoDirecto[comp.componente_producto_id].cantidadTotalRequerida = Number(
+                            (consumoAcumuladoDirecto[comp.componente_producto_id].cantidadTotalRequerida + cantTotalComp).toFixed(4)
+                        );
+                    } else if (comp.componente_tipo === 'receta') {
+                        // Descomponer en sus insumos
+                        const recComp = await allQuery(
+                            `SELECT r.insumo_id, r.cantidad_requerida, i.nombre, i.unidad_medida, i.costo_por_unidad
+                             FROM recetas r
+                             INNER JOIN insumos i ON r.insumo_id = i.id
+                             WHERE r.producto_id = ?`,
+                            [comp.componente_producto_id]
+                        );
+                        for (const ing of recComp) {
+                            const cantInsumoTotal = Number((ing.cantidad_requerida * cantTotalComp).toFixed(4));
+                            if (!consumoAcumuladoInsumos[ing.insumo_id]) {
+                                consumoAcumuladoInsumos[ing.insumo_id] = {
+                                    insumoId: ing.insumo_id,
+                                    nombre: ing.nombre,
+                                    unidad: ing.unidad_medida,
+                                    costoUnitario: Number(ing.costo_por_unidad || 0),
+                                    cantidadTotalRequerida: 0
+                                };
+                            }
+                            consumoAcumuladoInsumos[ing.insumo_id].cantidadTotalRequerida = Number(
+                                (consumoAcumuladoInsumos[ing.insumo_id].cantidadTotalRequerida + cantInsumoTotal).toFixed(4)
+                            );
+                        }
+                    }
+                }
+                costoUnitario = redondear2(costoCalculadoCombo);
+            }
+
+            // Si el producto es receta, su costo unitario exacto es la suma de los insumos efectivos
+            if (prod.tipo_inventario === 'receta') {
+                let costoCalculado = 0;
+                for (const ins of mapaInsumosPorUnidad.values()) {
+                    costoCalculado += ins.cantidad * ins.costoUnitario;
+                }
+                costoUnitario = redondear2(costoCalculado);
+            }
+
+            // Acumular consumo total de insumos para este producto (multiplicado por cantidadTotal)
+            for (const ins of mapaInsumosPorUnidad.values()) {
+                const requeridoTotalItem = Number((ins.cantidad * cantidadTotal).toFixed(4));
+                if (!consumoAcumuladoInsumos[ins.insumoId]) {
+                    consumoAcumuladoInsumos[ins.insumoId] = {
+                        insumoId: ins.insumoId,
+                        nombre: ins.nombre,
+                        unidad: ins.unidad,
+                        costoUnitario: ins.costoUnitario,
+                        cantidadTotalRequerida: 0
+                    };
+                }
+                consumoAcumuladoInsumos[ins.insumoId].cantidadTotalRequerida = Number(
+                    (consumoAcumuladoInsumos[ins.insumoId].cantidadTotalRequerida + requeridoTotalItem).toFixed(4)
+                );
+            }
+
+            // Si es directo, acumular consumo
+            if (prod.tipo_inventario === 'directo') {
+                if (!consumoAcumuladoDirecto[prod.id]) {
+                    consumoAcumuladoDirecto[prod.id] = {
+                        productoId: prod.id,
+                        nombre: prod.nombre,
+                        costoUnitario: Number(prod.costo || 0),
+                        cantidadTotalRequerida: 0
+                    };
+                }
+                consumoAcumuladoDirecto[prod.id].cantidadTotalRequerida = Number(
+                    (consumoAcumuladoDirecto[prod.id].cantidadTotalRequerida + cantidadTotal).toFixed(4)
+                );
+            }
+
+            const subtotalLinea = redondear2(cantidadTotal * precioUnitario);
+            subtotalBruto = redondear2(subtotalBruto + subtotalLinea);
+
+            itemsProcesados.push({
+                productoId: prod.id,
+                nombre: prod.nombre,
+                tipoInventario: prod.tipo_inventario,
+                cantidad: cantidadTotal,
+                precioUnitario,
+                costoUnitario,
+                subtotal: subtotalLinea,
+                textoModificadores: textoModificadores.join(', '),
+                modificadoresDetalle,
+                componentesDetalleCombo,
+                limiteMaximoActivo: Number(prod.limite_maximo_activo) === 1
+            });
+        }
+
+        // 3. Validar stock total requerido antes de descontar nada
+        for (const iId in consumoAcumuladoInsumos) {
+            const req = consumoAcumuladoInsumos[iId];
+            const insActual = await getQuery(`SELECT stock_actual, nombre, unidad_medida FROM insumos WHERE id = ?`, [req.insumoId]);
+            if (!insActual || Number(insActual.stock_actual) < req.cantidadTotalRequerida) {
+                const disponible = insActual ? insActual.stock_actual : 0;
+                const unidad = insActual ? insActual.unidad_medida : req.unidad;
+                throw new Error(
+                    `Stock insuficiente de insumo "${req.nombre}": se requieren ${req.cantidadTotalRequerida} ${unidad} pero solo hay ${disponible} ${unidad} en inventario.`
+                );
+            }
+        }
+
+        for (const pId in consumoAcumuladoDirecto) {
+            const reqDir = consumoAcumuladoDirecto[pId];
+            const prodActual = await getQuery(`SELECT stock, nombre, unidad_medida FROM productos WHERE id = ?`, [reqDir.productoId]);
+            if (!prodActual || Number(prodActual.stock) < reqDir.cantidadTotalRequerida) {
+                const disponible = prodActual ? prodActual.stock : 0;
+                const unidad = prodActual ? prodActual.unidad_medida : 'unidades';
+                throw new Error(
+                    `Stock insuficiente del producto "${reqDir.nombre}": se requieren ${reqDir.cantidadTotalRequerida} ${unidad} pero solo hay ${disponible} ${unidad} en stock.`
+                );
+            }
+        }
+
+        // Validar límite restante de combos si corresponde
+        for (const it of itemsProcesados) {
+            if (it.tipoInventario === 'combo' && it.limiteMaximoActivo) {
+                const pCombo = await getQuery(`SELECT limite_unidades_restante, nombre FROM productos WHERE id = ?`, [it.productoId]);
+                const restante = Math.max(0, Math.floor(pCombo?.limite_unidades_restante ?? 0));
+                if (restante < it.cantidad) {
+                    throw new Error(`Límite de venta alcanzado para la promoción "${pCombo.nombre}". Quedan solo ${restante} combos disponibles.`);
+                }
+            }
+        }
+
+        // 4. Calcular descuentos y total a pagar
+        const descuentoTotal = opcionesExtra?.descuentoTotal !== undefined
+            ? redondear2(numeroNoNegativo(opcionesExtra.descuentoTotal, 'El descuento total'))
+            : 0;
+        if (descuentoTotal > subtotalBruto) {
+            throw new Error(`El descuento (Bs ${descuentoTotal}) no puede superar el subtotal de la venta (Bs ${subtotalBruto}).`);
+        }
+        const montoNeto = redondear2(subtotalBruto - descuentoTotal);
+
+        // 5. Validar método de pago y montos según desglose
+        let montoEfectivo = 0;
+        let montoQr = 0;
+        let referenciaQr = opcionesExtra?.referenciaQr && String(opcionesExtra.referenciaQr).trim() !== ''
+            ? String(opcionesExtra.referenciaQr).trim()
+            : null;
+        let recibidoEfectivo = null;
+        let cambioCalculado = 0;
+
+        if (metodoPago === 'efectivo') {
+            montoEfectivo = montoNeto;
+            recibidoEfectivo = montoRecibido !== null && montoRecibido !== undefined && montoRecibido !== ''
+                ? redondear2(numeroNoNegativo(montoRecibido, 'El monto recibido en efectivo'))
+                : montoNeto;
+            if (recibidoEfectivo < montoNeto) {
+                throw new Error(`El efectivo recibido (Bs ${recibidoEfectivo.toFixed(2)}) es menor al total a cobrar (Bs ${montoNeto.toFixed(2)}).`);
+            }
+            cambioCalculado = redondear2(recibidoEfectivo - montoNeto);
+            if (cambioEntregado !== null && cambioEntregado !== undefined && cambioEntregado !== '') {
+                const cambioFront = redondear2(Number(cambioEntregado));
+                if (Math.abs(cambioFront - cambioCalculado) > 0.05) {
+                    console.warn(`[Venta] Diferencia en cálculo de cambio. Esperado: ${cambioCalculado}, Recibido front: ${cambioFront}`);
+                }
+            }
+        } else if (metodoPago === 'qr') {
+            montoQr = montoNeto;
+            recibidoEfectivo = null;
+            cambioCalculado = 0;
+        } else if (metodoPago === 'mixto') {
+            const desgloses = Array.isArray(opcionesExtra?.pagos) ? opcionesExtra.pagos : [];
+            const pagoEf = desgloses.find((p) => p && p.metodo === 'efectivo');
+            const pagoQr = desgloses.find((p) => p && p.metodo === 'qr');
+
+            montoEfectivo = pagoEf ? redondear2(numeroNoNegativo(pagoEf.monto, 'La porción en efectivo')) : 0;
+            montoQr = pagoQr ? redondear2(numeroNoNegativo(pagoQr.monto, 'La porción en QR')) : 0;
+            if (pagoQr?.referencia) {
+                referenciaQr = String(pagoQr.referencia).trim();
+            }
+
+            const sumaPartes = redondear2(montoEfectivo + montoQr);
+            if (Math.abs(sumaPartes - montoNeto) > 0.01) {
+                throw new Error(`En pago mixto, la suma de Efectivo (Bs ${montoEfectivo.toFixed(2)}) y QR (Bs ${montoQr.toFixed(2)}) debe ser exactamente igual al monto neto a cobrar (Bs ${montoNeto.toFixed(2)}). Suma actual: Bs ${sumaPartes.toFixed(2)}`);
+            }
+
+            if (pagoEf && pagoEf.recibido !== undefined && pagoEf.recibido !== null && pagoEf.recibido !== '') {
+                recibidoEfectivo = redondear2(numeroNoNegativo(pagoEf.recibido, 'El efectivo recibido en pago mixto'));
+                if (recibidoEfectivo < montoEfectivo) {
+                    throw new Error(`El efectivo recibido (Bs ${recibidoEfectivo.toFixed(2)}) es menor a la porción de efectivo acordada (Bs ${montoEfectivo.toFixed(2)}).`);
+                }
+                cambioCalculado = redondear2(recibidoEfectivo - montoEfectivo);
+            } else {
+                recibidoEfectivo = montoEfectivo;
+                cambioCalculado = 0;
+            }
+        }
+
+        // 6. Validaciones fiscales y snapshot congelado
+        const configNegocio = await obtenerConfiguracionNegocio();
+        const regimenConfig = configNegocio?.regimen_tributario || 'simplificado_control_interno';
+
+        const tipoComprobante = opcionesExtra?.tipoComprobante === 'factura' ? 'factura' : 'recibo';
+        const clienteNitCi = opcionesExtra?.clienteNitCi && String(opcionesExtra.clienteNitCi).trim() !== ''
+            ? String(opcionesExtra.clienteNitCi).trim()
+            : null;
+        const clienteRazonSocial = opcionesExtra?.clienteRazonSocial && String(opcionesExtra.clienteRazonSocial).trim() !== ''
+            ? String(opcionesExtra.clienteRazonSocial).trim()
+            : null;
+        const nroFactura = opcionesExtra?.nroFactura && String(opcionesExtra.nroFactura).trim() !== ''
+            ? String(opcionesExtra.nroFactura).trim()
+            : null;
+
+        if (tipoComprobante === 'factura') {
+            if (regimenConfig === 'simplificado_control_interno') {
+                throw new Error('Operación no permitida: El negocio está configurado bajo Régimen Tributario Simplificado / Control Interno. La emisión de facturas oficiales con IVA está estrictamente prohibida.');
+            }
+            if (Number(configNegocio?.emite_factura ?? 0) !== 1) {
+                throw new Error('Operación no permitida: La emisión de facturas no está habilitada en la configuración general del negocio.');
+            }
+            if (Number(caja.habilita_respaldo_fiscal ?? 1) !== 1) {
+                throw new Error(`Operación no permitida: La estación "${caja.caja_fisica_nombre}" tiene deshabilitada la emisión de facturas fiscales.`);
+            }
+        }
+
+        const ivaPorcCfg = Number(configNegocio?.iva_porcentaje ?? 13);
+        const itPorcCfg = Number(configNegocio?.it_porcentaje ?? 3);
+        const itBaseCfg = configNegocio?.it_base === 'solo_facturadas' ? 'solo_facturadas' : 'todas_las_ventas';
+
+        let ivaPorcSnapshot = 0;
+        let itPorcSnapshot = 0;
+        let ivaMontoSnapshot = 0;
+        let itMontoSnapshot = 0;
+
+        if (regimenConfig === 'regimen_general') {
+            if (tipoComprobante === 'factura') {
+                ivaPorcSnapshot = ivaPorcCfg;
+                ivaMontoSnapshot = redondear2(montoNeto * (ivaPorcCfg / 100));
+            }
+            const aplicaIt = itBaseCfg === 'todas_las_ventas' || (itBaseCfg === 'solo_facturadas' && tipoComprobante === 'factura');
+            if (aplicaIt) {
+                itPorcSnapshot = itPorcCfg;
+                itMontoSnapshot = redondear2(montoNeto * (itPorcCfg / 100));
+            }
+        }
+
+        // 7. Insertar cabecera de movimiento
+        const resMov = await runQuery(
+            `INSERT INTO movimientos (
+                caja_id, usuario_id, tipo, categoria_contable,
+                subtotal_bruto, descuento_total, monto,
+                metodo_pago, monto_efectivo, monto_qr, referencia_qr,
+                monto_recibido, cambio,
+                tipo_comprobante, nro_factura, cliente_nit_ci, cliente_razon_social,
+                regimen_tributario, iva_porcentaje, it_porcentaje, iva_monto, it_monto,
+                descripcion, estado
+             )
+             VALUES (?, ?, 'ingreso', 'venta', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'completado')`,
+            [
+                cajaId,
+                operador.id,
+                subtotalBruto,
+                descuentoTotal,
+                montoNeto,
+                metodoPago,
+                montoEfectivo,
+                montoQr,
+                referenciaQr,
+                recibidoEfectivo,
+                cambioCalculado,
+                tipoComprobante,
+                nroFactura,
+                clienteNitCi,
+                clienteRazonSocial,
+                regimenConfig,
+                ivaPorcSnapshot,
+                itPorcSnapshot,
+                ivaMontoSnapshot,
+                itMontoSnapshot,
+                descripcion.trim()
+            ]
+        );
+        const movimientoId = resMov.lastID;
+
+        // 8. Insertar fuente de verdad del dinero: movimientos_pagos
+        if (metodoPago === 'efectivo') {
+            await runQuery(
+                `INSERT INTO movimientos_pagos (movimiento_id, metodo_pago, monto, referencia) VALUES (?, 'efectivo', ?, NULL)`,
+                [movimientoId, montoEfectivo]
+            );
+        } else if (metodoPago === 'qr') {
+            await runQuery(
+                `INSERT INTO movimientos_pagos (movimiento_id, metodo_pago, monto, referencia) VALUES (?, 'qr', ?, ?)`,
+                [movimientoId, montoQr, referenciaQr]
+            );
+        } else if (metodoPago === 'mixto') {
+            if (montoEfectivo > 0) {
+                await runQuery(
+                    `INSERT INTO movimientos_pagos (movimiento_id, metodo_pago, monto, referencia) VALUES (?, 'efectivo', ?, NULL)`,
+                    [movimientoId, montoEfectivo]
+                );
+            }
+            if (montoQr > 0) {
+                await runQuery(
+                    `INSERT INTO movimientos_pagos (movimiento_id, metodo_pago, monto, referencia) VALUES (?, 'qr', ?, ?)`,
+                    [movimientoId, montoQr, referenciaQr]
+                );
+            }
+        }
+
+        // 9. Insertar líneas de venta (detalle_movimientos), modificadores y componentes de combo
+        for (const it of itemsProcesados) {
+            const resDet = await runQuery(
+                `INSERT INTO detalle_movimientos (movimiento_id, producto_id, cantidad, precio_unitario, costo_unitario, subtotal)
+                 VALUES (?, ?, ?, ?, ?, ?)`,
+                [movimientoId, it.productoId, it.cantidad, it.precioUnitario, it.costoUnitario, it.subtotal]
+            );
+            const detalleMovimientoId = resDet.lastID;
+
+            // Modificadores congelados para auditoría y anulación
+            for (const mod of it.modificadoresDetalle) {
+                await runQuery(
+                    `INSERT INTO detalle_movimientos_modificadores (
+                        detalle_movimiento_id, modificador_opcion_id, nombre, precio_adicional, costo_adicional,
+                        insumo_id, cantidad_insumo, insumo_reemplazado_id
+                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+                    [
+                        detalleMovimientoId,
+                        mod.modificadorOpcionId,
+                        mod.nombre,
+                        mod.precioAdicional,
+                        mod.costoAdicional,
+                        mod.insumoId,
+                        mod.cantidadInsumo,
+                        mod.insumoReemplazadoId
+                    ]
+                );
+            }
+
+            // Componentes de combo congelados
+            for (const comp of it.componentesDetalleCombo) {
+                await runQuery(
+                    `INSERT INTO detalle_movimientos_combos (
+                        detalle_movimiento_id, componente_producto_id, cantidad_unitaria, cantidad_total, costo_unitario_congelado
+                     ) VALUES (?, ?, ?, ?, ?)`,
+                    [
+                        detalleMovimientoId,
+                        comp.componenteProductoId,
+                        comp.cantidadUnitaria,
+                        comp.cantidadTotal,
+                        comp.costoUnitario
+                    ]
+                );
+            }
+
+            // Si es combo con límite activo, decrementar el contador restante de combos
+            if (it.tipoInventario === 'combo' && it.limiteMaximoActivo) {
+                await runQuery(
+                    `UPDATE productos
+                     SET limite_unidades_restante = ROUND(limite_unidades_restante - ?, 4)
+                     WHERE id = ? AND limite_unidades_restante >= ?`,
+                    [it.cantidad, it.productoId, it.cantidad]
+                );
+            }
+        }
+
+        // 10. Descontar inventario atómicamente y asentar en Kardex
+        // Insumos
+        for (const iId in consumoAcumuladoInsumos) {
+            const req = consumoAcumuladoInsumos[iId];
+            const r = await runQuery(
+                `UPDATE insumos SET stock_actual = ROUND(stock_actual - ?, 4) WHERE id = ? AND stock_actual >= ?`,
+                [req.cantidadTotalRequerida, req.insumoId, req.cantidadTotalRequerida]
+            );
+            if (r.changes === 0) {
+                throw new Error(`Error de concurrencia: Stock insuficiente de ${req.nombre} durante la venta.`);
+            }
+
+            const insActualizado = await getQuery(`SELECT stock_actual, costo_por_unidad FROM insumos WHERE id = ?`, [req.insumoId]);
+            const stockResult = Number(insActualizado?.stock_actual || 0);
+            const cppResult = Number(insActualizado?.costo_por_unidad || req.costoUnitario);
+
+            await runQuery(
+                `INSERT INTO movimientos_insumos (
+                    insumo_id, movimiento_id, usuario_id, tipo, cantidad, stock_resultante,
+                    costo_unitario, costo_promedio_resultante, monto_total_compra, motivo
+                 ) VALUES (?, ?, ?, 'consumo_venta', ?, ?, ?, ?, ?, ?)`,
+                [
+                    req.insumoId,
+                    movimientoId,
+                    operador.id,
+                    req.cantidadTotalRequerida,
+                    stockResult,
+                    req.costoUnitario,
+                    cppResult,
+                    redondear2(req.cantidadTotalRequerida * req.costoUnitario),
+                    `Consumo Venta Ticket #${movimientoId}`
+                ]
+            );
+        }
+
+        // Productos de venta directa
+        for (const pId in consumoAcumuladoDirecto) {
+            const reqDir = consumoAcumuladoDirecto[pId];
+            const r = await runQuery(
+                `UPDATE productos SET stock = ROUND(stock - ?, 4) WHERE id = ? AND stock >= ?`,
+                [reqDir.cantidadTotalRequerida, reqDir.productoId, reqDir.cantidadTotalRequerida]
+            );
+            if (r.changes === 0) {
+                throw new Error(`Error de concurrencia: Stock insuficiente de ${reqDir.nombre} durante la venta.`);
+            }
+
+            const prodActualizado = await getQuery(`SELECT stock, costo FROM productos WHERE id = ?`, [reqDir.productoId]);
+            const stockResultDir = Number(prodActualizado?.stock || 0);
+            const cppResultDir = Number(prodActualizado?.costo || reqDir.costoUnitario);
+
+            await runQuery(
+                `INSERT INTO movimientos_productos_directos (
+                    producto_id, movimiento_id, usuario_id, tipo, cantidad, stock_resultante,
+                    costo_unitario, costo_promedio_resultante, monto_total, motivo
+                 ) VALUES (?, ?, ?, 'venta', ?, ?, ?, ?, ?, ?)`,
+                [
+                    reqDir.productoId,
+                    movimientoId,
+                    operador.id,
+                    reqDir.cantidadTotalRequerida,
+                    stockResultDir,
+                    reqDir.costoUnitario,
+                    cppResultDir,
+                    redondear2(reqDir.cantidadTotalRequerida * reqDir.costoUnitario),
+                    `Venta Ticket #${movimientoId}`
+                ]
+            );
+        }
+
+        return {
+            movimientoId,
+            subtotalBruto,
+            descuentoTotal,
+            montoTotal: montoNeto,
+            metodoPago,
+            montoEfectivo,
+            montoQr,
+            recibido: recibidoEfectivo,
+            cambio: cambioCalculado,
+            tipoComprobante,
+            nroFactura,
+            items: itemsProcesados
+        };
+    });
+}
+
+async function registrarEgreso(cajaId, monto, descripcion, metodoPago = 'efectivo', usuarioId = null, opcionesFiscales = {}) {
+    const montoValidado = redondear2(numeroPositivo(monto, 'El monto del egreso'));
+
+    if (!descripcion || descripcion.trim() === '') {
+        throw new Error('Debes indicar el motivo del egreso.');
+    }
+
+    if (usuarioId === null || usuarioId === undefined || usuarioId === '') {
+        throw new Error('El usuario que registra el egreso es obligatorio.');
+    }
+
+    if (!['efectivo', 'qr'].includes(metodoPago)) {
+        throw new Error("Método de pago de egreso inválido. Debe ser 'efectivo' o 'qr'.");
+    }
+
+    return await enTransaccion(async () => {
+        const ejecutor = await obtenerUsuarioPorId(usuarioId);
+        if (!ejecutor) {
+            throw new Error('El usuario que intenta registrar el egreso no existe o está inactivo.');
+        }
+
+        if (!esRolAdministrativo(ejecutor.rol) && metodoPago !== 'efectivo') {
+            throw new Error('Permiso denegado: un cajero solo puede registrar egresos de efectivo físico del cajón.');
+        }
+
+        const caja = await getQuery(
+            `SELECT c.id, c.usuario_id, c.estado, c.caja_fisica_id,
+                    COALESCE(cf.nombre, 'Caja Principal') as caja_fisica_nombre,
+                    COALESCE(cf.habilita_respaldo_fiscal, 1) as habilita_respaldo_fiscal
+             FROM cajas c
+             LEFT JOIN cajas_fisicas cf ON c.caja_fisica_id = cf.id
+             WHERE c.id = ?`,
+            [cajaId]
+        );
+        if (!caja) {
+            throw new Error('La caja indicada no existe.');
+        }
+        if (caja.estado !== 'abierta') {
+            throw new Error('No se puede registrar un egreso porque la caja no está abierta.');
+        }
+        if (Number(caja.usuario_id) !== Number(ejecutor.id) && !esRolAdministrativo(ejecutor.rol)) {
+            throw new Error('Permiso denegado: solo el cajero titular de la caja abierta o un Administrador puede registrar egresos en este turno.');
+        }
+
+        const configNegocio = await obtenerConfiguracionNegocio();
+        const regimenSnapshot = configNegocio?.regimen_tributario === 'regimen_general'
+            ? 'regimen_general'
+            : 'simplificado_control_interno';
+
+        const CATEGORIAS_EGRESO_VALIDAS = ['gasto_operativo', 'compra_insumo', 'pago_proveedor', 'retiro_dueno', 'otro'];
+        const categoriaContable = CATEGORIAS_EGRESO_VALIDAS.includes(opcionesFiscales?.categoriaContable)
+            ? opcionesFiscales.categoriaContable
+            : 'gasto_operativo';
+
+        const conFactura = opcionesFiscales?.tipoComprobante === 'factura' || Boolean(opcionesFiscales?.conFactura);
+        if (conFactura) {
+            if (Number(configNegocio?.usa_respaldo_compras_egresos ?? 1) !== 1) {
+                throw new Error('Operación no permitida: El registro de respaldo fiscal en compras y egresos está deshabilitado en la configuración del negocio.');
+            }
+            if (Number(ejecutor.puede_registrar_respaldo_fiscal ?? 1) !== 1) {
+                throw new Error(`Permiso denegado: El usuario "${ejecutor.nombre}" no tiene autorización para registrar facturas en egresos.`);
+            }
+            if (Number(caja.habilita_respaldo_fiscal ?? 1) !== 1) {
+                throw new Error(`Operación no permitida: La estación "${caja.caja_fisica_nombre}" tiene deshabilitado el registro de respaldo fiscal.`);
+            }
+        }
+
+        const tipoComprobante = conFactura
+            ? 'factura'
+            : (opcionesFiscales?.tipoComprobante === 'sin_respaldo' ? 'sin_respaldo' : 'recibo');
+        const nroFactura = opcionesFiscales?.nroFactura && String(opcionesFiscales.nroFactura).trim() !== ''
+            ? String(opcionesFiscales.nroFactura).trim()
+            : null;
+        const proveedorNit = opcionesFiscales?.proveedorNit && String(opcionesFiscales.proveedorNit).trim() !== ''
+            ? String(opcionesFiscales.proveedorNit).trim()
+            : null;
+        const proveedorNombre = opcionesFiscales?.proveedorNombre && String(opcionesFiscales.proveedorNombre).trim() !== ''
+            ? String(opcionesFiscales.proveedorNombre).trim()
+            : null;
+        const referenciaQr = opcionesFiscales?.referenciaQr && String(opcionesFiscales.referenciaQr).trim() !== ''
+            ? String(opcionesFiscales.referenciaQr).trim()
+            : null;
+
+        const montoEfectivo = metodoPago === 'efectivo' ? montoValidado : 0;
+        const montoQr = metodoPago === 'qr' ? montoValidado : 0;
+
+        const ivaPorcCfg = Number(configNegocio?.iva_porcentaje ?? 13);
+        const ivaPorcSnapshot = (regimenSnapshot === 'regimen_general' && tipoComprobante === 'factura')
+            ? ivaPorcCfg
+            : 0;
+        const ivaMontoSnapshot = ivaPorcSnapshot > 0
+            ? redondear2(montoValidado * (ivaPorcSnapshot / 100))
+            : 0;
+
+        const res = await runQuery(
+            `INSERT INTO movimientos (
+                caja_id, usuario_id, tipo, categoria_contable,
+                subtotal_bruto, descuento_total, monto,
+                metodo_pago, monto_efectivo, monto_qr, referencia_qr,
+                tipo_comprobante, nro_factura, cliente_nit_ci, cliente_razon_social,
+                regimen_tributario, iva_porcentaje, it_porcentaje, iva_monto, it_monto,
+                descripcion, estado
+             )
+             VALUES (?, ?, 'egreso', ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 0, ?, 'completado')`,
+            [
+                cajaId,
+                ejecutor.id,
+                categoriaContable,
+                montoValidado,
+                montoValidado,
+                metodoPago,
+                montoEfectivo,
+                montoQr,
+                referenciaQr,
+                tipoComprobante,
+                nroFactura,
+                proveedorNit,
+                proveedorNombre,
+                regimenSnapshot,
+                ivaPorcSnapshot,
+                ivaMontoSnapshot,
+                descripcion.trim()
+            ]
+        );
+        const movId = res.lastID;
+        await runQuery(
+            `INSERT INTO movimientos_pagos (movimiento_id, metodo_pago, monto, referencia) VALUES (?, ?, ?, ?)`,
+            [movId, metodoPago === 'qr' ? 'qr' : 'efectivo', montoValidado, referenciaQr]
+        );
+        return movId;
+    });
+}
+
+// Inyección / Reposición de efectivo a la caja (ej. cambio o sencillo provisto por administrador o dueño)
+async function registrarIngresoEfectivo(cajaId, monto, motivo, usuarioId = null) {
+    const montoValidado = redondear2(numeroPositivo(monto, 'El monto a ingresar'));
+
+    if (!motivo || String(motivo).trim() === '') {
+        throw new Error('Debes indicar el motivo de la reposición de efectivo (ej. Aporte de sencillo para cambio).');
+    }
+
+    if (usuarioId === null || usuarioId === undefined || usuarioId === '') {
+        throw new Error('El usuario que registra el ingreso de efectivo es obligatorio.');
+    }
+
+    const descripcionFinal = `[REPOSICIÓN DE EFECTIVO] ${String(motivo).trim()}`;
+    return await enTransaccion(async () => {
+        const ejecutor = await obtenerUsuarioPorId(usuarioId);
+        if (!ejecutor) {
+            throw new Error('El usuario que intenta registrar el ingreso no existe o está inactivo.');
+        }
+
+        const caja = await getQuery(`SELECT id, usuario_id, estado FROM cajas WHERE id = ?`, [cajaId]);
+        if (!caja) {
+            throw new Error('La caja indicada no existe.');
+        }
+        if (caja.estado !== 'abierta') {
+            throw new Error('No se puede ingresar efectivo porque la caja no está abierta.');
+        }
+        if (Number(caja.usuario_id) !== Number(ejecutor.id) && !esRolAdministrativo(ejecutor.rol)) {
+            throw new Error('Permiso denegado: solo el cajero titular o un Administrador puede ingresar efectivo en este turno.');
+        }
+
+        const configNegocio = await obtenerConfiguracionNegocio();
+        const regimenSnapshot = configNegocio?.regimen_tributario === 'regimen_general'
+            ? 'regimen_general'
+            : 'simplificado_control_interno';
+
+        const res = await runQuery(
+            `INSERT INTO movimientos (
+                caja_id, usuario_id, tipo, categoria_contable,
+                subtotal_bruto, descuento_total, monto,
+                metodo_pago, monto_efectivo, monto_qr,
+                monto_recibido, cambio, tipo_comprobante,
+                regimen_tributario, iva_porcentaje, it_porcentaje, iva_monto, it_monto,
+                descripcion, estado
+             )
+             VALUES (?, ?, 'ingreso', 'aporte_cambio', ?, 0, ?, 'efectivo', ?, 0, ?, 0, 'recibo', ?, 0, 0, 0, 0, ?, 'completado')`,
+            [cajaId, ejecutor.id, montoValidado, montoValidado, montoValidado, montoValidado, regimenSnapshot, descripcionFinal]
+        );
+        const movId = res.lastID;
+        await runQuery(
+            `INSERT INTO movimientos_pagos (movimiento_id, metodo_pago, monto, referencia) VALUES (?, 'efectivo', ?, NULL)`,
+            [movId, montoValidado]
+        );
+        return movId;
+    });
+}
+
+// Anular movimiento con reversión atómica de stock e insumos
+async function anularMovimientoConPermiso(adminId, movimientoId, motivoAnulacion) {
+    const ejecutor = await obtenerUsuarioPorId(adminId);
+    if (!ejecutor || !esRolAdministrativo(ejecutor.rol)) {
+        throw new Error('Permiso denegado: solo el administrador puede anular movimientos.');
+    }
+
+    if (!motivoAnulacion || String(motivoAnulacion).trim().length < 3) {
+        throw new Error('Debes ingresar un motivo descriptivo y justificado para realizar la anulación.');
+    }
+
+    const motivoLimpio = String(motivoAnulacion).trim();
+
+    return await enTransaccion(async () => {
+        const mov = await getQuery(`SELECT * FROM movimientos WHERE id = ?`, [movimientoId]);
+        if (!mov) throw new Error('Movimiento no encontrado.');
+        if (mov.estado === 'anulado') throw new Error('Este movimiento ya fue anulado.');
+
+        const caja = await getQuery(`SELECT id, estado FROM cajas WHERE id = ?`, [mov.caja_id]);
+        if (!caja) {
+            throw new Error('La caja asociada al movimiento no existe.');
+        }
+        if (caja.estado !== 'abierta') {
+            throw new Error('No se puede anular un movimiento de una caja cerrada. Reabre la caja primero.');
+        }
+
+        const detalles = await allQuery(
+            `SELECT d.*, p.tipo_inventario
+             FROM detalle_movimientos d
+             INNER JOIN productos p ON d.producto_id = p.id
+             WHERE d.movimiento_id = ?`,
+            [movimientoId]
+        );
+
+        for (const det of detalles) {
+            if (det.tipo_inventario === 'directo') {
+                await runQuery(`UPDATE productos SET stock = ROUND(stock + ?, 4) WHERE id = ?`, [det.cantidad, det.producto_id]);
+                const prodAct = await getQuery(`SELECT stock, costo FROM productos WHERE id = ?`, [det.producto_id]);
+                await runQuery(
+                    `INSERT INTO movimientos_productos_directos (
+                        producto_id, movimiento_id, usuario_id, tipo, cantidad, stock_resultante,
+                        costo_unitario, costo_promedio_resultante, monto_total, motivo
+                     ) VALUES (?, ?, ?, 'reingreso_anulacion', ?, ?, ?, ?, ?, ?)`,
+                    [
+                        det.producto_id,
+                        movimientoId,
+                        ejecutor.id,
+                        det.cantidad,
+                        Number(prodAct?.stock || 0),
+                        det.costo_unitario,
+                        Number(prodAct?.costo ?? det.costo_unitario),
+                        redondear2(det.cantidad * det.costo_unitario),
+                        `Anulación Ticket #${movimientoId}: ${motivoLimpio}`
+                    ]
+                );
+            } else if (det.tipo_inventario === 'combo') {
+                // Si tenía límite activo, restituir el contador restante
+                await runQuery(
+                    `UPDATE productos
+                     SET limite_unidades_restante = ROUND(limite_unidades_restante + ?, 4)
+                     WHERE id = ? AND limite_maximo_activo = 1`,
+                    [det.cantidad, det.producto_id]
+                );
+
+                // Revertir stock de los componentes que eran directos leyendo detalle_movimientos_combos
+                const componentesCombosVendidos = await allQuery(
+                    `SELECT dmc.*, p.tipo_inventario
+                     FROM detalle_movimientos_combos dmc
+                     INNER JOIN productos p ON dmc.componente_producto_id = p.id
+                     WHERE dmc.detalle_movimiento_id = ?`,
+                    [det.id]
+                );
+                for (const comp of componentesCombosVendidos) {
+                    if (comp.tipo_inventario === 'directo') {
+                        await runQuery(
+                            `UPDATE productos SET stock = ROUND(stock + ?, 4) WHERE id = ?`,
+                            [comp.cantidad_total, comp.componente_producto_id]
+                        );
+                        const prodAct = await getQuery(`SELECT stock, costo FROM productos WHERE id = ?`, [comp.componente_producto_id]);
+                        await runQuery(
+                            `INSERT INTO movimientos_productos_directos (
+                                producto_id, movimiento_id, usuario_id, tipo, cantidad, stock_resultante,
+                                costo_unitario, costo_promedio_resultante, monto_total, motivo
+                             ) VALUES (?, ?, ?, 'reingreso_anulacion', ?, ?, ?, ?, ?, ?)`,
+                            [
+                                comp.componente_producto_id,
+                                movimientoId,
+                                ejecutor.id,
+                                comp.cantidad_total,
+                                Number(prodAct?.stock || 0),
+                                comp.costo_unitario_congelado,
+                                Number(prodAct?.costo ?? comp.costo_unitario_congelado),
+                                redondear2(comp.cantidad_total * comp.costo_unitario_congelado),
+                                `Anulación Combo Ticket #${movimientoId}: ${motivoLimpio}`
+                            ]
+                        );
+                    }
+                }
+            }
+        }
+
+        // Revertir EXACTAMENTE lo consumido en esa venta leyendo movimientos_insumos (cantidades y costos originales)
+        let consumosInsumos = await allQuery(
+            `SELECT id, insumo_id, cantidad, costo_unitario
+             FROM movimientos_insumos
+             WHERE movimiento_id = ? AND tipo = 'consumo_venta'`,
+            [movimientoId]
+        );
+
+        // Respaldo para ventas antiguas sin movimiento_id en movimientos_insumos
+        if (consumosInsumos.length === 0) {
+            const motivoRespaldo = `Venta Ticket #${movimientoId}`;
+            consumosInsumos = await allQuery(
+                `SELECT id, insumo_id, cantidad, costo_unitario
+                 FROM movimientos_insumos
+                 WHERE tipo = 'consumo_venta' AND motivo LIKE ?`,
+                [`%${motivoRespaldo}%`]
+            );
+        }
+
+        for (const cons of consumosInsumos) {
+            await runQuery(
+                `UPDATE insumos SET stock_actual = ROUND(stock_actual + ?, 4) WHERE id = ?`,
+                [cons.cantidad, cons.insumo_id]
+            );
+            const insAct = await getQuery(`SELECT stock_actual, costo_por_unidad FROM insumos WHERE id = ?`, [cons.insumo_id]);
+            await runQuery(
+                `INSERT INTO movimientos_insumos (
+                    insumo_id, movimiento_id, usuario_id, tipo, cantidad, stock_resultante,
+                    costo_unitario, costo_promedio_resultante, monto_total_compra, motivo
+                 ) VALUES (?, ?, ?, 'reingreso_anulacion', ?, ?, ?, ?, ?, ?)`,
+                [
+                    cons.insumo_id,
+                    movimientoId,
+                    ejecutor.id,
+                    cons.cantidad,
+                    Number(insAct?.stock_actual || 0),
+                    cons.costo_unitario,
+                    Number(insAct?.costo_por_unidad ?? cons.costo_unitario),
+                    redondear2(cons.cantidad * cons.costo_unitario),
+                    `Anulación Ticket #${movimientoId}: ${motivoLimpio}`
+                ]
+            );
+        }
+
+        // Si no se encontraron registros de consumo en movimientos_insumos (caso extremo legado),
+        // revertir según la receta actual y los modificadores registrados en la venta
+        if (consumosInsumos.length === 0) {
+            for (const det of detalles) {
+                if (det.tipo_inventario === 'receta') {
+                    const insumosBaseReceta = await allQuery(
+                        `SELECT insumo_id, cantidad_requerida FROM recetas WHERE producto_id = ?`,
+                        [det.producto_id]
+                    );
+                    const modsVendidos = await allQuery(
+                        `SELECT insumo_id, cantidad_insumo, insumo_reemplazado_id
+                         FROM detalle_movimientos_modificadores
+                         WHERE detalle_movimiento_id = ?`,
+                        [det.id]
+                    );
+
+                    const mapaInsumosAReintegrar = new Map();
+                    for (const ib of insumosBaseReceta) {
+                        mapaInsumosAReintegrar.set(ib.insumo_id, Number(ib.cantidad_requerida || 0));
+                    }
+
+                    for (const mv of modsVendidos) {
+                        if (mv.insumo_id) {
+                            if (mv.insumo_reemplazado_id) {
+                                const cantReemplazada = mapaInsumosAReintegrar.has(mv.insumo_reemplazado_id)
+                                    ? mapaInsumosAReintegrar.get(mv.insumo_reemplazado_id)
+                                    : Number(mv.cantidad_insumo || 0);
+                                mapaInsumosAReintegrar.delete(mv.insumo_reemplazado_id);
+                                const cantEfectiva = Number(mv.cantidad_insumo || 0) > 0 ? Number(mv.cantidad_insumo) : cantReemplazada;
+                                mapaInsumosAReintegrar.set(mv.insumo_id, cantEfectiva);
+                            } else {
+                                const prev = mapaInsumosAReintegrar.get(mv.insumo_id) || 0;
+                                mapaInsumosAReintegrar.set(mv.insumo_id, Number((prev + Number(mv.cantidad_insumo || 0)).toFixed(4)));
+                            }
+                        }
+                    }
+
+                    for (const [insId, cantPorUnidad] of mapaInsumosAReintegrar.entries()) {
+                        const totalReingreso = Number((cantPorUnidad * det.cantidad).toFixed(4));
+                        await runQuery(`UPDATE insumos SET stock_actual = ROUND(stock_actual + ?, 4) WHERE id = ?`, [totalReingreso, insId]);
+                        const insAct = await getQuery(`SELECT stock_actual, costo_por_unidad FROM insumos WHERE id = ?`, [insId]);
+                        await runQuery(
+                            `INSERT INTO movimientos_insumos (
+                                insumo_id, movimiento_id, usuario_id, tipo, cantidad, stock_resultante,
+                                costo_unitario, costo_promedio_resultante, monto_total_compra, motivo
+                             ) VALUES (?, ?, ?, 'reingreso_anulacion', ?, ?, ?, ?, ?, ?)`,
+                            [
+                                insId,
+                                movimientoId,
+                                ejecutor.id,
+                                totalReingreso,
+                                Number(insAct?.stock_actual || 0),
+                                Number(insAct?.costo_por_unidad || 0),
+                                Number(insAct?.costo_por_unidad || 0),
+                                redondear2(totalReingreso * Number(insAct?.costo_por_unidad || 0)),
+                                `Anulación Legada Ticket #${movimientoId}: ${motivoLimpio}`
+                            ]
+                        );
+                    }
+                }
+            }
+        }
+
+        const nuevaDesc = `${mov.descripcion} [ANULADO por ${ejecutor.nombre}: ${motivoLimpio}]`;
+        await runQuery(
+            `UPDATE movimientos
+             SET estado = 'anulado',
+                 descripcion = ?,
+                 anulado_por = ?,
+                 fecha_anulacion = CURRENT_TIMESTAMP,
+                 motivo_anulacion = ?
+             WHERE id = ?`,
+            [nuevaDesc, ejecutor.id, motivoLimpio, movimientoId]
+        );
+        return true;
+    });
+}
+
+async function obtenerMovimientosCaja(cajaId) {
+    return await allQuery(
+        `SELECT m.*,
+                datetime(m.fecha_hora, 'localtime') as fecha_hora,
+                datetime(m.fecha_anulacion, 'localtime') as fecha_anulacion,
+                u.nombre as usuario_nombre,
+                ua.nombre as anulado_por_nombre
+         FROM movimientos m
+         LEFT JOIN usuarios u ON m.usuario_id = u.id
+         LEFT JOIN usuarios ua ON m.anulado_por = ua.id
+         WHERE m.caja_id = ?
+         ORDER BY m.id DESC`,
+        [cajaId]
+    );
+}
+
+module.exports = {
+    registrarVentaCompleta,
+    registrarEgreso,
+    registrarIngresoEfectivo,
+    anularMovimientoConPermiso,
+    obtenerMovimientosCaja
+};

@@ -10,7 +10,7 @@
 - **Infraestructura y Preparación para Producción Local / Híbrida:**
   - Base de datos portable con ruta configurable por variable de entorno `DATABASE_PATH` y concurrencia gestionada con `PRAGMA busy_timeout = 5000` y modo WAL en `database/database.js`.
   - Script de respaldo atómico en caliente (`scripts/backup.js`) ejecutado con `npm run backup` usando SQLite `VACUUM INTO` y purga local automática.
-  - Empaquetado optimizado en `next.config.js` con `serverExternalPackages: ['sqlite3', 'bcryptjs', 'exceljs']`.
+  - Empaquetado optimizado en `next.config.js` con `serverExternalPackages: ['sqlite3', 'better-sqlite3', 'bcryptjs', 'exceljs', 'nodemailer']`.
   - Gestión de procesos con PM2 (`ecosystem.config.js`) y actualización segura automatizada (`scripts/update.js`).
   - Blindaje contra errores de máquina cliente: protección `notranslate` en `app/layout.js` (contra fallos del DOM en React por traducción automática de Chrome) y `Cache-Control: no-store` en `/api/caja`.
   - Validación temprana y perezosa de secretos de producción mediante `server/secretos.js` e `instrumentation.js`.
@@ -25,18 +25,23 @@
   - `README.md`: Punto de entrada, estructura general y comandos rápidos.
   - `docs/`: Documentación técnica (`ARQUITECTURA.md`) y checklist de pruebas (`PRUEBAS.md`).
   - `database/database.js`: Inicialización de SQLite, activación de claves foráneas (`PRAGMA foreign_keys = ON`), modo WAL, timeout y ejecución automática de migraciones.
+  - `database/schema.js`: Definición centralizada del esquema tipado con Drizzle ORM (19 tablas y relaciones completas).
+  - `database/drizzle.js`: Cliente Drizzle singleton sobre `better-sqlite3` con modo WAL y timeout de 5000ms.
   - `database/migraciones.js`: Sistema de migraciones versionado con `PRAGMA user_version` y respaldo automático previo a toda migración (`VACUUM INTO backups/caja-pre-migracion-vX-a-vY-*.db`). Toda mutación al esquema se aplica de forma transaccional e idempotente (migraciones v1 a v11).
-  - `server/queries.js`: Lógica de negocio y consultas con promesas nativas (`async/await`) usando `runQuery`, `getQuery`, `allQuery` y `enTransaccion()`.
-  - `server/sesion.js`: Manejo de sesión JWT del servidor (crear, validar, renovar y destruir cookies HttpOnly `pos_session`).
-  - `server/mailer.js`: Servicio SMTP (`nodemailer`) con plantillas HTML responsivas y adjuntos en background.
-  - `server/secretos.js`: Verificación estricta de variables de entorno y secretos pre-arranque en producción.
-  - `instrumentation.js`: Gancho de arranque de Next.js para validación temprana de seguridad.
-  - `scripts/backup.js`: Script de copia de seguridad atómica con retención configurable.
+  - `server/actions/`: Capa de mutaciones protegidas mediante Server Actions (`'use server'`) validadas con `_wrapper.js`: `turnos.actions.js`, `ventas.actions.js`, `catalogo.actions.js`, `inventario.actions.js`, `admin.actions.js`.
+  - `server/domain/`: Lógica pura de negocio y reglas desacopladas: `costos.js` (CPP NIC 2, cascada de recetas/combos) y `fiscal.js` (snapshot tributario, bases IVA/IT).
+  - `server/repositories/`: Módulos de persistencia SQL parametrizada (`db.js`, `auth.repo.js`, `cajas.repo.js`, `catalogo.repo.js`, `configuracion.repo.js`, `inventario.repo.js`, `ventas.repo.js`, `reportes.repo.js`, `index.js`).
+  - `server/lib/`: Infraestructura y servicios técnicos (`sesion.js`, `secretos.js`, `mailer.js`).
+  - `server/queries.js`: Fachada central y barrel que re-exporta los repositorios para retrocompatibilidad.
+  - `instrumentation.js`: Gancho de arranque de Next.js para validación temprana de seguridad (`server/lib/secretos.js`).
+  - `scripts/backup.js`: Script de copia de seguridad atómica con retención configurable (`VACUUM INTO`).
   - `scripts/update.js`: Script de actualización segura automatizada (`npm run update`: backup previo + `git pull` + `npm ci` + `build`).
-  - `app/api/caja/route.js`: Endpoint principal (`GET` de estado/sesión/catálogo/auditoría/kardexDetallado y `POST` por `accion`: `login`, `logout`, `instalacion_inicial`, `abrir`, `reabrir`, `vender`, `egreso`, `ingreso_efectivo`, `cerrar`, `anular`, `crear_usuario`, `borrar_usuario`, `cambiar_password`, `guardar_configuracion`, `guardar_configuracion_contable`, `actualizar_permiso_fiscal_caja`, `actualizar_permiso_fiscal_usuario`, `crear_categoria`, `crear_producto`, `comprar_producto_directo`, `merma_producto_directo`, `verificar_integridad_kardex`, `crear_insumo`, `comprar_insumo`, `merma_insumo`, `asignar_receta`, `crear_caja_fisica`, `desactivar_caja_fisica`, `reactivar_caja_fisica`, `crear_grupo_modificador`, `actualizar_grupo_modificador`, `eliminar_grupo_modificador`, `asignar_modificadores_producto`, `probar_email`, `reenviar_cierre_email`).
-  - `app/api/reportes/route.js`: Endpoint administrativo (`GET`) para tendencias JSON, exportación CSV (`?formato=csv`) y exportación Excel (`?formato=xlsx`, con filtros opcionales `cajaId`, `desde`, `hasta`, `usuarioId`, `cajaFisicaId` y metadatos del usuario generador).
-  - `app/caja/page.js` y `app/admin/page.js`: Vistas de operador y administrador.
-  - `app/admin/GraficosFinancieros.js` y `app/admin/exportarPDF.js`: Módulos de visualización financiera y exportación PDF del panel administrativo.
+  - `app/api/caja/route.js`: Endpoint exclusivo `GET` con `Cache-Control: no-store` para lectura de estado inicial, catálogo y sincronización/polling de turnos.
+  - `app/api/auth/route.js`: Endpoint `POST` para `login`, `logout` e `instalacion_inicial` con gestión de cookies `HttpOnly` (`pos_session`).
+  - `app/api/reportes/route.js`: Endpoint administrativo `GET` para tendencias JSON, exportación CSV (`?formato=csv`) y exportación Excel (`?formato=xlsx` con 10 hojas contables).
+  - `app/admin/`: Panel de administración (`page.js`, `GraficosFinancieros.js`, `exportarPDF.js`) con subcomponentes por pestaña en `_components/` (`TabCatalogo.js`, `TabTurnosArqueos.js`, `TabUsuariosCajas.js`, `TabKardex.js`, `TabConfigFiscal.js`, `TabExportacion.js`, `TabResumen.js`, `adminStyles.js`).
+  - `app/caja/`: Terminal POS (`page.js`) con subcomponentes atómicos en `_components/` (`CatalogoProductos.js`, `CarritoVenta.js`, `ModalCobro.js`, `ModalModificadores.js`, `ModalArqueoCiego.js`, `ModalMovimientosEfectivo.js`, `HistorialTurno.js`, `AperturaTurno.js`, `LoginCaja.js`, `cajaStyles.js`) y hooks en `_hooks/` (`useCarrito.js`, `useInactividad.js`).
+  - `next.config.js`: Optimización de paquetes nativos con `serverExternalPackages` y configuración de `experimental.serverActions.allowedOrigins` (`localhost:3000`, `127.0.0.1:3000`, `*.trycloudflare.com`, `ALLOWED_ORIGINS`).
 
 ## 2. Reglas de Negocio Obligatorias
 - **Roles y Permisos:**
@@ -107,7 +112,7 @@
 - **Manejo de fechas y zonas horarias:** Las fechas se almacenan en UTC (`CURRENT_TIMESTAMP`). Al consultar o filtrar fechas para el usuario, utilizar siempre `'localtime'` en SQLite, incluyendo las cláusulas `WHERE` (ej. `datetime(fecha_hora, 'localtime')`).
 - **Evolución del esquema:** Los cambios de esquema se realizan única y exclusivamente mediante migraciones en `database/migraciones.js`, administrando la versión con `PRAGMA user_version`.
 - **Confirmación en cambios críticos:** Antes de modificar el esquema de base de datos o la lógica de cálculo financiero, se debe explicar el impacto detalladamente al usuario y esperar su confirmación explícita.
-- **SQL nativo sin ORMs:** Mantener consultas SQL nativas y parametrizadas (`?`) en `server/queries.js`, evitando constructores de consulta u ORMs externos.
+- **SQL nativo y Drizzle ORM:** El proyecto cuenta con Drizzle ORM configurado sobre `better-sqlite3` (`database/schema.js`, `database/drizzle.js`) coexistiendo con las consultas SQL parametrizadas en `server/repositories/db.js`. Toda consulta tipada puede apoyarse en `drizzleDb` y el esquema centralizado de 19 tablas, manteniendo control absoluto de transacciones y modo WAL.
 - **Control de Versiones y Operaciones en Git (Estrictamente Bajo Demanda):**
   - **Ejecución Bajo Demanda (Ahorro de Tokens):** La IA conoce perfectamente todos los comandos y procedimientos de Git local, pero **NO** debe ejecutar `git add`, `git commit` ni operaciones de repositorio automáticamente tras cada cambio de código. Solo ejecutará acciones en Git cuando el usuario lo solicite expresamente (ej. *"haz commit"*, *"guarda los cambios en el repositorio"*, *"prepara el commit"*).
   - **Operaciones Locales Permitidas a la IA:** Cuando el usuario lo solicite: inspeccionar el árbol (`git status`, `git diff`, `git log`), crear y cambiar de ramas (`git branch`, `git checkout`, `git switch`), preparar archivos (`git add`) y redactar commits atómicos y descriptivos (`git commit`).

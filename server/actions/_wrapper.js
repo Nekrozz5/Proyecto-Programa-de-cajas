@@ -5,11 +5,11 @@ const { exigirUsuarioSesionAction } = require('../lib/sesion');
  * - Valida la sesión del usuario y sus permisos de rol en el servidor mediante cookies HttpOnly.
  * - Ejecuta la lógica de negocio pasando el usuario autenticado.
  * - Captura excepciones y retorna invariablemente una estructura plana serializable para el cliente:
- *     { ok: true, data } | { ok: false, error, status }
+ *     { ok: true, data, error: null } | { ok: false, data: null, error, status }
  *
  * @param {Array<string>|null|Function} rolesPermitidos - Lista de roles permitidos (ej. ['admin', 'superadmin']), null para cualquier usuario autenticado, o la función directamente si no se especifican roles.
  * @param {Function} [fn] - Función asíncrona de negocio `async (usuario) => resultado`
- * @returns {Promise<{ ok: true, data: any } | { ok: false, error: string, status: number }>}
+ * @returns {Promise<{ ok: true, data: any, error: null } | { ok: false, data: null, error: string, status: number }>}
  */
 async function ejecutarAction(rolesPermitidos, fn) {
     let actionFn = fn;
@@ -27,12 +27,14 @@ async function ejecutarAction(rolesPermitidos, fn) {
 
         return {
             ok: true,
-            data: resultado !== undefined ? resultado : null
+            data: resultado !== undefined ? resultado : null,
+            error: null
         };
     } catch (err) {
         console.error('[ServerAction Error]:', err && err.message ? err.message : err);
         return {
             ok: false,
+            data: null,
             error: (err && err.message) ? err.message : 'Error interno al procesar la operación.',
             status: (err && typeof err.status === 'number') ? err.status : 500
         };

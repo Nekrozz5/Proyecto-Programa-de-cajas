@@ -15,11 +15,95 @@ Este documento describe la arquitectura global del sistema POS y Control de Caja
   - `recharts` (`^3.10.1`): Gráficos interactivos de métricas financieras en `/admin` (flujo horario, balance de 7 días, top productos, métodos de pago).
 - **Servicio de Notificaciones:** `nodemailer` (`^10.5.0`): Envíos SMTP en segundo plano con plantilla HTML ejecutiva y libro Excel `.xlsx` adjunto en caliente.
 - **Despliegue, Actualización y Respaldos:** PM2 (`ecosystem.config.js`), actualización automatizada (`scripts/update.js`) y respaldo atómico en caliente con `VACUUM INTO` (`scripts/backup.js`).
-- **Blindaje Multi-Dispositivo:** Protección contra traducción automática del DOM (`notranslate` en `app/layout.js`) y encabezados `Cache-Control: no-store` en `/api/caja` para evitar datos obsoletos entre máquinas o tras actualizaciones.
+- **Blindaje Multi-Dispositivo y Cloudflare Tunnel:** Protección contra traducción automática del DOM (`notranslate` en `app/layout.js`), encabezados `Cache-Control: no-store` en `GET /api/caja` para lecturas en tiempo real sin caché, y configuración de `experimental.serverActions.allowedOrigins` en `next.config.js` (`*.trycloudflare.com`, `localhost:3000`) para ejecución segura de Server Actions en entornos remotos e híbridos.
 
 ---
 
-## 2. Seguridad y Control de Sesiones (`server/sesion.js` y `server/secretos.js`)
+## 2. Arquitectura de Capas y Estructura de Carpetas
+
+El sistema implementa una arquitectura en capas limpias que separa la interfaz visual, las mutaciones seguras del servidor, la lógica pura de dominio, la persistencia en base de datos y la infraestructura técnica:
+
+```text
+├── app/                              # Next.js App Router (Frontend y API Routes mínimas)
+│   ├── layout.js                     # Root layout protegido con notranslate
+│   ├── page.js                       # Asistente de instalación inicial y redirección
+│   ├── api/
+│   │   ├── auth/route.js             # POST: login, logout, instalacion_inicial con cookies HttpOnly
+│   │   ├── caja/route.js             # GET: lectura única de estado, catálogo y sincronización (no-store)
+│   │   └── reportes/route.js         # GET: exportación de libros Excel (.xlsx), CSV y tendencias JSON
+│   ├── admin/
+│   │   ├── page.js                   # Panel administrativo principal
+│   │   ├── GraficosFinancieros.js    # Visualizaciones con recharts
+│   │   ├── exportarPDF.js            # Exportación de reporte PDF con jsPDF
+│   │   └── _components/              # Componentes modulares por pestaña administrativa:
+│   │       ├── TabCatalogo.js        # Gestión de categorías, productos, recetas y modificadores
+│   │       ├── TabTurnosArqueos.js   # Historial de turnos, arqueos, reaperturas y auditoría
+│   │       ├── TabUsuariosCajas.js   # ABM de cajeros, estaciones físicas y permisos
+│   │       ├── TabKardex.js          # Kardex detallado e integridad matemática
+│   │       ├── TabConfigFiscal.js    # Régimen tributario, alícuotas y modalidad de negocio
+│   │       ├── TabExportacion.js     # Descarga de reportes contables
+│   │       ├── TabResumen.js         # Métricas ejecutivas y anulación de ventas
+│   │       └── adminStyles.js        # Estilos centralizados del panel de administración
+│   └── caja/
+│       ├── page.js                   # Terminal POS del operador / cajero
+│       ├── _hooks/                   # Hooks personalizados de interfaz:
+│       │   ├── useCarrito.js         # Estado reactivo del carrito de compras y prorrateo
+│       │   └── useInactividad.js     # Temporizador de cierre de sesión por inactividad
+│       └── _components/              # Componentes modulares de operación:
+│           ├── CatalogoProductos.js  # Selección visual de productos por categorías
+│           ├── CarritoVenta.js       # Resumen de orden, descuentos y totales
+│           ├── ModalCobro.js         # Cobro efectivo, QR y pagos mixtos con cálculo de cambio
+│           ├── ModalModificadores.js # Selección de reemplazos y complementos de recetas
+│           ├── ModalArqueoCiego.js   # Conteo físico a ciegas y cierre de turno
+│           ├── ModalMovimientosEfectivo.js # Registro de egresos e inyecciones de cambio
+│           ├── HistorialTurno.js     # Ventas del turno actual y reemisión de tickets
+│           ├── AperturaTurno.js      # Selección de caja física y fondo inicial
+│           ├── LoginCaja.js          # Selector de cajero y PIN numérico
+│           └── cajaStyles.js         # Estilos visuales del POS táctil
+├── server/                           # Núcleo de backend y lógica del servidor
+│   ├── actions/                      # Capa de mutaciones protegidas con Server Actions ('use server')
+│   │   ├── _wrapper.js               # Envoltorio seguro: validación de sesión HttpOnly y RBAC estricto
+│   │   ├── turnos.actions.js         # Apertura, cierre con arqueo ciego y reapertura auditada
+│   │   ├── ventas.actions.js         # Venta atómica, anulación, egresos e ingresos de cambio
+│   │   ├── catalogo.actions.js       # Categorías, productos, recetas y modificadores
+│   │   ├── inventario.actions.js     # Compras CPP, mermas, insumos y auditoría de Kardex
+│   │   └── admin.actions.js          # Usuarios, contraseñas, permisos fiscales, config y email
+│   ├── domain/                       # Lógica pura de negocio independiente de frameworks
+│   │   ├── costos.js                 # Algoritmos de CPP (NIC 2), recálculo en cascada y descomposición
+│   │   └── fiscal.js                 # Snapshot tributario, bases imponibles y liquidación IVA/IT
+│   ├── repositories/                 # Capa de persistencia SQL nativa (SQLite3) con transacciones
+│   │   ├── db.js                     # Pool SQLite, helpers de consulta y transacciones atómicas
+│   │   ├── auth.repo.js              # Autenticación, usuarios, roles, contraseñas y permisos fiscales
+│   │   ├── cajas.repo.js             # Cajas físicas, turnos, arqueos, cierres y reaperturas
+│   │   ├── catalogo.repo.js          # Categorías, productos, recetas, combos y modificadores
+│   │   ├── configuracion.repo.js     # Configuración de negocio, régimen tributario y singleton
+│   │   ├── inventario.repo.js        # Kardex dual, compras, mermas, insumos y verificación matemática
+│   │   ├── ventas.repo.js            # Ventas, detalle de venta, pagos mixtos, egresos y anulaciones
+│   │   ├── reportes.repo.js          # Métricas de rentabilidad, balance financiero y Excel 10 hojas
+│   │   └── index.js                  # Barrel exportador unificado de persistencia
+│   ├── lib/                          # Servicios de infraestructura y seguridad
+│   │   ├── sesion.js                 # Firma/verificación JWT, cookies HttpOnly, bootId y rate limit
+│   │   ├── secretos.js               # Validación estricta de variables de entorno y fallos tempranos
+│   │   └── mailer.js                 # Servicio SMTP con nodemailer, plantillas HTML y adjuntos Excel
+│   ├── queries.js                    # Fachada y barrel central retrocompatible de repositorios
+│   ├── sesion.js                     # Re-export retrocompatible hacia server/lib/sesion
+│   ├── secretos.js                   # Re-export retrocompatible hacia server/lib/secretos
+│   └── mailer.js                     # Re-export retrocompatible hacia server/lib/mailer
+├── database/                         # Persistencia relacional
+│   ├── database.js                   # Conexión SQLite, pragmas (WAL, busy_timeout) y migraciones
+│   └── migraciones.js                # Migraciones versionadas idempotentes con PRAGMA user_version (v1-v11)
+├── scripts/                          # Scripts operacionales y de mantenimiento
+│   ├── backup.js                     # Copia de seguridad atómica con VACUUM INTO
+│   ├── update.js                     # Actualización desatendida y segura del sistema
+│   └── seed_v11.js                   # Datos de prueba integrales para desarrollo
+└── docs/                             # Documentación técnica y checklists
+    ├── ARQUITECTURA.md               # Especificación técnica exhaustiva
+    └── PRUEBAS.md                    # Plan de validación y casos de prueba
+```
+
+---
+
+## 3. Seguridad y Control de Sesiones (`server/lib/sesion.js` y `server/lib/secretos.js`)
 
 - **Validación exclusiva en servidor:** La identidad, rol y permisos de cada petición se extraen directamente del token JWT validado en servidor, nunca de campos enviados por el cliente.
 - **TTL diferenciado por rol:**
@@ -39,7 +123,7 @@ Este documento describe la arquitectura global del sistema POS y Control de Caja
 
 ---
 
-## 3. Base de Datos y Sistema de Migraciones Versionadas (`database/`)
+## 4. Base de Datos y Sistema de Migraciones Versionadas (`database/`)
 
 - **`database/database.js`:**
   - Ruta de base de datos configurable mediante `DATABASE_PATH` (por defecto `./caja.db`).
@@ -64,7 +148,7 @@ Este documento describe la arquitectura global del sistema POS y Control de Caja
 
 ---
 
-## 4. Reglas de Negocio Principales
+## 5. Reglas de Negocio Principales
 
 ### A. Estaciones Físicas de Caja y N° de Turno (`cajas_fisicas` vs `cajas`)
 - **Estación Física (`cajas_fisicas`):** Representa el punto de cobro físico (ej. "Caja 1 - Barra", "Caja 2 - Terraza").
@@ -128,18 +212,18 @@ Este documento describe la arquitectura global del sistema POS y Control de Caja
 
 ---
 
-## 5. Servicio de Notificaciones por Correo (`server/mailer.js`)
+## 6. Servicio de Notificaciones por Correo (`server/lib/mailer.js`)
 
-- **Despacho Asíncrono en Segundo Plano:** Al cerrarse un turno mediante `cerrarCaja` en `/api/caja`, se despacha la notificación SMTP sin bloquear la respuesta HTTP al cajero.
+- **Despacho Asíncrono en Segundo Plano:** Al cerrarse un turno mediante `cerrarTurnoAction`, se despacha la notificación SMTP sin bloquear la respuesta de la Server Action al cajero.
 - **Plantilla Ejecutiva Responsiva:** Estación física, turno, cajero, balance de ventas (Efectivo vs. QR), inyección de sencillo, egresos y tarjeta destacada con la diferencia de arqueo (cuadrado, sobrante o faltante).
 - **Adjunto Oficial Excel:** Genera en caliente con `exceljs` el libro oficial (`Reporte_Turno_XX.xlsx`) y lo anexa al correo electrónico.
 - **Control Administrativo:** Diagnóstico SMTP con envío de prueba y reenvío bajo demanda de cualquier turno previo en `/admin`.
 
 ---
 
-## 6. Reportes Contables y Auditoría (Excel 10 Hojas y PDF Fiscal)
+## 7. Reportes Contables y Auditoría (Excel 10 Hojas y PDF Fiscal)
 
-- **Libro Excel `.xlsx` (`server/queries.js` con `exceljs`):** Servido desde `GET /api/reportes?formato=xlsx`:
+- **Libro Excel `.xlsx` (`server/repositories/reportes.repo.js` con `exceljs`):** Servido desde `GET /api/reportes?formato=xlsx`:
   1. *Movimientos:* Registro cronológico completo de ingresos y egresos.
   2. *Arqueos de Caja:* Historial de turnos, diferencias y conciliación.
   3. *Detalle Ventas (CMV):* Ventas línea por línea con costos congelados y descuento prorrateado.
@@ -154,7 +238,7 @@ Este documento describe la arquitectura global del sistema POS y Control de Caja
 
 ---
 
-## 7. Respaldos Atómicos y Actualizaciones Seguras
+## 8. Respaldos Atómicos y Actualizaciones Seguras
 
 - **Respaldos Atómicos (`scripts/backup.js`):** `npm run backup` ejecuta `VACUUM INTO` sobre la base de datos activa (copia en caliente atómica sin interrumpir el servicio) y aplica purga local según `MAX_BACKUPS_LOCAL` (30 copias por defecto).
 - **Actualización Segura Automatizada (`scripts/update.js`):** `npm run update` ejecuta un ciclo seguro de 5 fases: respaldo preventivo de `caja.db`, descarga limpia con `git pull --ff-only`, instalación reproducible con `npm ci`, compilación con `next build` y reinicio automático de PM2 si estuviera activo.
