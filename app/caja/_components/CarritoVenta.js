@@ -1,6 +1,9 @@
 'use client';
 
-import { cardStyle, btnMini, btnPrimario } from './cajaStyles';
+import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
 
 export default function CarritoVenta({
     carrito = [],
@@ -20,247 +23,204 @@ export default function CarritoVenta({
     const hayCantidadInvalida = carrito.some((i) => !i.cantidad || Number(i.cantidad) <= 0);
 
     return (
-        <section style={cardStyle}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
-                <h3 style={{ margin: 0, fontSize: '1.15rem', color: '#1e293b' }}>
-                    🛒 Detalle del Pedido ({carrito.length} {carrito.length === 1 ? 'ítem' : 'ítems'})
-                </h3>
-                {carrito.length > 0 && (
-                    <button
-                        type="button"
-                        onClick={vaciarCarrito}
-                        style={{
-                            background: 'none',
-                            border: 'none',
-                            color: '#dc2626',
-                            fontSize: '0.78rem',
-                            fontWeight: 600,
-                            cursor: 'pointer',
-                            textDecoration: 'underline'
-                        }}
-                    >
-                        Vaciar pedido
-                    </button>
-                )}
-            </div>
+        <Card className="shadow-sm border-slate-200">
+            <CardHeader className="p-4 sm:p-5 pb-3 border-b border-slate-100">
+                <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                        <CardTitle className="text-lg font-bold text-slate-900 tracking-tight flex items-center gap-2">
+                            <span>🛒</span>
+                            <span>Detalle del Pedido</span>
+                        </CardTitle>
+                        <Badge variant="secondary" className="bg-slate-100 text-slate-700 font-semibold text-xs">
+                            {carrito.length} {carrito.length === 1 ? 'ítem' : 'ítems'}
+                        </Badge>
+                    </div>
 
-            {/* Lista de productos en el pedido */}
-            {carrito.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: '2.5rem 1rem', background: '#f8fafc', borderRadius: '8px', border: '1px dashed #cbd5e1' }}>
-                    <p style={{ color: '#64748b', fontSize: '0.92rem', margin: 0 }}>
-                        Selecciona productos a la izquierda para agregarlos al pedido.
-                    </p>
+                    {carrito.length > 0 && (
+                        <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={vaciarCarrito}
+                            className="text-xs text-rose-600 hover:text-rose-700 hover:bg-rose-50 font-semibold min-h-[44px] px-3 cursor-pointer"
+                        >
+                            Vaciar pedido
+                        </Button>
+                    )}
                 </div>
-            ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', maxHeight: '420px', overflowY: 'auto', paddingRight: '0.2rem' }}>
-                    {carrito.map((item) => {
-                        const itemClave = item.itemKey || String(item.productoId);
-                        return (
-                            <div
-                                key={itemClave}
-                                style={{
-                                    display: 'flex',
-                                    justifyContent: 'space-between',
-                                    alignItems: 'center',
-                                    padding: '0.55rem 0',
-                                    borderBottom: '1px solid #f1f5f9',
-                                    fontSize: '0.9rem',
-                                    gap: '0.5rem'
-                                }}
-                            >
-                                <div style={{ flex: 1, minWidth: 0 }}>
-                                    <div style={{ fontWeight: 'bold', color: '#1e293b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                        {item.nombre}
-                                    </div>
-                                    {item.modificadores && item.modificadores.length > 0 && (
-                                        <div style={{ margin: '0.15rem 0 0.25rem', display: 'flex', flexWrap: 'wrap', gap: '0.25rem' }}>
-                                            {item.modificadores.map((m, idx) => (
-                                                <span
-                                                    key={idx}
-                                                    style={{
-                                                        fontSize: '0.72rem',
-                                                        background: '#e0f2fe',
-                                                        color: '#0369a1',
-                                                        borderRadius: '4px',
-                                                        padding: '0.05rem 0.35rem',
-                                                        fontWeight: 500
-                                                    }}
-                                                >
-                                                    {m.nombre} {Number(m.precio_adicional || 0) > 0 ? `(+Bs ${Number(m.precio_adicional).toFixed(2)})` : ''}
-                                                </span>
-                                            ))}
+            </CardHeader>
+
+            <CardContent className="p-4 sm:p-5 space-y-4">
+                {/* Lista de productos en el pedido */}
+                {carrito.length === 0 ? (
+                    <div className="text-center py-12 px-4 rounded-xl border-2 border-dashed border-slate-200 bg-slate-50">
+                        <span className="text-3xl block mb-2">🛍️</span>
+                        <p className="text-slate-600 text-sm font-medium">El carrito está vacío</p>
+                        <p className="text-slate-400 text-xs mt-1">
+                            Selecciona productos del catálogo para agregarlos al pedido.
+                        </p>
+                    </div>
+                ) : (
+                    <div className="flex flex-col divide-y divide-slate-100 max-h-[380px] overflow-y-auto pr-1">
+                        {carrito.map((item) => {
+                            const itemClave = item.itemKey || String(item.productoId);
+                            const precioNum = Number(item.precio) || 0;
+                            const cantidadNum = Number(item.cantidad) || 0;
+                            const subtotalItem = (precioNum * cantidadNum).toFixed(2);
+                            const tieneErrorCantidad = !item.cantidad || item.cantidad <= 0 || item.cantidadTexto === '';
+
+                            return (
+                                <div
+                                    key={itemClave}
+                                    className="py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                                >
+                                    <div className="flex-1 min-w-0">
+                                        <div className="font-bold text-slate-900 text-sm leading-snug line-clamp-2">
+                                            {item.nombre}
                                         </div>
-                                    )}
-                                    <div style={{ fontSize: '0.8rem', color: '#64748b' }}>
-                                        Bs {Number(item.precio).toFixed(2)} x {item.cantidad || 0} = <strong style={{ color: '#0f172a' }}>Bs {((Number(item.precio) || 0) * (Number(item.cantidad) || 0)).toFixed(2)}</strong>
-                                    </div>
-                                    {item.maximoDisponible !== null && item.maximoDisponible !== Infinity && (
-                                        <div style={{ fontSize: '0.72rem', color: '#0369a1' }}>
-                                            Máx. disponible: {item.maximoDisponible} u.
+
+                                        {/* Modificadores / Adicionales seleccionados */}
+                                        {item.modificadores && item.modificadores.length > 0 && (
+                                            <div className="mt-1 flex flex-wrap gap-1">
+                                                {item.modificadores.map((m, idx) => (
+                                                    <span
+                                                        key={idx}
+                                                        className="inline-flex items-center text-[11px] bg-sky-50 text-sky-700 border border-sky-200/80 rounded px-1.5 py-0.5 font-medium"
+                                                    >
+                                                        {m.nombre} {Number(m.precio_adicional || 0) > 0 ? `(+Bs ${Number(m.precio_adicional).toFixed(2)})` : ''}
+                                                    </span>
+                                                ))}
+                                            </div>
+                                        )}
+
+                                        <div className="text-xs text-slate-500 mt-1">
+                                            Bs {precioNum.toFixed(2)} × {cantidadNum} = <strong className="text-slate-900 font-bold">Bs {subtotalItem}</strong>
                                         </div>
-                                    )}
+
+                                        {item.maximoDisponible !== null && item.maximoDisponible !== Infinity && (
+                                            <div className="text-[11px] text-sky-700 font-medium mt-0.5">
+                                                Máx. disponible: {item.maximoDisponible} u.
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {/* Controles de cantidad táctiles */}
+                                    <div className="flex items-center gap-1.5 shrink-0 self-end sm:self-center">
+                                        <button
+                                            type="button"
+                                            onClick={() => cambiarCantidad && cambiarCantidad(itemClave, -1, productos)}
+                                            className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-base transition-colors active:scale-95 cursor-pointer"
+                                            title="Restar 1 unidad"
+                                        >
+                                            −
+                                        </button>
+
+                                        <input
+                                            type="number"
+                                            min="1"
+                                            max={item.maximoDisponible !== Infinity ? item.maximoDisponible : undefined}
+                                            value={item.cantidadTexto ?? item.cantidad ?? ''}
+                                            onChange={(e) => handleInputCantidad && handleInputCantidad(itemClave, e.target.value, productos)}
+                                            onBlur={(e) => finalizarEdicionCantidad && finalizarEdicionCantidad(itemClave, e.target.value, productos)}
+                                            onKeyDown={(e) => {
+                                                if (e.key === 'Enter') {
+                                                    e.preventDefault();
+                                                    finalizarEdicionCantidad && finalizarEdicionCantidad(itemClave, e.target.value, productos);
+                                                    e.target.blur();
+                                                }
+                                            }}
+                                            onFocus={(e) => e.target.select()}
+                                            className={`w-14 h-11 text-center font-bold text-sm rounded-lg border outline-none transition-colors ${
+                                                tieneErrorCantidad
+                                                    ? 'border-amber-400 bg-amber-50 text-amber-900 ring-2 ring-amber-400/30'
+                                                    : 'border-slate-300 bg-white text-slate-900 focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20'
+                                            }`}
+                                            title="Escribe la cantidad deseada desde el teclado"
+                                            placeholder="Cant"
+                                        />
+
+                                        <button
+                                            type="button"
+                                            onClick={() => cambiarCantidad && cambiarCantidad(itemClave, 1, productos)}
+                                            className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-base transition-colors active:scale-95 cursor-pointer"
+                                            title="Sumar 1 unidad"
+                                        >
+                                            +
+                                        </button>
+
+                                        <button
+                                            type="button"
+                                            onClick={() => eliminarDelCarrito && eliminarDelCarrito(itemClave)}
+                                            className="min-w-[44px] min-h-[44px] flex items-center justify-center text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer text-base"
+                                            title="Eliminar del pedido"
+                                        >
+                                            🗑️
+                                        </button>
+                                    </div>
                                 </div>
-
-                                {/* Controles de cantidad: restar, escribir por teclado, sumar, borrar */}
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', flexShrink: 0 }}>
-                                    <button
-                                        type="button"
-                                        onClick={() => cambiarCantidad && cambiarCantidad(itemClave, -1, productos)}
-                                        style={{
-                                            ...btnMini,
-                                            width: '28px',
-                                            height: '28px',
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            justifyContent: 'center',
-                                            fontWeight: 'bold',
-                                            cursor: 'pointer'
-                                        }}
-                                        title="Restar 1 unidad"
-                                    >
-                                        -
-                                    </button>
-
-                                    <input
-                                        type="number"
-                                        min="1"
-                                        max={item.maximoDisponible !== Infinity ? item.maximoDisponible : undefined}
-                                        value={item.cantidadTexto ?? item.cantidad ?? ''}
-                                        onChange={(e) => handleInputCantidad && handleInputCantidad(itemClave, e.target.value, productos)}
-                                        onBlur={(e) => finalizarEdicionCantidad && finalizarEdicionCantidad(itemClave, e.target.value, productos)}
-                                        onKeyDown={(e) => {
-                                            if (e.key === 'Enter') {
-                                                e.preventDefault();
-                                                finalizarEdicionCantidad && finalizarEdicionCantidad(itemClave, e.target.value, productos);
-                                                e.target.blur();
-                                            }
-                                        }}
-                                        onFocus={(e) => e.target.select()}
-                                        style={{
-                                            width: '54px',
-                                            height: '28px',
-                                            padding: '0 0.25rem',
-                                            textAlign: 'center',
-                                            fontWeight: 'bold',
-                                            fontSize: '0.92rem',
-                                            border: (!item.cantidad || item.cantidad <= 0 || item.cantidadTexto === '') ? '2px dashed #f59e0b' : '1px solid #cbd5e1',
-                                            borderRadius: '6px',
-                                            background: (!item.cantidad || item.cantidad <= 0 || item.cantidadTexto === '') ? '#fffbeb' : '#ffffff',
-                                            outline: 'none'
-                                        }}
-                                        title="Escribe la cantidad deseada desde el teclado"
-                                        placeholder="Cant"
-                                    />
-
-                                    <button
-                                        type="button"
-                                        onClick={() => cambiarCantidad && cambiarCantidad(itemClave, 1, productos)}
-                                        style={{
-                                            ...btnMini,
-                                            width: '28px',
-                                            height: '28px',
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            justifyContent: 'center',
-                                            fontWeight: 'bold',
-                                            cursor: 'pointer'
-                                        }}
-                                        title="Sumar 1 unidad"
-                                    >
-                                        +
-                                    </button>
-
-                                    <button
-                                        type="button"
-                                        onClick={() => eliminarDelCarrito && eliminarDelCarrito(itemClave)}
-                                        style={{
-                                            background: 'none',
-                                            border: 'none',
-                                            color: '#94a3b8',
-                                            fontSize: '0.9rem',
-                                            cursor: 'pointer',
-                                            padding: '0.2rem 0.35rem',
-                                            borderRadius: '4px',
-                                            marginLeft: '0.15rem'
-                                        }}
-                                        title="Eliminar del pedido"
-                                    >
-                                        🗑️
-                                    </button>
-                                </div>
-                            </div>
-                        );
-                    })}
-                </div>
-            )}
-
-            {/* Resumen monetario y botón principal de cobro */}
-            <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '2px solid #e2e8f0' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem', fontSize: '0.9rem' }}>
-                    <span style={{ color: '#64748b' }}>Subtotal Bruto:</span>
-                    <span style={{ fontWeight: 600 }}>Bs {subtotalBrutoCarrito.toFixed(2)}</span>
-                </div>
-
-                {descuentoAplicadoNum > 0 && !descuentoInvalido && (
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem', fontSize: '0.9rem', color: '#dc2626' }}>
-                        <span>Descuento aplicado:</span>
-                        <span style={{ fontWeight: 600 }}>-Bs {descuentoAplicadoNum.toFixed(2)}</span>
+                            );
+                        })}
                     </div>
                 )}
 
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '0.5rem 0 1rem', padding: '0.75rem', background: '#eff6ff', borderRadius: '8px', border: '1px solid #bfdbfe' }}>
-                    <span style={{ fontWeight: 'bold', color: '#1e40af', fontSize: '1.05rem' }}>TOTAL A COBRAR:</span>
-                    <span style={{ fontWeight: 'bold', color: '#1e3a8a', fontSize: '1.4rem' }}>
-                        Bs {totalCarrito.toFixed(2)}
-                    </span>
+                {/* Resumen monetario y botón principal de cobro */}
+                <div className="pt-3 border-t-2 border-slate-100 space-y-2">
+                    <div className="flex justify-between items-center text-sm text-slate-600">
+                        <span>Subtotal Bruto:</span>
+                        <span className="font-semibold text-slate-900">Bs {subtotalBrutoCarrito.toFixed(2)}</span>
+                    </div>
+
+                    {descuentoAplicadoNum > 0 && !descuentoInvalido && (
+                        <div className="flex justify-between items-center text-sm text-rose-600">
+                            <span>Descuento aplicado:</span>
+                            <span className="font-bold">-Bs {descuentoAplicadoNum.toFixed(2)}</span>
+                        </div>
+                    )}
+
+                    {/* Caja de Total a Cobrar */}
+                    <div className="flex justify-between items-center p-4 bg-sky-50 border-2 border-sky-200 rounded-xl my-3">
+                        <span className="font-bold text-sky-900 text-sm sm:text-base">TOTAL A COBRAR:</span>
+                        <span className="font-black text-sky-950 text-xl sm:text-2xl tracking-tight">
+                            Bs {totalCarrito.toFixed(2)}
+                        </span>
+                    </div>
+
+                    <Button
+                        type="button"
+                        onClick={onAbrirCobro}
+                        disabled={carrito.length === 0 || hayCantidadInvalida}
+                        className="w-full min-h-[50px] text-base font-bold bg-emerald-600 hover:bg-emerald-500 text-white shadow-md transition-all active:scale-[0.99] flex items-center justify-center gap-2 rounded-xl"
+                    >
+                        <span>💳</span>
+                        <span>Proceder al Cobro (Bs {totalCarrito.toFixed(2)})</span>
+                    </Button>
                 </div>
 
-                <button
-                    type="button"
-                    onClick={onAbrirCobro}
-                    disabled={carrito.length === 0 || hayCantidadInvalida}
-                    style={{
-                        ...btnPrimario,
-                        width: '100%',
-                        padding: '0.85rem',
-                        fontSize: '1.05rem',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        gap: '0.5rem',
-                        boxShadow: '0 4px 6px -1px rgba(0, 112, 243, 0.3)',
-                        opacity: (carrito.length === 0 || hayCantidadInvalida) ? 0.6 : 1,
-                        cursor: (carrito.length === 0 || hayCantidadInvalida) ? 'not-allowed' : 'pointer'
-                    }}
-                >
-                    <span>💳</span>
-                    <span>Proceder al Cobro (Bs {totalCarrito.toFixed(2)})</span>
-                </button>
-            </div>
-
-            {/* Notificación de último ticket emitido */}
-            {ultimoTicket && (
-                <div style={{ marginTop: '1rem', padding: '0.75rem', background: '#f0fdf4', borderRadius: '6px', border: '1px solid #bbf7d0', fontSize: '0.86rem' }}>
-                    <div>
-                        <strong>✅ Último Ticket #{ultimoTicket.movimientoId}:</strong> Cobrado Bs {Number(ultimoTicket.montoTotal || 0).toFixed(2)} ({String(ultimoTicket.metodoPago || '').toUpperCase()})
-                        {Number(ultimoTicket.descuento || 0) > 0 && (
-                            <span style={{ color: '#dc2626', marginLeft: '0.4rem' }}>
-                                (Desc: -Bs {Number(ultimoTicket.descuento).toFixed(2)})
-                            </span>
+                {/* Notificación de último ticket emitido */}
+                {ultimoTicket && (
+                    <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-950 space-y-1">
+                        <div className="font-semibold flex items-center gap-1.5">
+                            <span>✅</span>
+                            <span>Último Ticket #{ultimoTicket.movimientoId}: Cobrado Bs {Number(ultimoTicket.montoTotal || 0).toFixed(2)} ({String(ultimoTicket.metodoPago || '').toUpperCase()})</span>
+                            {Number(ultimoTicket.descuento || 0) > 0 && (
+                                <span className="text-rose-600 font-bold ml-1">
+                                    (-Bs {Number(ultimoTicket.descuento).toFixed(2)})
+                                </span>
+                            )}
+                        </div>
+                        {ultimoTicket.metodoPago === 'mixto' && (
+                            <div className="text-slate-600">
+                                Desglose Mixto: 💵 Efectivo Bs {Number(ultimoTicket.montoEfectivo || 0).toFixed(2)} + 📱 QR Bs {Number(ultimoTicket.montoQr || 0).toFixed(2)}
+                            </div>
+                        )}
+                        {(ultimoTicket.metodoPago === 'efectivo' || ultimoTicket.metodoPago === 'mixto') && (
+                            <div className="text-slate-600">
+                                Entregó cliente: Bs {Number(ultimoTicket.montoRecibido || 0).toFixed(2)} | <strong className="text-emerald-700 font-bold">Cambio entregado: Bs {Number(ultimoTicket.cambio || 0).toFixed(2)}</strong>
+                            </div>
                         )}
                     </div>
-                    {ultimoTicket.metodoPago === 'mixto' && (
-                        <div style={{ marginTop: '0.2rem', color: '#0369a1' }}>
-                            Desglose Mixto: 💵 Efectivo Bs {Number(ultimoTicket.montoEfectivo || 0).toFixed(2)} + 📱 QR Bs {Number(ultimoTicket.montoQr || 0).toFixed(2)}
-                        </div>
-                    )}
-                    {(ultimoTicket.metodoPago === 'efectivo' || ultimoTicket.metodoPago === 'mixto') && (
-                        <div style={{ marginTop: '0.2rem' }}>
-                            Entregó cliente: Bs {Number(ultimoTicket.montoRecibido || 0).toFixed(2)} | <strong style={{ color: '#15803d' }}>Cambio entregado: Bs {Number(ultimoTicket.cambio || 0).toFixed(2)}</strong>
-                        </div>
-                    )}
-                </div>
-            )}
-        </section>
+                )}
+            </CardContent>
+        </Card>
     );
 }

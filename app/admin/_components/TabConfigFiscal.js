@@ -1,7 +1,9 @@
 'use client';
 
 import { useState } from 'react';
-import { cardStyle, btnPrimario, inputStyle, plantillaBtnStyle } from './adminStyles';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Badge } from '@/components/ui/badge';
 import {
     guardarConfiguracionAction,
     guardarConfiguracionContableAction
@@ -105,122 +107,141 @@ export default function TabConfigFiscal({
     }
 
     return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', maxWidth: '900px' }}>
+        <div className="flex flex-col gap-6 max-w-4xl">
             {/* ASISTENTE DE MODALIDAD DEL NEGOCIO */}
-            <section style={{ ...cardStyle, border: '2px solid #0284c7' }}>
-                <h2 style={{ marginTop: 0 }}>
+            <section className="bg-white p-5 rounded-lg border-2 border-sky-600 shadow-sm">
+                <h2 className="text-xl font-bold text-slate-900 mt-0 mb-1.5">
                     {esPrimeraEjecucion
                         ? '🚀 Configuración Inicial del Sistema (Primera Ejecución)'
                         : '⚙️ Configurar Modalidad de Funcionamiento del Inventario'}
                 </h2>
-                <p style={{ color: '#475569', fontSize: '0.92rem' }}>
+                <p className="text-slate-600 text-sm mb-4">
                     Selecciona cómo funciona el inventario de tu negocio. El sistema activará u ocultará automáticamente los campos de <strong>Fechas de Vencimiento</strong> y de <strong>Ensamblaje / Recetas de Materiales</strong> según tu modalidad.
                 </p>
 
                 {/* 4 Plantillas por Funcionamiento */}
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.75rem', marginBottom: '1.25rem' }}>
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 mb-5">
                     <button
                         type="button"
                         onClick={() => aplicarPlantillaModalidad('no_perecedero')}
-                        style={plantillaBtnStyle(cfgUsaStockDirecto && !cfgUsaVencimiento && !cfgUsaRecetas)}
+                        className={`flex flex-col gap-1 text-left p-3.5 rounded-lg cursor-pointer transition-all border ${
+                            cfgUsaStockDirecto && !cfgUsaVencimiento && !cfgUsaRecetas
+                                ? 'border-2 border-sky-600 bg-sky-50 shadow-sm'
+                                : 'border-slate-300 bg-white hover:border-slate-400'
+                        }`}
                     >
-                        <strong>🔧 1. Artículos No Perecederos</strong>
-                        <span style={{ fontSize: '0.78rem', color: '#475569' }}>
+                        <strong className="text-sm text-slate-900">🔧 1. Artículos No Perecederos</strong>
+                        <span className="text-xs text-slate-600">
                             Compra y venta directa sin fecha de vencimiento ni recetas.
                         </span>
-                        <small style={{ color: '#0284c7' }}>Ej: Repuestos de auto, piezas de PC, ferretería, venta de madera.</small>
+                        <small className="text-sky-600 text-[11px] mt-auto font-medium">Ej: Repuestos de auto, ferretería, PC.</small>
                     </button>
 
                     <button
                         type="button"
                         onClick={() => aplicarPlantillaModalidad('perecedero')}
-                        style={plantillaBtnStyle(cfgUsaStockDirecto && cfgUsaVencimiento && !cfgUsaRecetas)}
+                        className={`flex flex-col gap-1 text-left p-3.5 rounded-lg cursor-pointer transition-all border ${
+                            cfgUsaStockDirecto && cfgUsaVencimiento && !cfgUsaRecetas
+                                ? 'border-2 border-sky-600 bg-sky-50 shadow-sm'
+                                : 'border-slate-300 bg-white hover:border-slate-400'
+                        }`}
                     >
-                        <strong>🛒 2. Productos con Vencimiento</strong>
-                        <span style={{ fontSize: '0.78rem', color: '#475569' }}>
-                            Compra y venta directa controlando lote y fecha de caducidad.
+                        <strong className="text-sm text-slate-900">🛒 2. Productos con Vencimiento</strong>
+                        <span className="text-xs text-slate-600">
+                            Compra y venta directa controlando lote y caducidad.
                         </span>
-                        <small style={{ color: '#0284c7' }}>Ej: Minimarket, supermercado, farmacia, insumos médicos.</small>
+                        <small className="text-sky-600 text-[11px] mt-auto font-medium">Ej: Minimarket, farmacia, supermercado.</small>
                     </button>
 
                     <button
                         type="button"
                         onClick={() => aplicarPlantillaModalidad('ensamblaje_no_perecedero')}
-                        style={plantillaBtnStyle(cfgUsaStockDirecto && !cfgUsaVencimiento && cfgUsaRecetas)}
+                        className={`flex flex-col gap-1 text-left p-3.5 rounded-lg cursor-pointer transition-all border ${
+                            cfgUsaStockDirecto && !cfgUsaVencimiento && cfgUsaRecetas
+                                ? 'border-2 border-sky-600 bg-sky-50 shadow-sm'
+                                : 'border-slate-300 bg-white hover:border-slate-400'
+                        }`}
                     >
-                        <strong>🪚 3. Ensamblaje / Fabricación (Sin Vencimiento)</strong>
-                        <span style={{ fontSize: '0.78rem', color: '#475569' }}>
-                            Une piezas o materiales no perecederos para crear un producto.
+                        <strong className="text-sm text-slate-900">🪚 3. Ensamblaje / Fabricación</strong>
+                        <span className="text-xs text-slate-600">
+                            Une piezas o materiales no perecederos para armar productos.
                         </span>
-                        <small style={{ color: '#0284c7' }}>Ej: Carpintería/mueblería, armado de PCs, talleres.</small>
+                        <small className="text-sky-600 text-[11px] mt-auto font-medium">Ej: Carpintería, armado de PCs, talleres.</small>
                     </button>
 
                     <button
                         type="button"
                         onClick={() => aplicarPlantillaModalidad('elaboracion_perecedera')}
-                        style={plantillaBtnStyle(cfgUsaStockDirecto && cfgUsaVencimiento && cfgUsaRecetas)}
+                        className={`flex flex-col gap-1 text-left p-3.5 rounded-lg cursor-pointer transition-all border ${
+                            cfgUsaStockDirecto && cfgUsaVencimiento && cfgUsaRecetas
+                                ? 'border-2 border-sky-600 bg-sky-50 shadow-sm'
+                                : 'border-slate-300 bg-white hover:border-slate-400'
+                        }`}
                     >
-                        <strong>☕ 4. Elaboración Perecedera (Con Receta y Vencimiento)</strong>
-                        <span style={{ fontSize: '0.78rem', color: '#475569' }}>
-                            Recetas con ingredientes que tienen fecha de vencimiento.
+                        <strong className="text-sm text-slate-900">☕ 4. Elaboración Perecedera</strong>
+                        <span className="text-xs text-slate-600">
+                            Recetas con ingredientes que tienen caducidad.
                         </span>
-                        <small style={{ color: '#0284c7' }}>Ej: Cafetería, restaurante, panadería, pastelería.</small>
+                        <small className="text-sky-600 text-[11px] mt-auto font-medium">Ej: Cafetería, restaurante, panadería.</small>
                     </button>
                 </div>
 
-                <form onSubmit={handleGuardarConfiguracion} style={{ display: 'flex', flexDirection: 'column', gap: '1rem', background: '#f8fafc', padding: '1rem', borderRadius: '8px', border: '1px solid #cbd5e1' }}>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-                        <label style={{ fontWeight: 'bold', fontSize: '0.9rem' }}>
+                <form onSubmit={handleGuardarConfiguracion} className="flex flex-col gap-4 bg-slate-50 p-4 rounded-lg border border-slate-200">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <label className="text-sm font-semibold text-slate-800 flex flex-col gap-1">
                             Nombre del Negocio:
-                            <input
+                            <Input
                                 type="text"
                                 required
                                 value={cfgNombreNegocio}
                                 onChange={(e) => setCfgNombreNegocio(e.target.value)}
-                                style={inputStyle}
+                                className="bg-white"
                             />
                         </label>
-                        <label style={{ fontWeight: 'bold', fontSize: '0.9rem' }}>
+                        <label className="text-sm font-semibold text-slate-800 flex flex-col gap-1">
                             Descripción de la Modalidad:
-                            <input
+                            <Input
                                 type="text"
                                 required
                                 value={cfgModalidadNombre}
                                 onChange={(e) => setCfgModalidadNombre(e.target.value)}
-                                style={inputStyle}
+                                className="bg-white"
                             />
                         </label>
                     </div>
 
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
-                        <strong>Interruptores de Funcionalidades de Inventario:</strong>
-                        <label style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', cursor: 'pointer' }}>
+                    <div className="flex flex-col gap-2.5 pt-2">
+                        <strong className="text-sm text-slate-800">Interruptores de Funcionalidades de Inventario:</strong>
+                        <label className="flex items-start gap-2.5 cursor-pointer text-xs text-slate-700">
                             <input
                                 type="checkbox"
                                 checked={cfgUsaStockDirecto}
                                 onChange={(e) => setCfgUsaStockDirecto(e.target.checked)}
+                                className="mt-0.5 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
                             />
                             <span>
                                 <strong>Control de Stock Directo por Artículo:</strong> Descuenta unidades/medidas al vender, alerta stock mínimo y recalcula Costo Promedio Ponderado al reabastecer artículos.
                             </span>
                         </label>
 
-                        <label style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', cursor: 'pointer' }}>
+                        <label className="flex items-start gap-2.5 cursor-pointer text-xs text-slate-700">
                             <input
                                 type="checkbox"
                                 checked={cfgUsaVencimiento}
                                 onChange={(e) => setCfgUsaVencimiento(e.target.checked)}
+                                className="mt-0.5 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
                             />
                             <span>
                                 <strong>Control de Fechas de Vencimiento:</strong> Solicita fecha de caducidad al registrar o comprar artículos/insumos (desactívalo para madera, repuestos de auto, piezas de PC o ferretería).
                             </span>
                         </label>
 
-                        <label style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', cursor: 'pointer' }}>
+                        <label className="flex items-start gap-2.5 cursor-pointer text-xs text-slate-700">
                             <input
                                 type="checkbox"
                                 checked={cfgUsaRecetas}
                                 onChange={(e) => setCfgUsaRecetas(e.target.checked)}
+                                className="mt-0.5 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
                             />
                             <span>
                                 <strong>Control de Ensamblaje / Recetas de Materiales (BOM):</strong> Habilita la bolsa de materiales/insumos para productos que se fabrican o ensamblan a partir de componentes.
@@ -228,22 +249,38 @@ export default function TabConfigFiscal({
                         </label>
                     </div>
 
-                    <button type="submit" style={{ ...btnPrimario, alignSelf: 'flex-start' }}>
+                    <Button type="submit" className="self-start bg-sky-600 hover:bg-sky-700 text-white font-bold mt-2">
                         Guardar Modalidad y Continuar
-                    </button>
+                    </Button>
                 </form>
             </section>
 
             {/* SECCIÓN CONFIGURACIÓN CONTABLE Y RÉGIMEN FISCAL */}
-            <section style={cardStyle}>
-                <h3 style={{ marginTop: 0 }}>🧾 Régimen Tributario y Configuración Fiscal (Bolivia)</h3>
-                <p style={{ color: '#475569', fontSize: '0.9rem' }}>
+            <section className="bg-white p-5 rounded-lg border border-slate-200 shadow-sm">
+                <div className="flex justify-between items-center mb-1 flex-wrap gap-2">
+                    <h3 className="text-lg font-bold text-slate-900 m-0">
+                        🧾 Régimen Tributario y Configuración Fiscal (Bolivia)
+                    </h3>
+                    <Badge
+                        variant="outline"
+                        className={
+                            cfgRegimenTributario === 'regimen_general'
+                                ? 'bg-blue-50 text-blue-800 border-blue-300 font-semibold'
+                                : 'bg-amber-50 text-amber-800 border-amber-300 font-semibold'
+                        }
+                    >
+                        {cfgRegimenTributario === 'regimen_general'
+                            ? '🏛️ Régimen General (IVA / IT)'
+                            : '📋 Régimen Simplificado (Sin IVA)'}
+                    </Badge>
+                </div>
+                <p className="text-slate-600 text-sm mb-4">
                     Define las tasas tributarias aplicadas a los movimientos del negocio. Puedes alternar entre <strong>Control Interno (RTS)</strong> y <strong>Régimen General (IVA / IT)</strong>.
                 </p>
 
-                <form onSubmit={handleGuardarConfiguracionContable} style={{ display: 'flex', flexDirection: 'column', gap: '1rem', background: '#f8fafc', padding: '1rem', borderRadius: '8px', border: '1px solid #cbd5e1' }}>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem' }}>
-                        <label style={{ fontSize: '0.88rem', fontWeight: 600 }}>
+                <form onSubmit={handleGuardarConfiguracionContable} className="flex flex-col gap-4 bg-slate-50 p-4 rounded-lg border border-slate-200">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                        <label className="text-sm font-semibold text-slate-800 flex flex-col gap-1">
                             Régimen del Negocio:
                             <select
                                 value={cfgRegimenTributario}
@@ -252,54 +289,54 @@ export default function TabConfigFiscal({
                                     setCfgRegimenTributario(val);
                                     setCfgEmiteFactura(val === 'regimen_general');
                                 }}
-                                style={inputStyle}
+                                className="w-full h-9 rounded-md border border-slate-300 bg-white px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-slate-950"
                             >
                                 <option value="simplificado_control_interno">📋 Control Interno / Régimen Simplificado (Sin IVA)</option>
                                 <option value="regimen_general">🏛️ Régimen General (Facturación IVA / IT)</option>
                             </select>
                         </label>
 
-                        <label style={{ fontSize: '0.88rem', fontWeight: 600 }}>
+                        <label className="text-sm font-semibold text-slate-800 flex flex-col gap-1">
                             NIT del Establecimiento (Opcional):
-                            <input
+                            <Input
                                 type="text"
                                 placeholder="Ej. 1029384015"
                                 value={cfgNitNegocio}
                                 onChange={(e) => setCfgNitNegocio(e.target.value)}
-                                style={inputStyle}
+                                className="bg-white"
                             />
                         </label>
 
                         {cfgRegimenTributario === 'regimen_general' && (
                             <>
-                                <label style={{ fontSize: '0.88rem', fontWeight: 600 }}>
+                                <label className="text-sm font-semibold text-slate-800 flex flex-col gap-1">
                                     Alícuota IVA (%):
-                                    <input
+                                    <Input
                                         type="number"
                                         step="0.01"
                                         min="0"
                                         value={cfgIvaPorcentaje}
                                         onChange={(e) => setCfgIvaPorcentaje(e.target.value)}
-                                        style={inputStyle}
+                                        className="bg-white"
                                     />
                                 </label>
-                                <label style={{ fontSize: '0.88rem', fontWeight: 600 }}>
+                                <label className="text-sm font-semibold text-slate-800 flex flex-col gap-1">
                                     Alícuota IT (%):
-                                    <input
+                                    <Input
                                         type="number"
                                         step="0.01"
                                         min="0"
                                         value={cfgItPorcentaje}
                                         onChange={(e) => setCfgItPorcentaje(e.target.value)}
-                                        style={inputStyle}
+                                        className="bg-white"
                                     />
                                 </label>
-                                <label style={{ fontSize: '0.88rem', fontWeight: 600 }}>
+                                <label className="text-sm font-semibold text-slate-800 flex flex-col gap-1">
                                     Base Imponible del IT:
                                     <select
                                         value={cfgItBase}
                                         onChange={(e) => setCfgItBase(e.target.value)}
-                                        style={inputStyle}
+                                        className="w-full h-9 rounded-md border border-slate-300 bg-white px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-slate-950"
                                     >
                                         <option value="todas_las_ventas">Todas las ventas (Facturadas y no facturadas)</option>
                                         <option value="solo_facturadas">Solo ventas formalmente facturadas</option>
@@ -309,28 +346,30 @@ export default function TabConfigFiscal({
                         )}
                     </div>
 
-                    <div style={{ display: 'flex', gap: '1.25rem', flexWrap: 'wrap', alignItems: 'center' }}>
-                        <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.88rem', cursor: 'pointer' }}>
+                    <div className="flex flex-wrap gap-5 items-center pt-1">
+                        <label className="flex items-center gap-2 text-xs text-slate-700 cursor-pointer">
                             <input
                                 type="checkbox"
                                 checked={cfgEmiteFactura}
                                 onChange={(e) => setCfgEmiteFactura(e.target.checked)}
+                                className="rounded border-slate-300 text-sky-600 focus:ring-sky-500"
                             />
                             <span>Habilitar emisión de Factura Formal (con NIT/CI y Razón Social)</span>
                         </label>
-                        <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.88rem', cursor: 'pointer' }}>
+                        <label className="flex items-center gap-2 text-xs text-slate-700 cursor-pointer">
                             <input
                                 type="checkbox"
                                 checked={cfgUsaRespaldoComprasEgresos}
                                 onChange={(e) => setCfgUsaRespaldoComprasEgresos(e.target.checked)}
+                                className="rounded border-slate-300 text-sky-600 focus:ring-sky-500"
                             />
                             <span>Permitir registrar factura en Compras y Gastos (Crédito Fiscal)</span>
                         </label>
                     </div>
 
-                    <button type="submit" style={{ ...btnPrimario, alignSelf: 'flex-start' }}>
+                    <Button type="submit" className="self-start bg-slate-900 hover:bg-slate-800 text-white font-bold mt-2">
                         Actualizar Configuración Contable
-                    </button>
+                    </Button>
                 </form>
             </section>
         </div>

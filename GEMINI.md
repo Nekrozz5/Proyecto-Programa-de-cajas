@@ -1,7 +1,7 @@
 # Contexto del Proyecto: Sistema POS y Control de Cajas Híbrido
 
 ## 1. Stack Tecnológico y Arquitectura
-- **Entorno:** Node.js (CommonJS) con Next.js (App Router) y SQLite3 local (`caja.db`).
+- **Entorno:** Node.js con Next.js (App Router), Tailwind CSS, Shadcn UI y SQLite3 local (`caja.db`).
 - **Autenticación y Seguridad:** JWT con cookies HttpOnly gestionadas desde el servidor (`jose`), contraseñas hasheadas con `bcryptjs` (salt rounds = 10), control de intentos fallidos en memoria con rate limiting dual (por IP con `TRUST_PROXY` y por cuenta de usuario) y sincronización automática de credenciales técnicas (`DEVELOPER_PASSWORD` en `.env.local`).
 - **Control de Sesiones Avanzado (`server/sesion.js`):**
   - TTL diferenciado por rol: `developer` (15 min), `superadmin` / `admin` (30 min), `user` (8 horas).
@@ -39,8 +39,10 @@
   - `app/api/caja/route.js`: Endpoint exclusivo `GET` con `Cache-Control: no-store` para lectura de estado inicial, catálogo y sincronización/polling de turnos.
   - `app/api/auth/route.js`: Endpoint `POST` para `login`, `logout` e `instalacion_inicial` con gestión de cookies `HttpOnly` (`pos_session`).
   - `app/api/reportes/route.js`: Endpoint administrativo `GET` para tendencias JSON, exportación CSV (`?formato=csv`) y exportación Excel (`?formato=xlsx` con 10 hojas contables).
-  - `app/admin/`: Panel de administración (`page.js`, `GraficosFinancieros.js`, `exportarPDF.js`) con subcomponentes por pestaña en `_components/` (`TabCatalogo.js`, `TabTurnosArqueos.js`, `TabUsuariosCajas.js`, `TabKardex.js`, `TabConfigFiscal.js`, `TabExportacion.js`, `TabResumen.js`, `adminStyles.js`).
-  - `app/caja/`: Terminal POS (`page.js`) con subcomponentes atómicos en `_components/` (`CatalogoProductos.js`, `CarritoVenta.js`, `ModalCobro.js`, `ModalModificadores.js`, `ModalArqueoCiego.js`, `ModalMovimientosEfectivo.js`, `HistorialTurno.js`, `AperturaTurno.js`, `LoginCaja.js`, `cajaStyles.js`) y hooks en `_hooks/` (`useCarrito.js`, `useInactividad.js`).
+  - `app/admin/`: Panel de administración (`page.js`, `GraficosFinancieros.js`, `exportarPDF.js`) con subcomponentes por pestaña en `_components/` (`TabCatalogo.js`, `TabTurnosArqueos.js`, `TabUsuariosCajas.js`, `TabKardex.js`, `TabConfigFiscal.js`, `TabExportacion.js`, `TabResumen.js`).
+  - `app/caja/`: Terminal POS (`page.js`) con subcomponentes atómicos en `_components/` (`CatalogoProductos.js`, `CarritoVenta.js`, `ModalCobro.js`, `ModalModificadores.js`, `ModalArqueoCiego.js`, `ModalMovimientosEfectivo.js`, `HistorialTurno.js`, `AperturaTurno.js`, `LoginCaja.js`) y hooks en `_hooks/` (`useCarrito.js`, `useInactividad.js`).
+  - `components/ui/`: Componentes UI reutilizables de Shadcn (`badge.jsx`, `button.jsx`, `card.jsx`, `dialog.jsx`, `input.jsx`, `separator.jsx`, `table.jsx`, `tabs.jsx`).
+  - `lib/utils.js`: Utilidad central `cn` (`clsx` + `tailwind-merge`) para combinación dinámica de clases Tailwind.
   - `next.config.js`: Optimización de paquetes nativos con `serverExternalPackages` y configuración de `experimental.serverActions.allowedOrigins` (`localhost:3000`, `127.0.0.1:3000`, `*.trycloudflare.com`, `ALLOWED_ORIGINS`).
 
 ## 2. Reglas de Negocio Obligatorias
@@ -120,6 +122,9 @@
 - **Testing y Búsqueda de Bugs (Estrictamente Bajo Demanda):**
   - La IA está capacitada para ejecutar diagnósticos de estrés, suites de prueba automatizadas (`scratch/test_*.js`) y compilaciones de verificación (`npm run build`), pero **NO** debe ejecutarlos proactivamente ni de forma automática tras cada ajuste menor para evitar consumo innecesario de tokens y tiempo.
   - La suite de pruebas y diagnóstico de errores solo se ejecutará cuando el usuario lo ordene explícitamente (ej. *"haz una prueba"*, *"busca fallos o bugs"*, *"ejecuta el testeo"*).
+- **Planificación por Fases y Ahorro de Tokens (Skill `phase-planner`):**
+  - Ante solicitudes de avance, nuevos módulos o refactorizaciones de envergadura (como la adopción progresiva de Shadcn), la IA debe apoyarse en la skill `phase-planner` (`.agents/skills/phase-planner/SKILL.md`).
+  - La descomposición debe dividir el desarrollo en fases atómicas secuenciales, generando para cada una un prompt quirúrgico autocontenido con lista cerrada de archivos, restricciones estrictas y criterio de terminado (DoD) para maximizar el ahorro de tokens y prevenir alucinaciones.
 
 ## 4. Comandos
 - **Instalación de dependencias:**

@@ -1,7 +1,10 @@
 'use client';
 
 import { useState } from 'react';
-import { cardStyle, formCol, inputStyle, btnPrimario, btnOscuro, btnSecundario, thTd } from './adminStyles';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Badge } from '@/components/ui/badge';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import {
     crearInsumoAction,
     comprarInsumoAction,
@@ -196,21 +199,21 @@ export default function TabKardex({
     }
 
     return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+        <div className="flex flex-col gap-6">
             {/* SECCIÓN PUNTO DE REORDEN Y ESTADO DE INSUMOS */}
-            <section style={cardStyle}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem', marginBottom: '0.85rem' }}>
+            <section className="bg-white p-5 rounded-lg border border-slate-200 shadow-sm">
+                <div className="flex justify-between items-center flex-wrap gap-3 mb-4">
                     <div>
-                        <h2 style={{ margin: 0 }}>🧱 Estado de Materiales / Insumos y Punto de Reorden</h2>
-                        <span style={{ fontSize: '0.84rem', color: '#64748b' }}>
+                        <h2 className="text-xl font-bold text-slate-900 m-0">🧱 Estado de Materiales / Insumos y Punto de Reorden</h2>
+                        <span className="text-xs text-slate-500">
                             {insumosFiltrados.length} insumo(s) encontrado(s) de un total de {listaInsumosCompleta.length}
                         </span>
                     </div>
 
                     {/* Buscador Rápido y Selector de Límite de Insumos */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-                        <div style={{ position: 'relative', minWidth: '240px' }}>
-                            <input
+                    <div className="flex items-center gap-2 flex-wrap">
+                        <div className="relative min-w-[240px]">
+                            <Input
                                 type="text"
                                 placeholder="🔍 Buscar insumo por nombre o alerta..."
                                 value={busquedaInsumos}
@@ -218,7 +221,7 @@ export default function TabKardex({
                                     setBusquedaInsumos(e.target.value);
                                     setPaginaInsumos(1);
                                 }}
-                                style={{ ...inputStyle, padding: '0.45rem 2rem 0.45rem 0.65rem', fontSize: '0.85rem' }}
+                                className="h-9 pr-8 text-xs bg-white"
                             />
                             {busquedaInsumos && (
                                 <button
@@ -227,18 +230,7 @@ export default function TabKardex({
                                         setBusquedaInsumos('');
                                         setPaginaInsumos(1);
                                     }}
-                                    style={{
-                                        position: 'absolute',
-                                        right: '8px',
-                                        top: '50%',
-                                        transform: 'translateY(-50%)',
-                                        background: 'transparent',
-                                        border: 'none',
-                                        color: '#94a3b8',
-                                        cursor: 'pointer',
-                                        fontWeight: 'bold',
-                                        fontSize: '0.9rem'
-                                    }}
+                                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 font-bold text-xs"
                                     title="Limpiar búsqueda"
                                 >
                                     ✕
@@ -252,7 +244,7 @@ export default function TabKardex({
                                 setLimitePorPaginaInsumos(Number(e.target.value));
                                 setPaginaInsumos(1);
                             }}
-                            style={{ ...inputStyle, width: 'auto', padding: '0.45rem', fontSize: '0.85rem' }}
+                            className="h-9 rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs shadow-sm focus:outline-none"
                             title="Insumos por página"
                         >
                             <option value={5}>5 por pág.</option>
@@ -264,85 +256,79 @@ export default function TabKardex({
                 </div>
 
                 {listaInsumosCompleta.length === 0 ? (
-                    <p style={{ color: '#666' }}>No hay materiales o insumos registrados todavía.</p>
+                    <p className="text-slate-500 text-sm">No hay materiales o insumos registrados todavía.</p>
                 ) : insumosFiltrados.length === 0 ? (
-                    <div style={{ padding: '2rem', textAlign: 'center', color: '#64748b', background: '#f8fafc', borderRadius: '6px' }}>
+                    <div className="p-8 text-center text-slate-500 bg-slate-50 rounded-lg text-sm">
                         No se encontraron insumos que coincidan con &ldquo;<strong>{busquedaInsumos}</strong>&rdquo;.
                     </div>
                 ) : (
                     <>
-                        <div style={{ overflowX: 'auto' }}>
-                            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' }}>
-                                <thead>
-                                    <tr style={{ borderBottom: '2px solid #e5e7eb', textAlign: 'left', background: '#f8fafc' }}>
-                                        <th style={thTd}>Material / Insumo</th>
-                                        <th style={thTd}>Stock Actual</th>
-                                        <th style={thTd}>Consumo Diario Prom.</th>
-                                        <th style={thTd}>Punto Reorden (ROP)</th>
-                                        <th style={thTd}>Compra Sugerida</th>
-                                        <th style={thTd}>Costo Estimado</th>
-                                        <th style={thTd}>Estado / Alerta</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
+                        <div className="overflow-x-auto border border-slate-200 rounded-lg">
+                            <Table>
+                                <TableHeader>
+                                    <TableRow className="bg-slate-50">
+                                        <TableHead className="font-bold text-slate-900">Material / Insumo</TableHead>
+                                        <TableHead className="font-bold text-slate-900">Stock Actual</TableHead>
+                                        <TableHead className="font-bold text-slate-900">Consumo Diario Prom.</TableHead>
+                                        <TableHead className="font-bold text-slate-900">Punto Reorden (ROP)</TableHead>
+                                        <TableHead className="font-bold text-slate-900">Compra Sugerida</TableHead>
+                                        <TableHead className="font-bold text-slate-900">Costo Estimado</TableHead>
+                                        <TableHead className="font-bold text-slate-900">Estado / Alerta</TableHead>
+                                    </TableRow>
+                                </TableHeader>
+                                <TableBody>
                                     {insumosPaginados.map((ins) => (
-                                        <tr key={ins.insumoId} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                                            <td style={thTd}><strong>{ins.nombre}</strong></td>
-                                            <td style={thTd}>{ins.stockActual} {ins.unidad}</td>
-                                            <td style={thTd}>{ins.consumoPromedioDiario} {ins.unidad}/día</td>
-                                            <td style={thTd}>{ins.puntoReordenROP} {ins.unidad}</td>
-                                            <td style={thTd}>{ins.cantidadSugeridaCompra} {ins.unidad}</td>
-                                            <td style={thTd}>Bs {ins.costoEstimadoCompra.toFixed(2)}</td>
-                                            <td style={{ ...thTd, fontWeight: 'bold', color: ins.estadoAlerta === 'OK' ? '#166534' : '#b91c1c' }}>
-                                                {ins.estadoAlerta}
-                                            </td>
-                                        </tr>
+                                        <TableRow key={ins.insumoId}>
+                                            <TableCell className="font-bold text-slate-900">{ins.nombre}</TableCell>
+                                            <TableCell>{ins.stockActual} {ins.unidad}</TableCell>
+                                            <TableCell>{ins.consumoPromedioDiario} {ins.unidad}/día</TableCell>
+                                            <TableCell>{ins.puntoReordenROP} {ins.unidad}</TableCell>
+                                            <TableCell>{ins.cantidadSugeridaCompra} {ins.unidad}</TableCell>
+                                            <TableCell>Bs {ins.costoEstimadoCompra.toFixed(2)}</TableCell>
+                                            <TableCell>
+                                                {ins.estadoAlerta === 'OK' ? (
+                                                    <Badge className="bg-emerald-100 text-emerald-800 hover:bg-emerald-100 border border-emerald-300 font-bold text-xs">
+                                                        OK
+                                                    </Badge>
+                                                ) : (
+                                                    <Badge variant="destructive" className="bg-red-100 text-red-800 hover:bg-red-100 border border-red-300 font-bold text-xs">
+                                                        {ins.estadoAlerta}
+                                                    </Badge>
+                                                )}
+                                            </TableCell>
+                                        </TableRow>
                                     ))}
-                                </tbody>
-                            </table>
+                                </TableBody>
+                            </Table>
                         </div>
 
                         {/* Barra de Paginación */}
                         {totalPaginasInsumos > 1 && (
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '1rem', paddingTop: '0.75rem', borderTop: '1px solid #e2e8f0', flexWrap: 'wrap', gap: '0.5rem' }}>
-                                <span style={{ fontSize: '0.82rem', color: '#64748b' }}>
+                            <div className="flex justify-between items-center mt-3 pt-3 border-t border-slate-200 flex-wrap gap-2">
+                                <span className="text-xs text-slate-500">
                                     Mostrando {inicioInsumos + 1} - {Math.min(inicioInsumos + limitePorPaginaInsumos, insumosFiltrados.length)} de {insumosFiltrados.length}
                                 </span>
-                                <div style={{ display: 'flex', gap: '0.35rem', alignItems: 'center' }}>
-                                    <button
+                                <div className="flex gap-1.5 items-center">
+                                    <Button
                                         type="button"
+                                        size="sm"
+                                        variant="outline"
                                         disabled={paginaInsumosValida <= 1}
                                         onClick={() => setPaginaInsumos((p) => Math.max(1, p - 1))}
-                                        style={{
-                                            padding: '0.35rem 0.75rem',
-                                            borderRadius: '4px',
-                                            border: '1px solid #cbd5e1',
-                                            background: paginaInsumosValida <= 1 ? '#f1f5f9' : '#ffffff',
-                                            color: paginaInsumosValida <= 1 ? '#94a3b8' : '#0f172a',
-                                            cursor: paginaInsumosValida <= 1 ? 'not-allowed' : 'pointer',
-                                            fontSize: '0.82rem',
-                                            fontWeight: 'bold'
-                                        }}
+                                        className="h-7 text-xs"
                                     >
                                         ◀ Anterior
-                                    </button>
-                                    <button
+                                    </Button>
+                                    <Button
                                         type="button"
+                                        size="sm"
+                                        variant="outline"
                                         disabled={paginaInsumosValida >= totalPaginasInsumos}
                                         onClick={() => setPaginaInsumos((p) => Math.min(totalPaginasInsumos, p + 1))}
-                                        style={{
-                                            padding: '0.35rem 0.75rem',
-                                            borderRadius: '4px',
-                                            border: '1px solid #cbd5e1',
-                                            background: paginaInsumosValida >= totalPaginasInsumos ? '#f1f5f9' : '#ffffff',
-                                            color: paginaInsumosValida >= totalPaginasInsumos ? '#94a3b8' : '#0f172a',
-                                            cursor: paginaInsumosValida >= totalPaginasInsumos ? 'not-allowed' : 'pointer',
-                                            fontSize: '0.82rem',
-                                            fontWeight: 'bold'
-                                        }}
+                                        className="h-7 text-xs"
                                     >
                                         Siguiente ▶
-                                    </button>
+                                    </Button>
                                 </div>
                             </div>
                         )}
@@ -351,13 +337,13 @@ export default function TabKardex({
             </section>
 
             {/* FORMULARIOS DE COMPRA Y CREACIÓN DE INSUMOS */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1.5rem' }}>
-                <section style={cardStyle}>
-                    <h3 style={{ marginTop: 0 }}>Registrar Compra de Material / Insumo (CPP - NIC 2)</h3>
-                    <form onSubmit={handleCompraCPP} style={formCol}>
-                        <label style={{ fontSize: '0.85rem', color: '#334155' }}>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <section className="bg-white p-5 rounded-lg border border-slate-200 shadow-sm flex flex-col gap-3">
+                    <h3 className="text-lg font-bold text-slate-900 m-0">Registrar Compra de Material / Insumo (CPP - NIC 2)</h3>
+                    <form onSubmit={handleCompraCPP} className="flex flex-col gap-3">
+                        <label className="text-xs font-semibold text-slate-700 flex flex-col gap-1">
                             Seleccionar Material / Insumo:
-                            <select value={compraInsumoId} onChange={(e) => setCompraInsumoId(e.target.value)} style={inputStyle}>
+                            <select value={compraInsumoId} onChange={(e) => setCompraInsumoId(e.target.value)} className="w-full h-9 rounded-md border border-slate-300 bg-white px-3 py-1 text-sm shadow-sm focus:outline-none">
                                 {(datos?.insumos || []).map((i) => (
                                     <option key={i.id} value={i.id}>
                                         {i.nombre} (Stock: {i.stock_actual} {i.unidad_medida})
@@ -365,30 +351,30 @@ export default function TabKardex({
                                 ))}
                             </select>
                         </label>
-                        <label style={{ fontSize: '0.85rem', color: '#334155' }}>
+                        <label className="text-xs font-semibold text-slate-700 flex flex-col gap-1">
                             Nombre de la distribuidora:
-                            <input
+                            <Input
                                 type="text"
                                 placeholder="Nombre de la distribuidora"
                                 value={compraDistribuidora}
                                 onChange={(e) => setCompraDistribuidora(e.target.value)}
-                                style={inputStyle}
+                                className="bg-white"
                             />
                         </label>
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
-                            <label style={{ fontSize: '0.82rem', color: '#334155' }}>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <label className="text-xs font-semibold text-slate-700 flex flex-col gap-1">
                                 NIT Proveedor (Opcional):
-                                <input
+                                <Input
                                     type="text"
                                     placeholder="NIT del proveedor"
                                     value={compraNitProveedor}
                                     onChange={(e) => setCompraNitProveedor(e.target.value)}
-                                    style={inputStyle}
+                                    className="bg-white"
                                 />
                             </label>
-                            <label style={{ fontSize: '0.82rem', color: '#334155' }}>
+                            <label className="text-xs font-semibold text-slate-700 flex flex-col gap-1">
                                 N° Factura (Opcional):
-                                <input
+                                <Input
                                     type="text"
                                     placeholder="N° de factura"
                                     value={compraNroFactura}
@@ -396,40 +382,43 @@ export default function TabKardex({
                                         setCompraNroFactura(e.target.value);
                                         if (e.target.value.trim() !== '') setCompraConFactura(true);
                                     }}
-                                    style={inputStyle}
+                                    className="bg-white"
                                 />
                             </label>
                         </div>
-                        <label style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', fontSize: '0.84rem', color: '#1e293b', cursor: 'pointer' }}>
+                        <label className="flex items-center gap-2 text-xs text-slate-800 cursor-pointer pt-1">
                             <input
                                 type="checkbox"
                                 checked={compraConFactura}
                                 onChange={(e) => setCompraConFactura(e.target.checked)}
+                                className="rounded border-slate-300 text-sky-600 focus:ring-sky-500"
                             />
                             <span>🧾 Compra con Factura Fiscal (Genera Crédito Fiscal IVA)</span>
                         </label>
-                        <label style={{ fontSize: '0.85rem', color: '#334155' }}>
+                        <label className="text-xs font-semibold text-slate-700 flex flex-col gap-1">
                             Cantidad Comprada (según su unidad de medida):
-                            <input type="number" step="0.01" placeholder="Ej. 10" required value={compraCantidad} onChange={(e) => setCompraCantidad(e.target.value)} style={inputStyle} />
+                            <Input type="number" step="0.01" placeholder="Ej. 10" required value={compraCantidad} onChange={(e) => setCompraCantidad(e.target.value)} className="bg-white" />
                         </label>
-                        <label style={{ fontSize: '0.85rem', color: '#334155' }}>
+                        <label className="text-xs font-semibold text-slate-700 flex flex-col gap-1">
                             Costo Total Pagado por la Compra (Bs):
-                            <input type="number" step="0.01" placeholder="Ej. 150.00" required value={compraCostoTotal} onChange={(e) => setCompraCostoTotal(e.target.value)} style={inputStyle} />
+                            <Input type="number" step="0.01" placeholder="Ej. 150.00" required value={compraCostoTotal} onChange={(e) => setCompraCostoTotal(e.target.value)} className="bg-white" />
                         </label>
-                        <button type="submit" style={btnOscuro}>Registrar Compra y Actualizar Costos</button>
+                        <Button type="submit" className="bg-slate-900 hover:bg-slate-800 text-white font-bold mt-1">
+                            Registrar Compra y Actualizar Costos
+                        </Button>
                     </form>
                 </section>
 
-                <section style={cardStyle}>
-                    <h3 style={{ marginTop: 0 }}>Registrar Nuevo Material / Insumo</h3>
-                    <form onSubmit={handleCrearInsumo} style={formCol}>
-                        <label style={{ fontSize: '0.85rem', color: '#334155' }}>
+                <section className="bg-white p-5 rounded-lg border border-slate-200 shadow-sm flex flex-col gap-3">
+                    <h3 className="text-lg font-bold text-slate-900 m-0">Registrar Nuevo Material / Insumo</h3>
+                    <form onSubmit={handleCrearInsumo} className="flex flex-col gap-3">
+                        <label className="text-xs font-semibold text-slate-700 flex flex-col gap-1">
                             Nombre del Material, Pieza o Ingrediente:
-                            <input placeholder="Nombre del material o insumo" required value={insNombre} onChange={(e) => setInsNombre(e.target.value)} style={inputStyle} />
+                            <Input placeholder="Nombre del material o insumo" required value={insNombre} onChange={(e) => setInsNombre(e.target.value)} className="bg-white" />
                         </label>
-                        <label style={{ fontSize: '0.85rem', color: '#334155' }}>
+                        <label className="text-xs font-semibold text-slate-700 flex flex-col gap-1">
                             Unidad de Medida (Sistema Métrico o Unidades):
-                            <select value={insUnidad} onChange={(e) => setInsUnidad(e.target.value)} style={inputStyle}>
+                            <select value={insUnidad} onChange={(e) => setInsUnidad(e.target.value)} className="w-full h-9 rounded-md border border-slate-300 bg-white px-3 py-1 text-sm shadow-sm focus:outline-none">
                                 <option value="unidades">Unidades (u. / piezas / paquetes)</option>
                                 <option value="metros">Metros (m)</option>
                                 <option value="centimetros">Centímetros (cm)</option>
@@ -440,19 +429,19 @@ export default function TabKardex({
                                 <option value="miligramos">Miligramos (mg)</option>
                             </select>
                         </label>
-                        <label style={{ fontSize: '0.85rem', color: '#334155' }}>
+                        <label className="text-xs font-semibold text-slate-700 flex flex-col gap-1">
                             Stock Inicial Disponible en Almacén:
-                            <input type="number" step="0.01" min="0" placeholder="Cantidad actual (0 si aún no compraste)" value={insStockIni} onChange={(e) => setInsStockIni(e.target.value)} style={inputStyle} />
+                            <Input type="number" step="0.01" min="0" placeholder="Cantidad actual (0 si aún no compraste)" value={insStockIni} onChange={(e) => setInsStockIni(e.target.value)} className="bg-white" />
                         </label>
-                        <label style={{ fontSize: '0.85rem', color: '#334155' }}>
+                        <label className="text-xs font-semibold text-slate-700 flex flex-col gap-1">
                             Costo por unidad (Bs):
-                            <input type="number" step="0.0001" min="0" placeholder="Cuánto cuesta 1 unidad en Bs" value={insCostoUni} onChange={(e) => setInsCostoUni(e.target.value)} style={inputStyle} />
+                            <Input type="number" step="0.0001" min="0" placeholder="Cuánto cuesta 1 unidad en Bs" value={insCostoUni} onChange={(e) => setInsCostoUni(e.target.value)} className="bg-white" />
                         </label>
-                        <label style={{ fontSize: '0.85rem', color: '#334155' }}>
+                        <label className="text-xs font-semibold text-slate-700 flex flex-col gap-1">
                             Stock de Seguridad (Reserva mínima para alerta de reposición):
-                            <input type="number" step="0.01" min="0" placeholder="Cantidad mínima antes de alertar" value={insStockSeg} onChange={(e) => setInsStockSeg(e.target.value)} style={inputStyle} />
+                            <Input type="number" step="0.01" min="0" placeholder="Cantidad mínima antes de alertar" value={insStockSeg} onChange={(e) => setInsStockSeg(e.target.value)} className="bg-white" />
                         </label>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', margin: '0.2rem 0' }}>
+                        <div className="flex items-center gap-2 py-0.5">
                             <input
                                 type="checkbox"
                                 id="checkInsVencimientoTab"
@@ -461,40 +450,42 @@ export default function TabKardex({
                                     setInsTieneVencimiento(e.target.checked);
                                     if (!e.target.checked) setInsFechaVencimiento('');
                                 }}
-                                style={{ width: '16px', height: '16px', cursor: 'pointer' }}
+                                className="rounded border-slate-300 text-sky-600 focus:ring-sky-500 cursor-pointer"
                             />
-                            <label htmlFor="checkInsVencimientoTab" style={{ fontSize: '0.85rem', color: '#334155', cursor: 'pointer', fontWeight: 500 }}>
+                            <label htmlFor="checkInsVencimientoTab" className="text-xs font-medium text-slate-700 cursor-pointer">
                                 ¿Tiene fecha de vencimiento?
                             </label>
                         </div>
                         {insTieneVencimiento && (
-                            <label style={{ fontSize: '0.85rem', color: '#334155' }}>
+                            <label className="text-xs font-semibold text-slate-700 flex flex-col gap-1">
                                 Fecha de Vencimiento:
-                                <input type="date" required={insTieneVencimiento} value={insFechaVencimiento} onChange={(e) => setInsFechaVencimiento(e.target.value)} style={inputStyle} />
+                                <Input type="date" required={insTieneVencimiento} value={insFechaVencimiento} onChange={(e) => setInsFechaVencimiento(e.target.value)} className="bg-white" />
                             </label>
                         )}
-                        <label style={{ fontSize: '0.85rem', color: '#334155' }}>
+                        <label className="text-xs font-semibold text-slate-700 flex flex-col gap-1">
                             Proveedor:
-                            <input
+                            <Input
                                 type="text"
                                 placeholder="Nombre de proveedor"
                                 value={insProveedor}
                                 onChange={(e) => setInsProveedor(e.target.value)}
-                                style={inputStyle}
+                                className="bg-white"
                             />
                         </label>
-                        <button type="submit" style={btnPrimario}>Crear Material / Insumo</button>
+                        <Button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white font-bold mt-1">
+                            Crear Material / Insumo
+                        </Button>
                     </form>
                 </section>
             </div>
 
             {/* FORMULARIO DE MERMAS DE INSUMOS */}
-            <section style={{ ...cardStyle, border: '1px solid #fecaca', background: '#fffdfd' }}>
-                <h3 style={{ marginTop: 0, color: '#991b1b' }}>⚠️ Registrar Merma / Desperdicio de Material o Insumo</h3>
+            <section className="bg-red-50/40 p-5 rounded-lg border border-red-200 shadow-sm flex flex-col gap-3">
+                <h3 className="text-lg font-bold text-red-800 m-0">⚠️ Registrar Merma / Desperdicio de Material o Insumo</h3>
                 {(() => {
                     const listaIns = datos?.insumos || [];
                     if (listaIns.length === 0) {
-                        return <p style={{ margin: 0, color: '#64748b', fontSize: '0.85rem' }}>No hay materiales o insumos registrados.</p>;
+                        return <p className="m-0 text-slate-500 text-xs">No hay materiales o insumos registrados.</p>;
                     }
                     const insSel = listaIns.find((i) => String(i.id) === String(mermaInsId || listaIns[0]?.id)) || listaIns[0];
                     const stockIns = Number(insSel?.stock_actual ?? 0);
@@ -504,8 +495,8 @@ export default function TabKardex({
                     const superaStockIns = cantInsNum > stockIns;
 
                     return (
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.75rem', alignItems: 'end' }}>
-                            <label style={{ fontSize: '0.82rem', color: '#334155', fontWeight: 600 }}>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3 items-end">
+                            <label className="text-xs font-semibold text-slate-700 flex flex-col gap-1">
                                 Insumo ({insSel?.unidad_medida || 'u.'}):
                                 <select
                                     value={mermaInsId || insSel?.id}
@@ -514,7 +505,7 @@ export default function TabKardex({
                                         setMermaInsConfirmando(false);
                                         setMermaInsResultado(null);
                                     }}
-                                    style={{ ...inputStyle, marginTop: '0.25rem' }}
+                                    className="w-full h-9 rounded-md border border-slate-300 bg-white px-2 text-xs shadow-sm focus:outline-none"
                                 >
                                     {listaIns.map((i) => (
                                         <option key={i.id} value={i.id}>
@@ -523,9 +514,9 @@ export default function TabKardex({
                                     ))}
                                 </select>
                             </label>
-                            <label style={{ fontSize: '0.82rem', color: '#334155', fontWeight: 600 }}>
+                            <label className="text-xs font-semibold text-slate-700 flex flex-col gap-1">
                                 Cantidad Perdida:
-                                <input
+                                <Input
                                     type="number"
                                     step="0.01"
                                     min="0.01"
@@ -536,57 +527,55 @@ export default function TabKardex({
                                         setMermaInsCantidad(e.target.value);
                                         setMermaInsConfirmando(false);
                                     }}
-                                    style={{ ...inputStyle, marginTop: '0.25rem', borderColor: superaStockIns ? '#ef4444' : '#ccc' }}
+                                    className={`bg-white h-9 text-xs ${superaStockIns ? 'border-red-500' : ''}`}
                                 />
                             </label>
-                            <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '6px', padding: '0.45rem 0.6rem', textAlign: 'right' }}>
-                                <div style={{ fontSize: '0.7rem', color: '#991b1b', fontWeight: 'bold', textTransform: 'uppercase' }}>Pérdida Estimada</div>
-                                <div style={{ fontSize: '1rem', fontWeight: 'bold', color: '#b91c1c' }}>Bs {perdidaInsBs.toFixed(2)}</div>
+                            <div className="bg-red-50 border border-red-200 rounded-md p-2 text-right h-9 flex flex-col justify-center">
+                                <div className="text-[10px] text-red-800 font-bold uppercase">Pérdida Estimada</div>
+                                <div className="text-sm font-bold text-red-700">Bs {perdidaInsBs.toFixed(2)}</div>
                             </div>
-                            <label style={{ fontSize: '0.82rem', color: '#334155', fontWeight: 600 }}>
+                            <label className="text-xs font-semibold text-slate-700 flex flex-col gap-1">
                                 Motivo de Merma (Obligatorio):
-                                <input
+                                <Input
                                     type="text"
-                                    placeholder="Ej. Derrame, caducidad, merma de cocción..."
+                                    placeholder="Ej. Derrame, caducidad..."
                                     value={mermaInsMotivo}
                                     onChange={(e) => {
                                         setMermaInsMotivo(e.target.value);
                                         setMermaInsConfirmando(false);
                                     }}
-                                    style={{ ...inputStyle, marginTop: '0.25rem' }}
+                                    className="bg-white h-9 text-xs"
                                 />
                             </label>
                             <div>
                                 {!mermaInsConfirmando ? (
-                                    <button
+                                    <Button
                                         type="button"
                                         disabled={!insSel || stockIns <= 0 || cantInsNum <= 0 || superaStockIns || !mermaInsMotivo || mermaInsMotivo.trim().length < 3}
                                         onClick={() => setMermaInsConfirmando(true)}
-                                        style={{
-                                            ...btnPrimario,
-                                            background: '#dc2626',
-                                            opacity: (!insSel || stockIns <= 0 || cantInsNum <= 0 || superaStockIns || !mermaInsMotivo || mermaInsMotivo.trim().length < 3) ? 0.55 : 1,
-                                            cursor: (!insSel || stockIns <= 0 || cantInsNum <= 0 || superaStockIns || !mermaInsMotivo || mermaInsMotivo.trim().length < 3) ? 'not-allowed' : 'pointer'
-                                        }}
+                                        className="w-full bg-red-600 hover:bg-red-700 text-white font-bold h-9 text-xs disabled:opacity-50"
                                     >
                                         Dar de Baja
-                                    </button>
+                                    </Button>
                                 ) : (
-                                    <div style={{ display: 'flex', gap: '0.35rem' }}>
-                                        <button
+                                    <div className="flex gap-1.5">
+                                        <Button
                                             type="button"
+                                            size="sm"
                                             onClick={handleConfirmarMermaInsumo}
-                                            style={{ ...btnPrimario, background: '#dc2626', padding: '0.5rem 0.75rem', fontSize: '0.8rem' }}
+                                            className="h-9 text-xs bg-red-600 hover:bg-red-700 text-white font-bold flex-1"
                                         >
-                                            ✅ Confirmar (-{cantInsNum} {insSel?.unidad_medida})
-                                        </button>
-                                        <button
+                                            ✅ Confirmar (-{cantInsNum})
+                                        </Button>
+                                        <Button
                                             type="button"
+                                            size="sm"
+                                            variant="secondary"
                                             onClick={() => setMermaInsConfirmando(false)}
-                                            style={{ ...btnSecundario, padding: '0.5rem 0.65rem', fontSize: '0.8rem', cursor: 'pointer', border: '1px solid #cbd5e1' }}
+                                            className="h-9 text-xs"
                                         >
                                             Cancelar
-                                        </button>
+                                        </Button>
                                     </div>
                                 )}
                             </div>
@@ -594,40 +583,41 @@ export default function TabKardex({
                     );
                 })()}
                 {mermaInsResultado && (
-                    <div style={{ marginTop: '0.75rem', background: '#f0fdf4', border: '1px solid #86efac', borderRadius: '6px', padding: '0.55rem 0.75rem', fontSize: '0.82rem', color: '#166534' }}>
+                    <div className="mt-1 bg-emerald-50 border border-emerald-200 rounded-md p-2.5 text-xs text-emerald-800">
                         <strong>✅ Merma de insumo registrada:</strong> {mermaInsResultado.insumoNombre} (-{mermaInsResultado.cantidadPerdida} {mermaInsResultado.unidadMedida}) | Stock restante: <strong>{mermaInsResultado.stockRestante} {mermaInsResultado.unidadMedida}</strong> | Pérdida: <strong>Bs {Number(mermaInsResultado.costoPerdida || 0).toFixed(2)}</strong>
                     </div>
                 )}
             </section>
 
             {/* VERIFICACIÓN DE INTEGRIDAD KARDEX */}
-            <section style={cardStyle}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
+            <section className="bg-white p-5 rounded-lg border border-slate-200 shadow-sm flex flex-col gap-3">
+                <div className="flex justify-between items-center flex-wrap gap-3">
                     <div>
-                        <h3 style={{ margin: 0 }}>🛡️ Verificación de Integridad del Kardex (NIC 2)</h3>
-                        <p style={{ margin: '0.25rem 0 0', fontSize: '0.84rem', color: '#64748b' }}>
+                        <h3 className="text-lg font-bold text-slate-900 m-0">🛡️ Verificación de Integridad del Kardex (NIC 2)</h3>
+                        <p className="text-xs text-slate-500 m-0 mt-0.5">
                             Comprueba que el stock físico actual coincida exactamente con la reconstrucción matemática de los movimientos de Kardex.
                         </p>
                     </div>
-                    <button type="button" onClick={handleVerificarIntegridadKardex} style={{ ...btnPrimario, background: '#15803d' }}>
+                    <Button
+                        type="button"
+                        onClick={handleVerificarIntegridadKardex}
+                        className="bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs"
+                    >
                         🔍 Auditar Integridad del Kardex Ahora
-                    </button>
+                    </Button>
                 </div>
                 {resultadoIntegridadKardex && (
-                    <div style={{
-                        marginTop: '0.85rem',
-                        padding: '0.75rem 1rem',
-                        borderRadius: '8px',
-                        background: resultadoIntegridadKardex.integro ? '#f0fdf4' : '#fef2f2',
-                        border: `1px solid ${resultadoIntegridadKardex.integro ? '#86efac' : '#fca5a5'}`,
-                        fontSize: '0.85rem'
-                    }}>
-                        <strong>
+                    <div className={`p-3 rounded-lg border text-xs ${
+                        resultadoIntegridadKardex.integro
+                            ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                            : 'bg-red-50 border-red-200 text-red-800'
+                    }`}>
+                        <strong className="text-sm">
                             {resultadoIntegridadKardex.integro
                                 ? '✅ Estado: 100% ÍNTEGRO'
                                 : '⚠️ Estado: Discrepancias detectadas'}
                         </strong>
-                        <div style={{ marginTop: '0.25rem', color: '#334155' }}>
+                        <div className="mt-1 text-slate-700">
                             Productos directos auditados: <strong>{resultadoIntegridadKardex.totalProductosAuditados ?? 0}</strong> |{' '}
                             Insumos auditados: <strong>{resultadoIntegridadKardex.integridadInsumos?.totalInsumosAuditados ?? resultadoIntegridadKardex.insumos?.totalInsumosAuditados ?? 0}</strong>
                         </div>
@@ -636,99 +626,131 @@ export default function TabKardex({
             </section>
 
             {/* TABLA KARDEX CRONOLÓGICO DE PRODUCTOS DIRECTOS */}
-            <section style={cardStyle}>
-                <h3 style={{ marginTop: 0 }}>📦 Kardex Cronológico de Productos Directos</h3>
+            <section className="bg-white p-5 rounded-lg border border-slate-200 shadow-sm flex flex-col gap-3">
+                <h3 className="text-lg font-bold text-slate-900 m-0">📦 Kardex Cronológico de Productos Directos</h3>
                 {(datos?.kardexDetallado?.kardexProductosDirectos || []).length === 0 ? (
-                    <p style={{ color: '#64748b', fontSize: '0.88rem' }}>No hay movimientos de Kardex de productos directos registrados.</p>
+                    <p className="text-slate-500 text-xs">No hay movimientos de Kardex de productos directos registrados.</p>
                 ) : (
-                    <div style={{ overflowX: 'auto', maxHeight: '340px' }}>
-                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
-                            <thead style={{ background: '#f8fafc', position: 'sticky', top: 0 }}>
-                                <tr style={{ borderBottom: '2px solid #cbd5e1', textAlign: 'left' }}>
-                                    <th style={thTd}>ID</th>
-                                    <th style={thTd}>Fecha / Hora</th>
-                                    <th style={thTd}>Producto Directo</th>
-                                    <th style={thTd}>Tipo</th>
-                                    <th style={{ ...thTd, textAlign: 'right' }}>Cantidad</th>
-                                    <th style={{ ...thTd, textAlign: 'right' }}>Stock Resultante</th>
-                                    <th style={{ ...thTd, textAlign: 'right' }}>Costo Unit.</th>
-                                    <th style={{ ...thTd, textAlign: 'right' }}>CPP Resultante</th>
-                                    <th style={{ ...thTd, textAlign: 'right' }}>Costo Total</th>
-                                    <th style={thTd}>Motivo / Comprobante</th>
-                                </tr>
-                            </thead>
-                            <tbody>
+                    <div className="overflow-x-auto max-h-80 border border-slate-200 rounded-lg">
+                        <Table className="text-xs">
+                            <TableHeader className="sticky top-0 bg-slate-50">
+                                <TableRow>
+                                    <TableHead className="font-bold text-slate-900">ID</TableHead>
+                                    <TableHead className="font-bold text-slate-900">Fecha / Hora</TableHead>
+                                    <TableHead className="font-bold text-slate-900">Producto Directo</TableHead>
+                                    <TableHead className="font-bold text-slate-900">Tipo</TableHead>
+                                    <TableHead className="font-bold text-slate-900 text-right">Cantidad</TableHead>
+                                    <TableHead className="font-bold text-slate-900 text-right">Stock Resultante</TableHead>
+                                    <TableHead className="font-bold text-slate-900 text-right">Costo Unit.</TableHead>
+                                    <TableHead className="font-bold text-slate-900 text-right">CPP Resultante</TableHead>
+                                    <TableHead className="font-bold text-slate-900 text-right">Costo Total</TableHead>
+                                    <TableHead className="font-bold text-slate-900">Motivo / Comprobante</TableHead>
+                                </TableRow>
+                            </TableHeader>
+                            <TableBody>
                                 {(datos?.kardexDetallado?.kardexProductosDirectos || []).map((k) => (
-                                    <tr key={k.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                                        <td style={thTd}>#{k.id}</td>
-                                        <td style={thTd}>{k.fecha_hora_local}</td>
-                                        <td style={thTd}><strong>{k.producto_nombre}</strong></td>
-                                        <td style={{ ...thTd, fontWeight: 600, color: k.tipo === 'merma' || k.tipo === 'venta' ? '#b91c1c' : '#15803d' }}>
-                                            {k.tipo.toUpperCase()}
-                                        </td>
-                                        <td style={{ ...thTd, textAlign: 'right', fontWeight: 'bold' }}>
+                                    <TableRow key={k.id}>
+                                        <TableCell>#{k.id}</TableCell>
+                                        <TableCell>{k.fecha_hora_local}</TableCell>
+                                        <TableCell className="font-bold">{k.producto_nombre}</TableCell>
+                                        <TableCell>
+                                            {k.tipo === 'merma' ? (
+                                                <Badge variant="destructive" className="bg-red-100 text-red-800 border-red-300 hover:bg-red-100 font-bold text-[10px]">
+                                                    MERMA
+                                                </Badge>
+                                            ) : k.tipo === 'venta' ? (
+                                                <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-300 font-bold text-[10px]">
+                                                    VENTA
+                                                </Badge>
+                                            ) : k.tipo === 'compra' ? (
+                                                <Badge className="bg-emerald-100 text-emerald-800 border-emerald-300 hover:bg-emerald-100 font-bold text-[10px]">
+                                                    COMPRA
+                                                </Badge>
+                                            ) : (
+                                                <Badge variant="secondary" className="font-bold text-[10px]">
+                                                    {k.tipo.toUpperCase()}
+                                                </Badge>
+                                            )}
+                                        </TableCell>
+                                        <TableCell className="text-right font-bold">
                                             {k.tipo === 'merma' || k.tipo === 'venta' ? `-${k.cantidad}` : `+${k.cantidad}`} {k.unidad_medida || 'u.'}
-                                        </td>
-                                        <td style={{ ...thTd, textAlign: 'right', fontWeight: 'bold' }}>{k.stock_resultante}</td>
-                                        <td style={{ ...thTd, textAlign: 'right' }}>Bs {Number(k.costo_unitario || 0).toFixed(2)}</td>
-                                        <td style={{ ...thTd, textAlign: 'right' }}>Bs {Number(k.costo_promedio_resultante || 0).toFixed(2)}</td>
-                                        <td style={{ ...thTd, textAlign: 'right' }}>Bs {Number(k.costo_total || 0).toFixed(2)}</td>
-                                        <td style={thTd}>
+                                        </TableCell>
+                                        <TableCell className="text-right font-bold">{k.stock_resultante}</TableCell>
+                                        <TableCell className="text-right">Bs {Number(k.costo_unitario || 0).toFixed(2)}</TableCell>
+                                        <TableCell className="text-right">Bs {Number(k.costo_promedio_resultante || 0).toFixed(2)}</TableCell>
+                                        <TableCell className="text-right">Bs {Number(k.costo_total || 0).toFixed(2)}</TableCell>
+                                        <TableCell>
                                             {k.motivo}
                                             {k.nro_factura_compra ? ` (Fact. #${k.nro_factura_compra})` : ''}
-                                        </td>
-                                    </tr>
+                                        </TableCell>
+                                    </TableRow>
                                 ))}
-                            </tbody>
-                        </table>
+                            </TableBody>
+                        </Table>
                     </div>
                 )}
             </section>
 
             {/* TABLA KARDEX CRONOLÓGICO DE INSUMOS */}
-            <section style={cardStyle}>
-                <h3 style={{ marginTop: 0 }}>🧱 Kardex Cronológico de Materiales e Insumos</h3>
+            <section className="bg-white p-5 rounded-lg border border-slate-200 shadow-sm flex flex-col gap-3">
+                <h3 className="text-lg font-bold text-slate-900 m-0">🧱 Kardex Cronológico de Materiales e Insumos</h3>
                 {(datos?.kardexDetallado?.kardexInsumos || []).length === 0 ? (
-                    <p style={{ color: '#64748b', fontSize: '0.88rem' }}>No hay movimientos de Kardex de insumos registrados.</p>
+                    <p className="text-slate-500 text-xs">No hay movimientos de Kardex de insumos registrados.</p>
                 ) : (
-                    <div style={{ overflowX: 'auto', maxHeight: '340px' }}>
-                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
-                            <thead style={{ background: '#f8fafc', position: 'sticky', top: 0 }}>
-                                <tr style={{ borderBottom: '2px solid #cbd5e1', textAlign: 'left' }}>
-                                    <th style={thTd}>ID</th>
-                                    <th style={thTd}>Fecha / Hora</th>
-                                    <th style={thTd}>Insumo</th>
-                                    <th style={thTd}>Tipo</th>
-                                    <th style={{ ...thTd, textAlign: 'right' }}>Cantidad</th>
-                                    <th style={{ ...thTd, textAlign: 'right' }}>Stock Resultante</th>
-                                    <th style={{ ...thTd, textAlign: 'right' }}>CPP Resultante</th>
-                                    <th style={{ ...thTd, textAlign: 'right' }}>Costo Total</th>
-                                    <th style={thTd}>Motivo / Proveedor</th>
-                                </tr>
-                            </thead>
-                            <tbody>
+                    <div className="overflow-x-auto max-h-80 border border-slate-200 rounded-lg">
+                        <Table className="text-xs">
+                            <TableHeader className="sticky top-0 bg-slate-50">
+                                <TableRow>
+                                    <TableHead className="font-bold text-slate-900">ID</TableHead>
+                                    <TableHead className="font-bold text-slate-900">Fecha / Hora</TableHead>
+                                    <TableHead className="font-bold text-slate-900">Insumo</TableHead>
+                                    <TableHead className="font-bold text-slate-900">Tipo</TableHead>
+                                    <TableHead className="font-bold text-slate-900 text-right">Cantidad</TableHead>
+                                    <TableHead className="font-bold text-slate-900 text-right">Stock Resultante</TableHead>
+                                    <TableHead className="font-bold text-slate-900 text-right">CPP Resultante</TableHead>
+                                    <TableHead className="font-bold text-slate-900 text-right">Costo Total</TableHead>
+                                    <TableHead className="font-bold text-slate-900">Motivo / Proveedor</TableHead>
+                                </TableRow>
+                            </TableHeader>
+                            <TableBody>
                                 {(datos?.kardexDetallado?.kardexInsumos || []).map((k) => (
-                                    <tr key={k.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                                        <td style={thTd}>#{k.id}</td>
-                                        <td style={thTd}>{k.fecha_hora_local}</td>
-                                        <td style={thTd}><strong>{k.insumo_nombre}</strong></td>
-                                        <td style={{ ...thTd, fontWeight: 600, color: k.tipo === 'merma' || k.tipo === 'consumo_venta' ? '#b91c1c' : '#15803d' }}>
-                                            {k.tipo.toUpperCase()}
-                                        </td>
-                                        <td style={{ ...thTd, textAlign: 'right', fontWeight: 'bold' }}>
+                                    <TableRow key={k.id}>
+                                        <TableCell>#{k.id}</TableCell>
+                                        <TableCell>{k.fecha_hora_local}</TableCell>
+                                        <TableCell className="font-bold">{k.insumo_nombre}</TableCell>
+                                        <TableCell>
+                                            {k.tipo === 'merma' ? (
+                                                <Badge variant="destructive" className="bg-red-100 text-red-800 border-red-300 hover:bg-red-100 font-bold text-[10px]">
+                                                    MERMA
+                                                </Badge>
+                                            ) : k.tipo === 'consumo_venta' ? (
+                                                <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-300 font-bold text-[10px]">
+                                                    CONSUMO VENTA
+                                                </Badge>
+                                            ) : k.tipo === 'compra' ? (
+                                                <Badge className="bg-emerald-100 text-emerald-800 border-emerald-300 hover:bg-emerald-100 font-bold text-[10px]">
+                                                    COMPRA
+                                                </Badge>
+                                            ) : (
+                                                <Badge variant="secondary" className="font-bold text-[10px]">
+                                                    {k.tipo.toUpperCase()}
+                                                </Badge>
+                                            )}
+                                        </TableCell>
+                                        <TableCell className="text-right font-bold">
                                             {k.tipo === 'merma' || k.tipo === 'consumo_venta' ? `-${k.cantidad}` : `+${k.cantidad}`} {k.unidad_medida}
-                                        </td>
-                                        <td style={{ ...thTd, textAlign: 'right', fontWeight: 'bold' }}>{Number(k.stock_resultante ?? 0).toFixed(2)}</td>
-                                        <td style={{ ...thTd, textAlign: 'right' }}>Bs {Number(k.costo_promedio_resultante ?? 0).toFixed(4)}</td>
-                                        <td style={{ ...thTd, textAlign: 'right' }}>Bs {Number(k.costo_total || 0).toFixed(2)}</td>
-                                        <td style={thTd}>
+                                        </TableCell>
+                                        <TableCell className="text-right font-bold">{Number(k.stock_resultante ?? 0).toFixed(2)}</TableCell>
+                                        <TableCell className="text-right">Bs {Number(k.costo_promedio_resultante ?? 0).toFixed(4)}</TableCell>
+                                        <TableCell className="text-right">Bs {Number(k.costo_total || 0).toFixed(2)}</TableCell>
+                                        <TableCell>
                                             {k.motivo}
                                             {k.nro_factura_compra ? ` (Fact. #${k.nro_factura_compra})` : ''}
-                                        </td>
-                                    </tr>
+                                        </TableCell>
+                                    </TableRow>
                                 ))}
-                            </tbody>
-                        </table>
+                            </TableBody>
+                        </Table>
                     </div>
                 )}
             </section>

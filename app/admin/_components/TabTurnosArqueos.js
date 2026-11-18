@@ -1,7 +1,10 @@
 'use client';
 
 import { useState } from 'react';
-import { cardStyle, btnPrimario, btnSecundario, inputStyle, thTd } from './adminStyles';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Badge } from '@/components/ui/badge';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { abrirTurnoAction, reabrirTurnoAction } from '../../../server/actions/turnos.actions';
 import {
     probarEmailAction,
@@ -196,38 +199,42 @@ export default function TabTurnosArqueos({
     }
 
     return (
-        <section style={cardStyle}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', marginBottom: '1.25rem' }}>
+        <section className="bg-white p-5 rounded-lg border border-slate-200 shadow-sm flex flex-col gap-5">
+            <div className="flex justify-between items-center flex-wrap gap-4">
                 <div>
-                    <h2 style={{ margin: 0 }}>🏦 Auditoría de Cierres y Arqueos por Turno</h2>
-                    <p style={{ margin: '0.25rem 0 0', color: '#555', fontSize: '0.9rem' }}>
+                    <h2 className="text-xl font-bold text-slate-900 m-0">🏦 Auditoría de Cierres y Arqueos por Turno</h2>
+                    <p className="text-slate-500 text-sm mt-1 mb-0">
                         Revisa si hubo dinero faltante o sobrante en cada turno cerrado y habilita o reabre turnos cuando sea necesario.
                     </p>
                 </div>
-                <div style={{ display: 'flex', gap: '0.6rem', alignItems: 'center', flexWrap: 'wrap' }}>
-                    <button
+                <div className="flex gap-2 items-center flex-wrap">
+                    <Button
                         type="button"
+                        variant="secondary"
+                        size="sm"
                         onClick={() => setMostrarPanelContable(!mostrarPanelContable)}
-                        style={{ ...btnSecundario, fontSize: '0.84rem', padding: '0.45rem 0.8rem', background: mostrarPanelContable ? '#dbeafe' : '#e2e8f0', color: '#0f172a' }}
+                        className={`text-xs font-semibold ${mostrarPanelContable ? 'bg-sky-100 text-sky-900 hover:bg-sky-200' : ''}`}
                     >
                         🧾 {mostrarPanelContable ? 'Ocultar Régimen Contable' : 'Régimen Contable / Facturación'}
-                    </button>
+                    </Button>
 
-                    <button
+                    <Button
                         type="button"
+                        variant="secondary"
+                        size="sm"
                         onClick={() => setMostrarPanelCajasFisicas(!mostrarPanelCajasFisicas)}
-                        style={{ ...btnSecundario, fontSize: '0.84rem', padding: '0.45rem 0.8rem' }}
+                        className="text-xs font-semibold"
                     >
                         🏢 {mostrarPanelCajasFisicas ? 'Ocultar Estaciones' : 'Gestionar Estaciones de Caja'} ({(datos?.cajasFisicas || []).length})
-                    </button>
+                    </Button>
 
                     {cajasFisicasDisponibles.length > 0 && (
-                        <form onSubmit={handleAbrirNuevoTurnoAdmin} style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                        <form onSubmit={handleAbrirNuevoTurnoAdmin} className="flex gap-2 items-center flex-wrap">
                             {cajasFisicasDisponibles.length > 1 && (
                                 <select
                                     value={cajaFisicaParaAbrir}
                                     onChange={(e) => setCajaFisicaParaAbrir(e.target.value)}
-                                    style={{ padding: '0.45rem 0.6rem', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.84rem', background: '#fff' }}
+                                    className="h-8 rounded-md border border-slate-300 bg-white px-2 py-0.5 text-xs shadow-sm focus:outline-none"
                                 >
                                     <option value="">-- Estación --</option>
                                     {cajasFisicasDisponibles.map((cf) => (
@@ -235,88 +242,71 @@ export default function TabTurnosArqueos({
                                     ))}
                                 </select>
                             )}
-                            <input
+                            <Input
                                 type="number"
                                 step="0.01"
                                 min="0"
                                 value={nuevoFondoInicial}
                                 onChange={(e) => setNuevoFondoInicial(e.target.value)}
                                 placeholder="Fondo inicial Bs"
-                                style={{ padding: '0.45rem', borderRadius: '6px', border: '1px solid #cbd5e1', width: '120px', fontSize: '0.85rem' }}
+                                className="h-8 text-xs w-28 bg-white"
                             />
-                            <button type="submit" style={{ ...btnPrimario, fontSize: '0.85rem', padding: '0.45rem 0.8rem' }}>
+                            <Button type="submit" size="sm" className="h-8 text-xs bg-blue-600 hover:bg-blue-700 text-white font-bold">
                                 + Abrir Turno
-                            </button>
+                            </Button>
                         </form>
                     )}
                 </div>
             </div>
 
             {/* BANNER INFORMATIVO Y DE PRUEBA DE CORREO ELECTRÓNICO */}
-            <div style={{
-                background: datos?.estadoEmail?.configurado ? '#f0fdf4' : '#f8fafc',
-                border: `1px solid ${datos?.estadoEmail?.configurado ? '#bbf7d0' : '#e2e8f0'}`,
-                borderRadius: '8px',
-                padding: '0.75rem 1rem',
-                marginBottom: '1.25rem',
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                flexWrap: 'wrap',
-                gap: '0.75rem'
-            }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.86rem' }}>
-                    <span style={{ fontSize: '1.25rem' }}>{datos?.estadoEmail?.configurado ? '🟢' : '✉️'}</span>
+            <div className={`p-3.5 rounded-lg border flex justify-between items-center flex-wrap gap-3 ${
+                datos?.estadoEmail?.configurado ? 'bg-emerald-50 border-emerald-200' : 'bg-slate-50 border-slate-200'
+            }`}>
+                <div className="flex items-center gap-2.5 text-xs">
+                    <span className="text-lg">{datos?.estadoEmail?.configurado ? '🟢' : '✉️'}</span>
                     <div>
                         {datos?.estadoEmail?.configurado ? (
                             <>
-                                <strong style={{ color: '#166534' }}>Notificaciones automáticas por correo activadas:</strong>{' '}
-                                <span style={{ color: '#334155' }}>
+                                <strong className="text-emerald-800">Notificaciones automáticas por correo activadas:</strong>{' '}
+                                <span className="text-slate-700">
                                     Al cerrar cada turno se envía el resumen ejecutivo y el Excel a: <strong>{datos.estadoEmail.destinatarios}</strong>
                                 </span>
                             </>
                         ) : (
                             <>
-                                <strong style={{ color: '#475569' }}>Notificaciones automáticas por correo desactivadas:</strong>{' '}
-                                <span style={{ color: '#64748b' }}>
-                                    Configura <code>SMTP_USER</code>, <code>SMTP_PASS</code> y <code>EMAIL_DESTINATARIO_CIERRE</code> en <code>.env.local</code> para recibir el arqueo y Excel automáticamente.
+                                <strong className="text-slate-700">Notificaciones automáticas por correo desactivadas:</strong>{' '}
+                                <span className="text-slate-500">
+                                    Configura <code className="bg-slate-200 px-1 py-0.5 rounded text-[11px]">SMTP_USER</code>, <code className="bg-slate-200 px-1 py-0.5 rounded text-[11px]">SMTP_PASS</code> y <code className="bg-slate-200 px-1 py-0.5 rounded text-[11px]">EMAIL_DESTINATARIO_CIERRE</code> en <code className="bg-slate-200 px-1 py-0.5 rounded text-[11px]">.env.local</code> para recibir el arqueo y Excel automáticamente.
                                 </span>
                             </>
                         )}
                     </div>
                 </div>
                 {datos?.estadoEmail?.configurado && (
-                    <button
+                    <Button
                         type="button"
+                        size="sm"
                         disabled={enviandoPruebaEmail}
                         onClick={handleProbarEmail}
-                        style={{
-                            padding: '0.4rem 0.8rem',
-                            background: '#16a34a',
-                            color: '#fff',
-                            border: 'none',
-                            borderRadius: '6px',
-                            fontSize: '0.8rem',
-                            fontWeight: '600',
-                            cursor: enviandoPruebaEmail ? 'not-allowed' : 'pointer'
-                        }}
+                        className="h-7 text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-semibold"
                     >
                         {enviandoPruebaEmail ? '⏳ Enviando prueba...' : '🧪 Enviar Correo de Prueba'}
-                    </button>
+                    </Button>
                 )}
             </div>
 
             {/* PANEL DE CONFIGURACIÓN CONTABLE / RÉGIMEN TRIBUTARIO MODULAR */}
             {mostrarPanelContable && (
-                <form onSubmit={handleGuardarConfiguracionContable} style={{ background: '#f8fafc', border: '2px solid #0284c7', borderRadius: '8px', padding: '1.1rem', marginBottom: '1.25rem', display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+                <form onSubmit={handleGuardarConfiguracionContable} className="bg-slate-50 border-2 border-sky-600 rounded-lg p-4 flex flex-col gap-3.5">
                     <div>
-                        <h4 style={{ margin: 0, color: '#0f172a' }}>🧾 Configuración Contable y Régimen Tributario Modular (Bolivia)</h4>
-                        <p style={{ margin: '0.2rem 0 0', color: '#475569', fontSize: '0.84rem' }}>
+                        <h4 className="text-sm font-bold text-slate-900 m-0">🧾 Configuración Contable y Régimen Tributario Modular (Bolivia)</h4>
+                        <p className="text-xs text-slate-600 m-0 mt-0.5">
                             Adapta el sistema según el régimen del cliente: <strong>Control Interno / Régimen Simplificado (RTS)</strong> o <strong>Régimen General (Con Facturación IVA / IT)</strong>. Todos los reportes Excel, CSV y PDF se ajustan automáticamente.
                         </p>
                     </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '0.75rem' }}>
-                        <label style={{ fontSize: '0.85rem', fontWeight: 600 }}>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                        <label className="text-xs font-semibold text-slate-800 flex flex-col gap-1">
                             Régimen del Negocio:
                             <select
                                 value={cfgRegimenTributario}
@@ -325,52 +315,52 @@ export default function TabTurnosArqueos({
                                     setCfgRegimenTributario(val);
                                     setCfgEmiteFactura(val === 'regimen_general');
                                 }}
-                                style={inputStyle}
+                                className="w-full h-8 rounded-md border border-slate-300 bg-white px-2 py-0.5 text-xs shadow-sm focus:outline-none"
                             >
                                 <option value="simplificado_control_interno">📋 Control Interno / Régimen Simplificado (Sin IVA)</option>
                                 <option value="regimen_general">🏛️ Régimen General (Facturación IVA / IT)</option>
                             </select>
                         </label>
-                        <label style={{ fontSize: '0.85rem', fontWeight: 600 }}>
+                        <label className="text-xs font-semibold text-slate-800 flex flex-col gap-1">
                             NIT del Establecimiento (Opcional):
-                            <input
+                            <Input
                                 type="text"
                                 placeholder="Ej. 1029384015"
                                 value={cfgNitNegocio}
                                 onChange={(e) => setCfgNitNegocio(e.target.value)}
-                                style={inputStyle}
+                                className="h-8 text-xs bg-white"
                             />
                         </label>
                         {cfgRegimenTributario === 'regimen_general' && (
                             <>
-                                <label style={{ fontSize: '0.85rem', fontWeight: 600 }}>
+                                <label className="text-xs font-semibold text-slate-800 flex flex-col gap-1">
                                     Alícuota IVA (%):
-                                    <input
+                                    <Input
                                         type="number"
                                         step="0.01"
                                         min="0"
                                         value={cfgIvaPorcentaje}
                                         onChange={(e) => setCfgIvaPorcentaje(e.target.value)}
-                                        style={inputStyle}
+                                        className="h-8 text-xs bg-white"
                                     />
                                 </label>
-                                <label style={{ fontSize: '0.85rem', fontWeight: 600 }}>
+                                <label className="text-xs font-semibold text-slate-800 flex flex-col gap-1">
                                     Alícuota IT (%):
-                                    <input
+                                    <Input
                                         type="number"
                                         step="0.01"
                                         min="0"
                                         value={cfgItPorcentaje}
                                         onChange={(e) => setCfgItPorcentaje(e.target.value)}
-                                        style={inputStyle}
+                                        className="h-8 text-xs bg-white"
                                     />
                                 </label>
-                                <label style={{ fontSize: '0.85rem', fontWeight: 600 }}>
+                                <label className="text-xs font-semibold text-slate-800 flex flex-col gap-1">
                                     Base Imponible del IT:
                                     <select
                                         value={cfgItBase}
                                         onChange={(e) => setCfgItBase(e.target.value)}
-                                        style={inputStyle}
+                                        className="w-full h-8 rounded-md border border-slate-300 bg-white px-2 py-0.5 text-xs shadow-sm focus:outline-none"
                                     >
                                         <option value="todas_las_ventas">Todas las ventas (Facturadas y no facturadas)</option>
                                         <option value="solo_facturadas">Solo ventas formalmente facturadas</option>
@@ -379,59 +369,61 @@ export default function TabTurnosArqueos({
                             </>
                         )}
                     </div>
-                    <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', alignItems: 'center' }}>
-                        <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem', cursor: 'pointer' }}>
+                    <div className="flex gap-4 flex-wrap items-center pt-1">
+                        <label className="flex items-center gap-1.5 text-xs text-slate-700 cursor-pointer">
                             <input
                                 type="checkbox"
                                 checked={cfgEmiteFactura}
                                 onChange={(e) => setCfgEmiteFactura(e.target.checked)}
+                                className="rounded border-slate-300 text-sky-600 focus:ring-sky-500"
                             />
                             <span>Habilitar emisión de Factura Formal (con NIT/CI y Razón Social)</span>
                         </label>
-                        <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem', cursor: 'pointer' }}>
+                        <label className="flex items-center gap-1.5 text-xs text-slate-700 cursor-pointer">
                             <input
                                 type="checkbox"
                                 checked={cfgUsaRespaldoComprasEgresos}
                                 onChange={(e) => setCfgUsaRespaldoComprasEgresos(e.target.checked)}
+                                className="rounded border-slate-300 text-sky-600 focus:ring-sky-500"
                             />
                             <span>Permitir registrar factura en Compras y Gastos (Crédito Fiscal)</span>
                         </label>
                     </div>
-                    <div style={{ display: 'flex', gap: '0.6rem', marginTop: '0.25rem' }}>
-                        <button type="submit" style={{ ...btnPrimario, fontSize: '0.85rem', padding: '0.45rem 0.9rem' }}>
+                    <div className="flex gap-2 mt-1">
+                        <Button type="submit" size="sm" className="bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs">
                             Guardar Configuración Contable
-                        </button>
-                        <button type="button" onClick={() => setMostrarPanelContable(false)} style={{ ...btnSecundario, fontSize: '0.85rem', padding: '0.45rem 0.9rem', border: 'none', cursor: 'pointer' }}>
+                        </Button>
+                        <Button type="button" size="sm" variant="secondary" onClick={() => setMostrarPanelContable(false)} className="text-xs">
                             Cerrar
-                        </button>
+                        </Button>
                     </div>
                 </form>
             )}
 
             {/* PANEL DE GESTIÓN DE ESTACIONES FÍSICAS DE CAJA */}
             {mostrarPanelCajasFisicas && (
-                <div style={{ background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '8px', padding: '1rem', marginBottom: '1.25rem' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem', marginBottom: '0.75rem' }}>
+                <div className="bg-slate-50 border border-slate-300 rounded-lg p-4">
+                    <div className="flex justify-between items-center flex-wrap gap-3 mb-3">
                         <div>
-                            <h4 style={{ margin: 0, color: '#0f172a' }}>🏢 Estaciones Físicas de Caja (Puntos de Venta)</h4>
-                            <p style={{ margin: '0.2rem 0 0', color: '#64748b', fontSize: '0.82rem' }}>
+                            <h4 className="text-sm font-bold text-slate-900 m-0">🏢 Estaciones Físicas de Caja (Puntos de Venta)</h4>
+                            <p className="text-xs text-slate-500 m-0 mt-0.5">
                                 Define las terminales físicas del negocio. Puedes agregar nuevas o desactivar las que no uses (mínimo 1 activa requerida).
                             </p>
                         </div>
-                        <form onSubmit={handleCrearCajaFisica} style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                            <input
+                        <form onSubmit={handleCrearCajaFisica} className="flex gap-2 items-center">
+                            <Input
                                 type="text"
                                 value={nuevaCajaFisicaNombre}
                                 onChange={(e) => setNuevaCajaFisicaNombre(e.target.value)}
                                 placeholder="ej. Caja 2 - Barra"
-                                style={{ padding: '0.45rem 0.6rem', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.85rem', minWidth: '170px' }}
+                                className="h-8 text-xs min-w-[170px] bg-white"
                             />
-                            <button type="submit" style={{ ...btnPrimario, fontSize: '0.82rem', padding: '0.45rem 0.8rem' }}>
+                            <Button type="submit" size="sm" className="h-8 text-xs bg-blue-600 hover:bg-blue-700 text-white font-bold">
                                 + Crear Caja
-                            </button>
+                            </Button>
                         </form>
                     </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '0.75rem' }}>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
                         {(datos?.cajasFisicas || []).map((cf) => {
                             const esActiva = Number(cf.activa) === 1;
                             const totalActivas = (datos?.cajasFisicas || []).filter((c) => Number(c.activa) === 1).length;
@@ -440,95 +432,65 @@ export default function TabTurnosArqueos({
                             return (
                                 <div
                                     key={cf.id}
-                                    style={{
-                                        background: esActiva ? '#fff' : '#f1f5f9',
-                                        border: `1px solid ${esActiva ? '#e2e8f0' : '#cbd5e1'}`,
-                                        borderRadius: '6px',
-                                        padding: '0.75rem',
-                                        display: 'flex',
-                                        flexDirection: 'column',
-                                        gap: '0.4rem',
-                                        opacity: esActiva ? 1 : 0.65
-                                    }}
+                                    className={`rounded-lg p-3 flex flex-col gap-2 border transition-all ${
+                                        esActiva ? 'bg-white border-slate-200 shadow-sm' : 'bg-slate-100 border-slate-300 opacity-70'
+                                    }`}
                                 >
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                        <strong style={{ fontSize: '0.92rem', color: '#0f172a' }}>{cf.nombre}</strong>
-                                        <span
-                                            style={{
-                                                fontSize: '0.72rem',
-                                                fontWeight: 'bold',
-                                                padding: '0.15rem 0.45rem',
-                                                borderRadius: '4px',
-                                                background: esActiva ? '#dcfce7' : '#e2e8f0',
-                                                color: esActiva ? '#166534' : '#64748b'
-                                            }}
-                                        >
-                                            {esActiva ? 'ACTIVA' : 'INACTIVA'}
-                                        </span>
+                                    <div className="flex justify-between items-center">
+                                        <strong className="text-sm text-slate-900">{cf.nombre}</strong>
+                                        {esActiva ? (
+                                            <Badge className="bg-emerald-100 text-emerald-800 hover:bg-emerald-100 border border-emerald-200 text-[10px] font-bold">
+                                                ACTIVA
+                                            </Badge>
+                                        ) : (
+                                            <Badge variant="secondary" className="text-[10px] font-bold">
+                                                INACTIVA
+                                            </Badge>
+                                        )}
                                     </div>
-                                    <div style={{ fontSize: '0.8rem', color: '#64748b' }}>
+                                    <div className="text-xs text-slate-600">
                                         {tieneTurno ? (
-                                            <span style={{ color: '#16a34a', fontWeight: '600' }}>
+                                            <span className="text-emerald-700 font-semibold">
                                                 🟢 Turno #{cf.turno_abierto_id} en curso ({cf.operador_abierto || 'Cajero'})
                                             </span>
                                         ) : (
                                             <span>⚪ Sin turno abierto actualmente</span>
                                         )}
                                     </div>
-                                    <div style={{ marginTop: '0.3rem', display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+                                    <div className="mt-1 flex gap-1.5 flex-wrap">
                                         <button
                                             type="button"
                                             onClick={() => handleTogglePermisoFiscalCaja(cf.id, Number(cf.habilita_respaldo_fiscal ?? 1) === 1, cf.nombre)}
-                                            style={{
-                                                fontSize: '0.73rem',
-                                                padding: '0.25rem 0.55rem',
-                                                borderRadius: '4px',
-                                                border: `1px solid ${Number(cf.habilita_respaldo_fiscal ?? 1) === 1 ? '#38bdf8' : '#cbd5e1'}`,
-                                                background: Number(cf.habilita_respaldo_fiscal ?? 1) === 1 ? '#e0f2fe' : '#f1f5f9',
-                                                color: Number(cf.habilita_respaldo_fiscal ?? 1) === 1 ? '#0369a1' : '#64748b',
-                                                cursor: 'pointer',
-                                                fontWeight: '600'
-                                            }}
+                                            className={`text-[11px] px-2 py-0.5 rounded font-semibold border transition-colors ${
+                                                Number(cf.habilita_respaldo_fiscal ?? 1) === 1
+                                                    ? 'bg-sky-50 text-sky-800 border-sky-300 hover:bg-sky-100'
+                                                    : 'bg-slate-100 text-slate-600 border-slate-300 hover:bg-slate-200'
+                                            }`}
                                             title="Habilitar o deshabilitar el registro de factura/respaldo en ventas y egresos de esta estación"
                                         >
-                                            🧾 Respaldo Fiscal: {Number(cf.habilita_respaldo_fiscal ?? 1) === 1 ? 'SÍ' : 'NO'}
+                                            🧾 Respaldo: {Number(cf.habilita_respaldo_fiscal ?? 1) === 1 ? 'SÍ' : 'NO'}
                                         </button>
                                         {esActiva ? (
-                                            <button
+                                            <Button
                                                 type="button"
+                                                size="sm"
+                                                variant="destructive"
                                                 disabled={totalActivas <= 1 || tieneTurno}
                                                 onClick={() => handleDesactivarCajaFisica(cf.id, cf.nombre)}
                                                 title={totalActivas <= 1 ? 'El sistema debe mantener al menos 1 caja activa' : tieneTurno ? 'Cierra el turno antes de desactivarla' : 'Desactivar esta caja'}
-                                                style={{
-                                                    fontSize: '0.75rem',
-                                                    padding: '0.25rem 0.55rem',
-                                                    borderRadius: '4px',
-                                                    border: '1px solid #f87171',
-                                                    background: totalActivas <= 1 || tieneTurno ? '#f1f5f9' : '#fee2e2',
-                                                    color: totalActivas <= 1 || tieneTurno ? '#94a3b8' : '#991b1b',
-                                                    cursor: totalActivas <= 1 || tieneTurno ? 'not-allowed' : 'pointer',
-                                                    fontWeight: '600'
-                                                }}
+                                                className="h-6 text-[11px] px-2 bg-red-100 text-red-800 border border-red-200 hover:bg-red-200 disabled:opacity-50"
                                             >
-                                                {totalActivas <= 1 ? 'Mínimo 1 requerida' : tieneTurno ? 'Turno en curso' : 'Desactivar'}
-                                            </button>
+                                                {totalActivas <= 1 ? 'Mínimo 1' : tieneTurno ? 'En curso' : 'Desactivar'}
+                                            </Button>
                                         ) : (
-                                            <button
+                                            <Button
                                                 type="button"
+                                                size="sm"
                                                 onClick={() => handleReactivarCajaFisica(cf.id, cf.nombre)}
-                                                style={{
-                                                    fontSize: '0.75rem',
-                                                    padding: '0.25rem 0.55rem',
-                                                    borderRadius: '4px',
-                                                    border: '1px solid #86efac',
-                                                    background: '#dcfce7',
-                                                    color: '#166534',
-                                                    cursor: 'pointer',
-                                                    fontWeight: '600'
-                                                }}
+                                                className="h-6 text-[11px] px-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold"
                                             >
                                                 Reactivar
-                                            </button>
+                                            </Button>
                                         )}
                                     </div>
                                 </div>
@@ -540,199 +502,179 @@ export default function TabTurnosArqueos({
 
             {/* TABLA HISTORIAL DE TURNOS DE CAJA */}
             {(datos?.historialCajas || []).length === 0 ? (
-                <p style={{ color: '#666' }}>Aún no se ha abierto ni cerrado ningún turno de caja.</p>
+                <p className="text-slate-500 text-sm">Aún no se ha abierto ni cerrado ningún turno de caja.</p>
             ) : (
-                <div style={{ overflowX: 'auto' }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' }}>
-                        <thead>
-                            <tr style={{ borderBottom: '2px solid #cbd5e1', textAlign: 'left', background: '#f8fafc' }}>
-                                <th style={thTd}>N° Turno</th>
-                                <th style={thTd}>Estación / Caja</th>
-                                <th style={thTd}>Abierta por</th>
-                                <th style={thTd}>Estado</th>
-                                <th style={thTd}>Fondo Inicial</th>
-                                <th style={thTd}>Efectivo Esperado</th>
-                                <th style={thTd}>Efectivo Real Contado</th>
-                                <th style={thTd}>Resultado / Diferencia</th>
-                                <th style={thTd}>Total QR</th>
-                                <th style={thTd}>Acción Admin</th>
-                            </tr>
-                        </thead>
-                        <tbody>
+                <div className="overflow-x-auto border border-slate-200 rounded-lg">
+                    <Table>
+                        <TableHeader>
+                            <TableRow className="bg-slate-50">
+                                <TableHead className="font-bold text-slate-900">N° Turno</TableHead>
+                                <TableHead className="font-bold text-slate-900">Estación / Caja</TableHead>
+                                <TableHead className="font-bold text-slate-900">Abierta por</TableHead>
+                                <TableHead className="font-bold text-slate-900">Estado</TableHead>
+                                <TableHead className="font-bold text-slate-900">Fondo Inicial</TableHead>
+                                <TableHead className="font-bold text-slate-900">Efectivo Esperado</TableHead>
+                                <TableHead className="font-bold text-slate-900">Efectivo Real Contado</TableHead>
+                                <TableHead className="font-bold text-slate-900">Resultado / Diferencia</TableHead>
+                                <TableHead className="font-bold text-slate-900">Total QR</TableHead>
+                                <TableHead className="font-bold text-slate-900">Acción Admin</TableHead>
+                            </TableRow>
+                        </TableHeader>
+                        <TableBody>
                             {(datos?.historialCajas || []).map((c) => {
                                 const dif = c.diferencia_efectivo !== null && c.diferencia_efectivo !== undefined ? Number(c.diferencia_efectivo) : null;
-                                let badgeColor = '#166534';
-                                let badgeBg = '#dcfce7';
-                                let textoDif = 'En curso (Abierto)';
+                                let badgeDiferencia = (
+                                    <Badge variant="outline" className="bg-slate-50 text-slate-600 font-medium">
+                                        En curso (Abierto)
+                                    </Badge>
+                                );
 
                                 if (c.estado === 'cerrada' && dif !== null) {
                                     if (dif < 0) {
-                                        badgeColor = '#991b1b';
-                                        badgeBg = '#fee2e2';
-                                        textoDif = `⚠️ FALTANTE: Bs ${dif.toFixed(2)}`;
+                                        badgeDiferencia = (
+                                            <Badge variant="destructive" className="bg-red-100 text-red-800 hover:bg-red-100 border border-red-300 font-bold">
+                                                ⚠️ FALTANTE: Bs {dif.toFixed(2)}
+                                            </Badge>
+                                        );
                                     } else if (dif > 0) {
-                                        badgeColor = '#1e40af';
-                                        badgeBg = '#dbeafe';
-                                        textoDif = `SOBRANTE: +Bs ${dif.toFixed(2)}`;
+                                        badgeDiferencia = (
+                                            <Badge className="bg-blue-100 text-blue-800 hover:bg-blue-100 border border-blue-300 font-bold">
+                                                SOBRANTE: +Bs {dif.toFixed(2)}
+                                            </Badge>
+                                        );
                                     } else {
-                                        badgeColor = '#166534';
-                                        badgeBg = '#dcfce7';
-                                        textoDif = '✅ CUADRE EXACTO (Bs 0.00)';
+                                        badgeDiferencia = (
+                                            <Badge className="bg-emerald-100 text-emerald-800 hover:bg-emerald-100 border border-emerald-300 font-bold">
+                                                ✅ CUADRE EXACTO (Bs 0.00)
+                                            </Badge>
+                                        );
                                     }
                                 }
 
                                 return (
-                                    <tr key={c.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
-                                        <td style={thTd}><strong>Turno #{c.id}</strong></td>
-                                        <td style={thTd}><span style={{ fontWeight: '600', color: '#0369a1' }}>{c.caja_fisica_nombre || 'Caja Principal'}</span></td>
-                                        <td style={thTd}>{c.usuario_nombre || `Usuario #${c.usuario_id}`}</td>
-                                        <td style={thTd}>
-                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', alignItems: 'flex-start' }}>
-                                                <span style={{
-                                                    padding: '0.2rem 0.55rem',
-                                                    borderRadius: '4px',
-                                                    fontWeight: 'bold',
-                                                    fontSize: '0.8rem',
-                                                    background: c.estado === 'abierta' ? '#dcfce7' : '#e2e8f0',
-                                                    color: c.estado === 'abierta' ? '#166534' : '#334155'
-                                                }}>
-                                                    {c.estado.toUpperCase()}
-                                                </span>
+                                    <TableRow key={c.id}>
+                                        <TableCell className="font-bold text-slate-900">Turno #{c.id}</TableCell>
+                                        <TableCell>
+                                            <span className="font-semibold text-sky-700">{c.caja_fisica_nombre || 'Caja Principal'}</span>
+                                        </TableCell>
+                                        <TableCell>{c.usuario_nombre || `Usuario #${c.usuario_id}`}</TableCell>
+                                        <TableCell>
+                                            <div className="flex flex-col gap-1 items-start">
+                                                {c.estado === 'abierta' ? (
+                                                    <Badge className="bg-emerald-100 text-emerald-800 hover:bg-emerald-100 border border-emerald-300 font-bold text-[11px]">
+                                                        ABIERTA
+                                                    </Badge>
+                                                ) : (
+                                                    <Badge variant="secondary" className="bg-slate-100 text-slate-700 font-bold text-[11px]">
+                                                        CERRADA
+                                                    </Badge>
+                                                )}
                                                 {Number(c.veces_reabierta) > 0 && (
-                                                    <span style={{
-                                                        padding: '0.18rem 0.5rem',
-                                                        borderRadius: '4px',
-                                                        fontWeight: 'bold',
-                                                        fontSize: '0.75rem',
-                                                        background: '#fef3c7',
-                                                        color: '#92400e',
-                                                        border: '1px solid #f59e0b'
-                                                    }}>
+                                                    <Badge variant="outline" className="bg-amber-50 text-amber-900 border-amber-300 font-bold text-[10px]">
                                                         🔄 REABIERTO ({c.veces_reabierta} {Number(c.veces_reabierta) === 1 ? 'vez' : 'veces'})
-                                                    </span>
+                                                    </Badge>
                                                 )}
                                             </div>
-                                        </td>
-                                        <td style={thTd}>Bs {Number(c.monto_inicial).toFixed(2)}</td>
-                                        <td style={thTd}>
+                                        </TableCell>
+                                        <TableCell>Bs {Number(c.monto_inicial).toFixed(2)}</TableCell>
+                                        <TableCell>
                                             {c.efectivo_esperado !== null ? `Bs ${Number(c.efectivo_esperado).toFixed(2)}` : '—'}
-                                        </td>
-                                        <td style={thTd}>
+                                        </TableCell>
+                                        <TableCell>
                                             {c.efectivo_real !== null ? <strong>Bs {Number(c.efectivo_real).toFixed(2)}</strong> : '—'}
-                                        </td>
-                                        <td style={thTd}>
+                                        </TableCell>
+                                        <TableCell>
                                             <div>
-                                                <span style={{ padding: '0.25rem 0.6rem', borderRadius: '6px', fontWeight: 'bold', background: badgeBg, color: badgeColor, display: 'inline-block' }}>
-                                                    {textoDif}
-                                                </span>
+                                                {badgeDiferencia}
                                                 {c.historial_reaperturas && (
-                                                    <div style={{ marginTop: '0.35rem', fontSize: '0.78rem', color: '#78350f', background: '#fffbeb', padding: '0.35rem 0.5rem', borderRadius: '4px', borderLeft: '3px solid #f59e0b' }}>
-                                                        <strong>Historial previo:</strong> {c.historial_reaperturas}
+                                                    <div className="mt-1 text-xs text-amber-900 bg-amber-50 p-1.5 rounded border-l-2 border-amber-500">
+                                                        <strong>Historial:</strong> {c.historial_reaperturas}
                                                     </div>
                                                 )}
                                             </div>
-                                        </td>
-                                        <td style={thTd}>Bs {Number(c.qr_esperado || 0).toFixed(2)}</td>
-                                        <td style={thTd}>
-                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', minWidth: '170px' }}>
-                                                <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
-                                                    <button
+                                        </TableCell>
+                                        <TableCell>Bs {Number(c.qr_esperado || 0).toFixed(2)}</TableCell>
+                                        <TableCell>
+                                            <div className="flex flex-col gap-1.5 min-w-[170px]">
+                                                <div className="flex gap-1.5 flex-wrap">
+                                                    <Button
                                                         type="button"
+                                                        size="sm"
+                                                        variant={Number(datos?.cajaAuditada?.id) === Number(c.id) ? "default" : "secondary"}
                                                         onClick={() => seleccionarTurnoParaAuditar?.(c.id)}
-                                                        style={{
-                                                            padding: '0.3rem 0.55rem',
-                                                            background: Number(datos?.cajaAuditada?.id) === Number(c.id) ? '#0f172a' : '#e2e8f0',
-                                                            color: Number(datos?.cajaAuditada?.id) === Number(c.id) ? '#fff' : '#0f172a',
-                                                            border: 'none',
-                                                            borderRadius: '4px',
-                                                            cursor: 'pointer',
-                                                            fontSize: '0.75rem',
-                                                            fontWeight: '600'
-                                                        }}
+                                                        className="h-7 text-xs font-semibold"
                                                     >
                                                         {Number(datos?.cajaAuditada?.id) === Number(c.id) ? '👁️ Auditando' : '🔍 Auditar / PDF'}
-                                                    </button>
+                                                    </Button>
                                                     <a
                                                         href={`/api/reportes?formato=xlsx&cajaId=${c.id}`}
-                                                        style={{
-                                                            padding: '0.3rem 0.55rem',
-                                                            background: '#dcfce7',
-                                                            color: '#166534',
-                                                            borderRadius: '4px',
-                                                            fontSize: '0.75rem',
-                                                            fontWeight: '600',
-                                                            textDecoration: 'none'
-                                                        }}
+                                                        className="inline-flex items-center px-2 py-1 rounded text-xs font-semibold bg-emerald-100 text-emerald-800 hover:bg-emerald-200 transition-colors"
                                                     >
                                                         📊 Excel
                                                     </a>
                                                 </div>
                                                 {c.estado === 'cerrada' && !datos?.cajaAbierta && (
                                                     cajaAReabrirId === c.id ? (
-                                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', minWidth: '200px' }}>
-                                                            <input
+                                                        <div className="flex flex-col gap-1.5 min-w-[200px] mt-1">
+                                                            <Input
                                                                 type="text"
                                                                 placeholder="Motivo de reapertura..."
                                                                 value={motivoReapertura}
                                                                 onChange={(e) => setMotivoReapertura(e.target.value)}
-                                                                style={{ padding: '0.35rem', borderRadius: '4px', border: '1px solid #94a3b8', fontSize: '0.8rem' }}
+                                                                className="h-7 text-xs bg-white"
                                                             />
-                                                            <div style={{ display: 'flex', gap: '0.35rem' }}>
-                                                                <button
+                                                            <div className="flex gap-1.5">
+                                                                <Button
                                                                     type="button"
+                                                                    size="sm"
                                                                     onClick={() => confirmarReabrirCaja(c.id)}
-                                                                    style={{ padding: '0.3rem 0.6rem', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '0.78rem' }}
+                                                                    className="h-6 text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-bold"
                                                                 >
                                                                     Confirmar
-                                                                </button>
-                                                                <button
+                                                                </Button>
+                                                                <Button
                                                                     type="button"
+                                                                    size="sm"
+                                                                    variant="secondary"
                                                                     onClick={() => setCajaAReabrirId(null)}
-                                                                    style={{ padding: '0.3rem 0.6rem', background: '#64748b', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.78rem' }}
+                                                                    className="h-6 text-xs"
                                                                 >
                                                                     Cancelar
-                                                                </button>
+                                                                </Button>
                                                             </div>
                                                         </div>
                                                     ) : (
-                                                        <button
+                                                        <Button
                                                             type="button"
+                                                            size="sm"
                                                             onClick={() => {
                                                                 setCajaAReabrirId(c.id);
                                                                 setMotivoReapertura('Reconteo / Corrección de cierre');
                                                             }}
-                                                            style={{ padding: '0.35rem 0.7rem', background: '#0070f3', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '0.8rem' }}
+                                                            className="h-7 text-xs bg-blue-600 hover:bg-blue-700 text-white font-bold self-start"
                                                         >
                                                             Reabrir este Turno
-                                                        </button>
+                                                        </Button>
                                                     )
                                                 )}
                                                 {c.estado === 'cerrada' && (
-                                                    <button
+                                                    <Button
                                                         type="button"
+                                                        size="sm"
                                                         disabled={enviandoEmailCajaId === c.id}
                                                         onClick={() => handleReenviarEmailCierre(c.id)}
-                                                        style={{
-                                                            padding: '0.35rem 0.65rem',
-                                                            background: '#047857',
-                                                            color: '#fff',
-                                                            border: 'none',
-                                                            borderRadius: '4px',
-                                                            cursor: enviandoEmailCajaId === c.id ? 'not-allowed' : 'pointer',
-                                                            fontSize: '0.78rem',
-                                                            fontWeight: '600'
-                                                        }}
+                                                        className="h-7 text-xs bg-emerald-700 hover:bg-emerald-800 text-white font-semibold self-start"
                                                     >
                                                         {enviandoEmailCajaId === c.id ? '⏳ Enviando...' : '✉️ Enviar por Correo'}
-                                                    </button>
+                                                    </Button>
                                                 )}
                                             </div>
-                                        </td>
-                                    </tr>
+                                        </TableCell>
+                                    </TableRow>
                                 );
                             })}
-                        </tbody>
-                    </table>
+                        </TableBody>
+                    </Table>
                 </div>
             )}
         </section>

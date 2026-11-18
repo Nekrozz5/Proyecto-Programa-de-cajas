@@ -23,7 +23,7 @@ function formatearBs(valor) {
 }
 
 /**
- * Panel visual de estadísticas financieras y tendencias operativas usando Recharts.
+ * Panel visual de estadísticas financieras y tendencias operativas usando Recharts integrado con Tailwind CSS.
  */
 export default function GraficosFinancieros({ estadisticas, tendencias, desglosePagos, cajaId }) {
     const comparativaSemanal = tendencias?.comparativaSemanal || [];
@@ -42,28 +42,33 @@ export default function GraficosFinancieros({ estadisticas, tendencias, desglose
     }));
 
     return (
-        <section
-            style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))',
-                gap: '1.25rem',
-                marginBottom: '1.5rem'
-            }}
-        >
+        <section className="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-6">
             {/* 1. Comparativa Semanal: Ingresos vs Egresos */}
-            <div style={cardGrafico}>
-                <h3 style={tituloGrafico}>📈 Ingresos vs Egresos (Últimos 7 días)</h3>
+            <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm transition-shadow hover:shadow-md flex flex-col justify-between">
+                <div className="flex items-center justify-between mb-3 border-b border-slate-100 pb-2.5">
+                    <h3 className="font-semibold text-sm text-slate-800 flex items-center gap-2">
+                        <span>📈</span> Ingresos vs Egresos (Últimos 7 días)
+                    </h3>
+                    <span className="text-[11px] font-medium text-slate-400 bg-slate-100 px-2 py-0.5 rounded">
+                        Semanal
+                    </span>
+                </div>
                 {comparativaSemanal.length === 0 ? (
-                    <p style={vacioStyle}>Sin movimientos registrados en los últimos 7 días.</p>
+                    <div className="flex items-center justify-center h-[260px] text-slate-400 text-sm text-center">
+                        Sin movimientos registrados en los últimos 7 días.
+                    </div>
                 ) : (
-                    <div style={{ width: '100%', height: 260 }}>
+                    <div className="w-full h-[260px]">
                         <ResponsiveContainer width="100%" height="100%">
                             <BarChart data={comparativaSemanal} margin={{ top: 8, right: 12, left: 0, bottom: 4 }}>
-                                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                                <XAxis dataKey="fecha" tick={{ fontSize: 11, fill: '#475569' }} />
-                                <YAxis tick={{ fontSize: 11, fill: '#475569' }} />
-                                <Tooltip formatter={(val) => formatearBs(val)} />
-                                <Legend wrapperStyle={{ fontSize: 12 }} />
+                                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                                <XAxis dataKey="fecha" tick={{ fontSize: 11, fill: '#64748b' }} />
+                                <YAxis tick={{ fontSize: 11, fill: '#64748b' }} />
+                                <Tooltip
+                                    formatter={(val) => formatearBs(val)}
+                                    contentStyle={{ backgroundColor: '#ffffff', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '12px' }}
+                                />
+                                <Legend wrapperStyle={{ fontSize: 12, paddingTop: '6px' }} />
                                 <Bar dataKey="ingresos" name="Ingresos (Bs)" fill="#16a34a" radius={[4, 4, 0, 0]} />
                                 <Bar dataKey="egresos" name="Egresos (Bs)" fill="#dc2626" radius={[4, 4, 0, 0]} />
                             </BarChart>
@@ -73,18 +78,30 @@ export default function GraficosFinancieros({ estadisticas, tendencias, desglose
             </div>
 
             {/* 2. Flujo de Ventas por Hora (Hoy) */}
-            <div style={cardGrafico}>
-                <h3 style={tituloGrafico}>🕒 Ventas por Hora (Hoy)</h3>
+            <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm transition-shadow hover:shadow-md flex flex-col justify-between">
+                <div className="flex items-center justify-between mb-3 border-b border-slate-100 pb-2.5">
+                    <h3 className="font-semibold text-sm text-slate-800 flex items-center gap-2">
+                        <span>🕒</span> Ventas por Hora (Hoy)
+                    </h3>
+                    <span className="text-[11px] font-medium text-slate-400 bg-slate-100 px-2 py-0.5 rounded">
+                        En tiempo real
+                    </span>
+                </div>
                 {ventasPorHora.length === 0 ? (
-                    <p style={vacioStyle}>Aún no hay ventas registradas hoy.</p>
+                    <div className="flex items-center justify-center h-[260px] text-slate-400 text-sm text-center">
+                        Aún no hay ventas registradas hoy.
+                    </div>
                 ) : (
-                    <div style={{ width: '100%', height: 260 }}>
+                    <div className="w-full h-[260px]">
                         <ResponsiveContainer width="100%" height="100%">
                             <AreaChart data={ventasPorHora} margin={{ top: 8, right: 12, left: 0, bottom: 4 }}>
-                                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                                <XAxis dataKey="hora" tick={{ fontSize: 11, fill: '#475569' }} />
-                                <YAxis tick={{ fontSize: 11, fill: '#475569' }} />
-                                <Tooltip formatter={(val) => formatearBs(val)} />
+                                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                                <XAxis dataKey="hora" tick={{ fontSize: 11, fill: '#64748b' }} />
+                                <YAxis tick={{ fontSize: 11, fill: '#64748b' }} />
+                                <Tooltip
+                                    formatter={(val) => formatearBs(val)}
+                                    contentStyle={{ backgroundColor: '#ffffff', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '12px' }}
+                                />
                                 <Area
                                     type="monotone"
                                     dataKey="total_vendido"
@@ -100,19 +117,31 @@ export default function GraficosFinancieros({ estadisticas, tendencias, desglose
             </div>
 
             {/* 3. Top Productos por Rentabilidad (Caja Auditada) */}
-            <div style={cardGrafico}>
-                <h3 style={tituloGrafico}>🏆 Top Productos: Ingreso vs Ganancia (Caja #{cajaId || '—'})</h3>
+            <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm transition-shadow hover:shadow-md flex flex-col justify-between">
+                <div className="flex items-center justify-between mb-3 border-b border-slate-100 pb-2.5">
+                    <h3 className="font-semibold text-sm text-slate-800 flex items-center gap-2">
+                        <span>🏆</span> Top Productos (Turno #{cajaId || '—'})
+                    </h3>
+                    <span className="text-[11px] font-medium text-slate-400 bg-slate-100 px-2 py-0.5 rounded">
+                        Ingreso vs Ganancia
+                    </span>
+                </div>
                 {topProductos.length === 0 ? (
-                    <p style={vacioStyle}>Sin ventas de productos en la caja auditada.</p>
+                    <div className="flex items-center justify-center h-[260px] text-slate-400 text-sm text-center">
+                        Sin ventas de productos en la caja auditada.
+                    </div>
                 ) : (
-                    <div style={{ width: '100%', height: 260 }}>
+                    <div className="w-full h-[260px]">
                         <ResponsiveContainer width="100%" height="100%">
                             <BarChart data={topProductos} margin={{ top: 8, right: 12, left: 0, bottom: 4 }}>
-                                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                                <XAxis dataKey="nombre" tick={{ fontSize: 11, fill: '#475569' }} />
-                                <YAxis tick={{ fontSize: 11, fill: '#475569' }} />
-                                <Tooltip formatter={(val) => formatearBs(val)} />
-                                <Legend wrapperStyle={{ fontSize: 12 }} />
+                                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                                <XAxis dataKey="nombre" tick={{ fontSize: 11, fill: '#64748b' }} />
+                                <YAxis tick={{ fontSize: 11, fill: '#64748b' }} />
+                                <Tooltip
+                                    formatter={(val) => formatearBs(val)}
+                                    contentStyle={{ backgroundColor: '#ffffff', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '12px' }}
+                                />
+                                <Legend wrapperStyle={{ fontSize: 12, paddingTop: '6px' }} />
                                 <Bar dataKey="ingresos" name="Ingresos (Bs)" fill="#0284c7" radius={[4, 4, 0, 0]} />
                                 <Bar dataKey="ganancia" name="Ganancia Bruta (Bs)" fill="#16a34a" radius={[4, 4, 0, 0]} />
                             </BarChart>
@@ -122,12 +151,21 @@ export default function GraficosFinancieros({ estadisticas, tendencias, desglose
             </div>
 
             {/* 4. Distribución por Método de Pago (Caja Auditada) */}
-            <div style={cardGrafico}>
-                <h3 style={tituloGrafico}>💳 Métodos de Pago (Caja #{cajaId || '—'})</h3>
+            <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm transition-shadow hover:shadow-md flex flex-col justify-between">
+                <div className="flex items-center justify-between mb-3 border-b border-slate-100 pb-2.5">
+                    <h3 className="font-semibold text-sm text-slate-800 flex items-center gap-2">
+                        <span>💳</span> Métodos de Pago (Turno #{cajaId || '—'})
+                    </h3>
+                    <span className="text-[11px] font-medium text-slate-400 bg-slate-100 px-2 py-0.5 rounded">
+                        Efectivo / QR
+                    </span>
+                </div>
                 {pagos.length === 0 ? (
-                    <p style={vacioStyle}>Sin ingresos registrados en la caja auditada.</p>
+                    <div className="flex items-center justify-center h-[260px] text-slate-400 text-sm text-center">
+                        Sin ingresos registrados en la caja auditada.
+                    </div>
                 ) : (
-                    <div style={{ width: '100%', height: 260 }}>
+                    <div className="w-full h-[260px]">
                         <ResponsiveContainer width="100%" height="100%">
                             <PieChart>
                                 <Pie
@@ -143,8 +181,11 @@ export default function GraficosFinancieros({ estadisticas, tendencias, desglose
                                         <Cell key={idx} fill={COLORES_PAGO[idx % COLORES_PAGO.length]} />
                                     ))}
                                 </Pie>
-                                <Tooltip formatter={(val) => formatearBs(val)} />
-                                <Legend wrapperStyle={{ fontSize: 12 }} />
+                                <Tooltip
+                                    formatter={(val) => formatearBs(val)}
+                                    contentStyle={{ backgroundColor: '#ffffff', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '12px' }}
+                                />
+                                <Legend wrapperStyle={{ fontSize: 12, paddingTop: '6px' }} />
                             </PieChart>
                         </ResponsiveContainer>
                     </div>
@@ -153,23 +194,3 @@ export default function GraficosFinancieros({ estadisticas, tendencias, desglose
         </section>
     );
 }
-
-const cardGrafico = {
-    background: '#fff',
-    padding: '1.15rem',
-    borderRadius: '10px',
-    boxShadow: '0 1px 3px rgba(0,0,0,0.08)'
-};
-
-const tituloGrafico = {
-    margin: '0 0 0.75rem 0',
-    fontSize: '0.98rem',
-    color: '#0f172a'
-};
-
-const vacioStyle = {
-    color: '#64748b',
-    fontSize: '0.88rem',
-    padding: '2.5rem 0',
-    textAlign: 'center'
-};

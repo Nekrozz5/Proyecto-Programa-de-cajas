@@ -1,7 +1,10 @@
 'use client';
 
 import { useState } from 'react';
-import { cardStyle, inputStyle, btnPrimario } from './cajaStyles';
+import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { abrirTurnoAction } from '../../../server/actions/turnos.actions';
 
 export default function AperturaTurno({
@@ -49,67 +52,97 @@ export default function AperturaTurno({
     }
 
     return (
-        <section style={{ ...cardStyle, maxWidth: '520px', margin: '2rem auto' }}>
-            <h2 style={{ marginTop: 0 }}>Estado: Sin Turno Abierto</h2>
-            {!puedeAbrirCaja ? (
-                <div style={{ background: '#fffbeb', border: '1px solid #f59e0b', color: '#92400e', padding: '1rem', borderRadius: '8px' }}>
-                    <strong>🔒 Reapertura Restringida al Administrador</strong>
-                    <p style={{ margin: '0.5rem 0 0', fontSize: '0.92rem' }}>
-                        El turno de caja ya fue cerrado. Un cajero (<code>user</code>) no puede volver a abrir la caja después de cerrada.
-                        Solicita al <strong>Administrador</strong> que la habilite.
-                    </p>
+        <Card className="max-w-lg mx-auto shadow-sm border-slate-200 mt-8 mb-8">
+            <CardHeader className="p-5 pb-3 border-b border-slate-100">
+                <div className="flex items-center gap-2">
+                    <span className="text-xl">🏪</span>
+                    <CardTitle className="text-xl font-bold text-slate-900 tracking-tight">
+                        Estado: Sin Turno Abierto
+                    </CardTitle>
                 </div>
-            ) : (
-                <form onSubmit={handleAbrirCaja} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                    <p style={{ margin: 0, color: '#555', fontSize: '0.9rem' }}>
-                        Abriendo turno con: <strong>{usuarioActual?.nombre} ({usuarioActual?.rol})</strong>.
-                    </p>
-                    {cajasFisicas.filter((cf) => Number(cf.activa) === 1).length > 1 ? (
-                        <label>
-                            Estación de Caja Física:
-                            <select
-                                value={cajaFisicaSeleccionada}
-                                onChange={(e) => setCajaFisicaSeleccionada(e.target.value)}
-                                style={inputStyle}
-                            >
-                                <option value="">-- Seleccionar Estación --</option>
-                                {cajasFisicas.filter((cf) => Number(cf.activa) === 1).map((cf) => (
-                                    <option key={cf.id} value={cf.id} disabled={!!cf.turno_abierto_id}>
-                                        {cf.nombre} {cf.turno_abierto_id ? `(Ocupada: Turno #${cf.turno_abierto_id})` : '(Disponible)'}
-                                    </option>
-                                ))}
-                            </select>
-                        </label>
-                    ) : (
-                        <div style={{ fontSize: '0.88rem', color: '#0369a1', background: '#e0f2fe', padding: '0.6rem 0.8rem', borderRadius: '6px' }}>
-                            Estación asignada: <strong>{cajasFisicas[0]?.nombre || 'Caja 1 - Principal'}</strong>
+            </CardHeader>
+
+            <CardContent className="p-5 pt-4">
+                {!puedeAbrirCaja ? (
+                    <div className="bg-amber-50 border border-amber-200 text-amber-900 p-4 rounded-xl space-y-2">
+                        <div className="flex items-center gap-2 font-bold text-sm">
+                            <span>🔒</span>
+                            <span>Reapertura Restringida al Administrador</span>
                         </div>
-                    )}
-                    <label>
-                        Fondo Inicial en Efectivo (Bs):
-                        <input
-                            type="number"
-                            step="0.01"
-                            min="0"
-                            value={montoInicial}
-                            onChange={(e) => setMontoInicial(e.target.value)}
-                            required
-                            style={inputStyle}
-                        />
-                    </label>
-                    <button
-                        type="submit"
-                        disabled={abriendo}
-                        style={{
-                            ...btnPrimario,
-                            opacity: abriendo ? 0.6 : 1,
-                            cursor: abriendo ? 'not-allowed' : 'pointer'
-                        }}
-                    >
-                        {abriendo ? 'Abriendo turno...' : 'Abrir Turno de Caja'}
-                    </button>
-                </form>
-            )}
-        </section>
+                        <p className="text-xs text-amber-800 leading-relaxed">
+                            El turno de caja ya fue cerrado. Un cajero (<code>user</code>) no puede volver a abrir la caja después de cerrada.
+                            Solicita al <strong>Administrador</strong> que la habilite.
+                        </p>
+                    </div>
+                ) : (
+                    <form onSubmit={handleAbrirCaja} className="space-y-4">
+                        <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-600 flex items-center justify-between">
+                            <span>Abriendo turno con:</span>
+                            <div className="flex items-center gap-1.5">
+                                <strong className="text-slate-900 font-semibold">{usuarioActual?.nombre}</strong>
+                                <Badge variant="secondary" className="text-[10px] bg-slate-200 text-slate-700">
+                                    {usuarioActual?.rol}
+                                </Badge>
+                            </div>
+                        </div>
+
+                        {cajasFisicas.filter((cf) => Number(cf.activa) === 1).length > 1 ? (
+                            <div className="space-y-1.5">
+                                <label className="text-xs font-semibold text-slate-700 block">
+                                    Estación de Caja Física:
+                                </label>
+                                <select
+                                    value={cajaFisicaSeleccionada}
+                                    onChange={(e) => setCajaFisicaSeleccionada(e.target.value)}
+                                    className="h-11 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-sky-500"
+                                >
+                                    <option value="">-- Seleccionar Estación --</option>
+                                    {cajasFisicas.filter((cf) => Number(cf.activa) === 1).map((cf) => (
+                                        <option key={cf.id} value={cf.id} disabled={!!cf.turno_abierto_id}>
+                                            {cf.nombre} {cf.turno_abierto_id ? `(Ocupada: Turno #${cf.turno_abierto_id})` : '(Disponible)'}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+                        ) : (
+                            <div className="text-xs text-sky-800 bg-sky-50 border border-sky-200 p-3 rounded-lg font-medium flex items-center justify-between">
+                                <span>Estación asignada:</span>
+                                <strong className="font-bold text-sky-900">{cajasFisicas[0]?.nombre || 'Caja 1 - Principal'}</strong>
+                            </div>
+                        )}
+
+                        <div className="space-y-1.5">
+                            <label className="text-xs font-semibold text-slate-700 block">
+                                Fondo Inicial en Efectivo (Bs):
+                            </label>
+                            <Input
+                                type="number"
+                                step="0.01"
+                                min="0"
+                                value={montoInicial}
+                                onChange={(e) => setMontoInicial(e.target.value)}
+                                required
+                                className="h-11 text-base font-bold bg-white border-slate-300 rounded-lg focus-visible:ring-sky-500"
+                            />
+                        </div>
+
+                        <Button
+                            type="submit"
+                            disabled={abriendo}
+                            className="w-full h-11 text-base font-bold bg-sky-600 hover:bg-sky-500 text-white rounded-lg shadow-sm transition-all"
+                        >
+                            {abriendo ? (
+                                <span className="flex items-center gap-2">
+                                    <span className="h-4 w-4 border-2 border-white border-t-transparent animate-spin rounded-full" />
+                                    <span>Abriendo turno...</span>
+                                </span>
+                            ) : (
+                                'Abrir Turno de Caja'
+                            )}
+                        </Button>
+                    </form>
+                )}
+            </CardContent>
+        </Card>
     );
 }

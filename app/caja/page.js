@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import Link from 'next/link';
 import CatalogoProductos from './_components/CatalogoProductos';
 import CarritoVenta from './_components/CarritoVenta';
 import ModalCobro from './_components/ModalCobro';
@@ -11,14 +12,10 @@ import HistorialTurno from './_components/HistorialTurno';
 import AperturaTurno from './_components/AperturaTurno';
 import LoginCaja from './_components/LoginCaja';
 import { cambiarPasswordAction } from '../../server/actions/admin.actions';
-import {
-    sidebarStyle,
-    navBtnStyle,
-    btnSidebarMini,
-    cardStyle,
-    btnPrimario,
-    btnSecundario
-} from './_components/cajaStyles';
+import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
 import { useCarrito } from './_hooks/useCarrito';
 import { useInactividad } from './_hooks/useInactividad';
 
@@ -194,7 +191,14 @@ export default function CajaPage() {
     }
 
     if (cargando) {
-        return <div style={{ padding: '2rem' }}>Cargando módulo de caja...</div>;
+        return (
+            <div className="flex h-screen items-center justify-center bg-slate-100">
+                <div className="flex flex-col items-center gap-3">
+                    <div className="h-8 w-8 animate-spin rounded-full border-4 border-sky-600 border-t-transparent" />
+                    <span className="text-sm font-medium text-slate-600">Cargando módulo de caja...</span>
+                </div>
+            </div>
+        );
     }
 
     // 1. Pantalla de inicio de sesión si no hay operador autenticado
@@ -215,62 +219,97 @@ export default function CajaPage() {
 
     // 2. Pantalla principal del Módulo de Caja
     return (
-        <div style={{ display: 'flex', flexWrap: 'wrap', minHeight: '100vh', background: '#f1f5f9' }}>
+        <div className="flex min-h-screen flex-col lg:flex-row bg-slate-100 text-slate-900">
             {/* BARRA LATERAL IZQUIERDA (SIDEBAR) */}
-            <aside style={sidebarStyle}>
-                <div style={{ padding: '1.25rem', borderBottom: '1px solid #334155' }}>
-                    <h2 style={{ margin: 0, fontSize: '1.15rem', color: '#fff' }}>Módulo de Caja</h2>
-                    <div style={{ fontSize: '0.82rem', color: '#94a3b8', marginTop: '0.35rem' }}>
-                        {cajaAbierta ? `🟢 [${cajaAbierta.caja_fisica_nombre || 'Caja Principal'}] Turno #${cajaAbierta.id} Abierto` : '🔴 Sin Turno Abierto'}
+            <aside className="w-full lg:w-72 bg-slate-900 text-slate-100 flex flex-col shrink-0 border-r border-slate-800">
+                <div className="p-4 border-b border-slate-800">
+                    <h2 className="text-lg font-bold text-white tracking-tight">Módulo de Caja</h2>
+                    <div className="text-xs text-slate-400 mt-1 flex items-center gap-1.5">
+                        {cajaAbierta ? (
+                            <>
+                                <span className="inline-block h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+                                <span>[{cajaAbierta.caja_fisica_nombre || 'Caja Principal'}] Turno #{cajaAbierta.id} Abierto</span>
+                            </>
+                        ) : (
+                            <>
+                                <span className="inline-block h-2 w-2 rounded-full bg-rose-500" />
+                                <span>Sin Turno Abierto</span>
+                            </>
+                        )}
                     </div>
                 </div>
 
                 {/* Datos del Operador */}
-                <div style={{ padding: '1rem 1.25rem', background: '#0f172a', borderBottom: '1px solid #334155', fontSize: '0.85rem' }}>
-                    <div style={{ color: '#94a3b8' }}>Operador activo:</div>
-                    <div style={{ fontWeight: 'bold', color: '#38bdf8', fontSize: '0.95rem', margin: '0.2rem 0' }}>
-                        {usuarioActual.nombre} ({usuarioActual.rol})
+                <div className="p-4 bg-slate-950/70 border-b border-slate-800 text-xs">
+                    <div className="text-slate-400 font-medium">Operador activo:</div>
+                    <div className="flex items-center justify-between mt-1">
+                        <span className="font-semibold text-sky-400 text-sm">{usuarioActual.nombre}</span>
+                        <Badge variant="secondary" className="bg-slate-800 text-slate-300 text-[10px] px-2 py-0.5">
+                            {usuarioActual.rol}
+                        </Badge>
                     </div>
-                    <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.5rem' }}>
-                        <button type="button" onClick={() => setMostrarFormPin(!mostrarFormPin)} style={btnSidebarMini}>
+
+                    <div className="flex gap-2 mt-3">
+                        <Button
+                            type="button"
+                            variant="secondary"
+                            size="sm"
+                            className="h-8 text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700"
+                            onClick={() => setMostrarFormPin(!mostrarFormPin)}
+                        >
                             Cambiar PIN
-                        </button>
-                        <button type="button" onClick={cerrarSesion} style={{ ...btnSidebarMini, background: '#475569' }}>
+                        </Button>
+                        <Button
+                            type="button"
+                            variant="destructive"
+                            size="sm"
+                            className="h-8 text-xs bg-slate-700 hover:bg-rose-700 text-white"
+                            onClick={cerrarSesion}
+                        >
                             Salir
-                        </button>
+                        </Button>
                     </div>
+
                     {mostrarFormPin && (
-                        <form onSubmit={handleCambiarMiPin} style={{ marginTop: '0.6rem', display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-                            <input
+                        <form onSubmit={handleCambiarMiPin} className="mt-3 flex flex-col gap-2 p-2 bg-slate-900 rounded border border-slate-800">
+                            <Input
                                 type="password"
                                 placeholder="PIN actual"
                                 required
                                 value={pinActualCajero}
                                 onChange={(e) => setPinActualCajero(e.target.value)}
-                                style={{ padding: '0.35rem', borderRadius: '4px', border: '1px solid #475569', fontSize: '0.8rem' }}
+                                className="h-8 text-xs bg-slate-950 border-slate-700 text-white"
                             />
-                            <input
+                            <Input
                                 type="password"
                                 placeholder="Nuevo PIN"
                                 required
                                 value={nuevoPinCajero}
                                 onChange={(e) => setNuevoPinCajero(e.target.value)}
-                                style={{ padding: '0.35rem', borderRadius: '4px', border: '1px solid #475569', fontSize: '0.8rem' }}
+                                className="h-8 text-xs bg-slate-950 border-slate-700 text-white"
                             />
-                            <button type="submit" style={{ ...btnSidebarMini, background: '#16a34a' }}>Guardar PIN</button>
+                            <Button type="submit" size="sm" className="h-8 text-xs bg-emerald-600 hover:bg-emerald-500 text-white">
+                                Guardar PIN
+                            </Button>
                         </form>
                     )}
                 </div>
 
                 {/* Menú de Navegación Lateral */}
-                <nav style={{ display: 'flex', flexDirection: 'column', padding: '0.75rem', gap: '0.35rem', flex: 1 }}>
+                <nav className="flex flex-col p-3 gap-1.5 flex-1 overflow-y-auto">
                     <button
                         type="button"
                         onClick={() => { limpiarAlertas(); setSeccionActiva('pos'); }}
-                        style={navBtnStyle(seccionActiva === 'pos')}
+                        className={`flex items-center gap-2.5 px-3.5 py-3 rounded-lg text-sm font-medium text-left transition-colors min-h-[44px] ${
+                            seccionActiva === 'pos'
+                                ? 'bg-sky-600 text-white font-semibold shadow-sm'
+                                : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+                        }`}
                     >
-                        🛒 1. Punto de Venta (Cobrar)
+                        <span>🛒</span>
+                        <span>1. Punto de Venta (Cobrar)</span>
                     </button>
+
                     {cajaAbierta && (
                         <>
                             <button
@@ -279,9 +318,10 @@ export default function CajaPage() {
                                     limpiarAlertas();
                                     setModalMovimientosConfig({ isOpen: true, tipo: 'ingreso' });
                                 }}
-                                style={navBtnStyle(false)}
+                                className="flex items-center gap-2.5 px-3.5 py-3 rounded-lg text-sm font-medium text-left text-slate-300 hover:bg-slate-800 hover:text-white transition-colors min-h-[44px]"
                             >
-                                📥 2. Ingresar Efectivo / Sencillo
+                                <span>📥</span>
+                                <span>2. Ingresar Efectivo / Sencillo</span>
                             </button>
                             <button
                                 type="button"
@@ -289,9 +329,10 @@ export default function CajaPage() {
                                     limpiarAlertas();
                                     setModalMovimientosConfig({ isOpen: true, tipo: 'egreso' });
                                 }}
-                                style={navBtnStyle(false)}
+                                className="flex items-center gap-2.5 px-3.5 py-3 rounded-lg text-sm font-medium text-left text-slate-300 hover:bg-slate-800 hover:text-white transition-colors min-h-[44px]"
                             >
-                                💸 3. Registrar Egreso
+                                <span>💸</span>
+                                <span>3. Registrar Egreso</span>
                             </button>
                             <button
                                 type="button"
@@ -299,55 +340,76 @@ export default function CajaPage() {
                                     limpiarAlertas();
                                     setMostrarModalArqueo(true);
                                 }}
-                                style={navBtnStyle(false)}
+                                className="flex items-center gap-2.5 px-3.5 py-3 rounded-lg text-sm font-medium text-left text-slate-300 hover:bg-slate-800 hover:text-white transition-colors min-h-[44px]"
                             >
-                                🔒 4. Cerrar Turno (Arqueo)
+                                <span>🔒</span>
+                                <span>4. Cerrar Turno (Arqueo)</span>
                             </button>
                             <button
                                 type="button"
                                 onClick={() => { limpiarAlertas(); setSeccionActiva('movimientos'); }}
-                                style={navBtnStyle(seccionActiva === 'movimientos')}
+                                className={`flex items-center gap-2.5 px-3.5 py-3 rounded-lg text-sm font-medium text-left transition-colors min-h-[44px] ${
+                                    seccionActiva === 'movimientos'
+                                        ? 'bg-sky-600 text-white font-semibold shadow-sm'
+                                        : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+                                }`}
                             >
-                                📋 5. Historial del Turno
+                                <span>📋</span>
+                                <span>5. Historial del Turno</span>
                             </button>
                         </>
                     )}
                 </nav>
 
-                <div style={{ padding: '1rem', borderTop: '1px solid #334155', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                    <a href="/admin" style={{ ...btnPrimario, textAlign: 'center', fontSize: '0.85rem' }}>
-                        Ir a Panel Admin
-                    </a>
-                    <a href="/" style={{ ...btnSecundario, textAlign: 'center', fontSize: '0.85rem' }}>
-                        Menú Principal
-                    </a>
+                <div className="p-4 border-t border-slate-800 flex flex-col gap-2">
+                    <Button asChild variant="default" className="w-full h-10 bg-sky-600 hover:bg-sky-500 text-white font-medium text-sm">
+                        <Link href="/admin">Ir a Panel Admin</Link>
+                    </Button>
+                    <Button asChild variant="outline" className="w-full h-10 border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm">
+                        <Link href="/">Menú Principal</Link>
+                    </Button>
                 </div>
             </aside>
 
             {/* ÁREA PRINCIPAL DERECHA */}
-            <main style={{ flex: '1 1 340px', padding: '1.5rem', overflowY: 'auto' }}>
+            <main className="flex-1 p-4 lg:p-6 overflow-y-auto">
                 {error && (
-                    <div style={{ background: '#fee2e2', color: '#991b1b', padding: '0.85rem 1rem', borderRadius: '6px', marginBottom: '1rem', border: '1px solid #f87171' }}>
-                        <strong>Error:</strong> {error}
+                    <div className="mb-4 flex items-center justify-between rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+                        <div className="flex items-center gap-2">
+                            <span className="font-semibold">Error:</span>
+                            <span>{error}</span>
+                        </div>
+                        <Button variant="ghost" size="sm" onClick={limpiarAlertas} className="h-6 w-6 p-0 text-red-800 hover:bg-red-100">✕</Button>
                     </div>
                 )}
 
                 {mensaje && (
-                    <div style={{ background: '#dcfce7', color: '#166534', padding: '0.85rem 1rem', borderRadius: '6px', marginBottom: '1rem', border: '1px solid #4ade80' }}>
-                        {mensaje}
+                    <div className="mb-4 flex items-center justify-between rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
+                        <div className="flex items-center gap-2">
+                            <span>✅</span>
+                            <span>{mensaje}</span>
+                        </div>
+                        <Button variant="ghost" size="sm" onClick={limpiarAlertas} className="h-6 w-6 p-0 text-emerald-800 hover:bg-emerald-100">✕</Button>
                     </div>
                 )}
 
                 {confirmacionCierreCiego && (
-                    <section style={{ ...cardStyle, border: '2px solid #0070f3', marginBottom: '1.5rem', background: '#f8fafc' }}>
-                        <h3 style={{ marginTop: 0 }}>Comprobante de Cierre Ciego (Turno #{confirmacionCierreCiego.cajaId})</h3>
-                        <p style={{ margin: '0.35rem 0' }}>
-                            Cerrado por: <strong>{confirmacionCierreCiego.cerradoPor}</strong> | Efectivo físico declarado: <strong>Bs {Number(confirmacionCierreCiego.efectivoDeclarado || 0).toFixed(2)}</strong>
-                        </p>
-                        <small style={{ color: '#555' }}>
-                            🔒 El cálculo de diferencias fue enviado exclusivamente a Auditoría y al Panel de Administración.
-                        </small>
-                    </section>
+                    <Card className="mb-5 border-2 border-sky-500 bg-sky-50/50 shadow-sm">
+                        <CardHeader className="pb-2">
+                            <CardTitle className="text-base text-sky-950 flex items-center gap-2">
+                                <span>🔒</span>
+                                Comprobante de Cierre Ciego (Turno #{confirmacionCierreCiego.cajaId})
+                            </CardTitle>
+                        </CardHeader>
+                        <CardContent className="text-sm text-slate-700">
+                            <p className="mb-1">
+                                Cerrado por: <strong>{confirmacionCierreCiego.cerradoPor}</strong> | Efectivo físico declarado: <strong className="text-slate-900 font-bold">Bs {Number(confirmacionCierreCiego.efectivoDeclarado || 0).toFixed(2)}</strong>
+                            </p>
+                            <p className="text-xs text-slate-500">
+                                🔒 El cálculo de diferencias fue enviado exclusivamente a Auditoría y al Panel de Administración.
+                            </p>
+                        </CardContent>
+                    </Card>
                 )}
 
                 {!cajaAbierta ? (
@@ -362,37 +424,36 @@ export default function CajaPage() {
                     <>
                         {/* SECCIÓN 1: PUNTO DE VENTA (CATÁLOGO Y CARRITO) */}
                         {seccionActiva === 'pos' && (
-                            <div style={{
-                                display: 'grid',
-                                gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))',
-                                gap: '1.25rem',
-                                alignItems: 'start'
-                            }}>
-                                <CatalogoProductos
-                                    productos={productos}
-                                    categorias={categorias}
-                                    carrito={carrito}
-                                    onSeleccionarProducto={handleSeleccionarProducto}
-                                />
+                            <div className="grid grid-cols-1 xl:grid-cols-12 gap-5 items-start">
+                                <div className="xl:col-span-7 2xl:col-span-8">
+                                    <CatalogoProductos
+                                        productos={productos}
+                                        categorias={categorias}
+                                        carrito={carrito}
+                                        onSeleccionarProducto={handleSeleccionarProducto}
+                                    />
+                                </div>
 
-                                <CarritoVenta
-                                    carrito={carrito}
-                                    productos={productos}
-                                    cambiarCantidad={cambiarCantidad}
-                                    handleInputCantidad={handleInputCantidad}
-                                    finalizarEdicionCantidad={finalizarEdicionCantidad}
-                                    eliminarDelCarrito={eliminarDelCarrito}
-                                    vaciarCarrito={vaciarCarrito}
-                                    subtotalBrutoCarrito={subtotalBrutoCarrito}
-                                    descuentoAplicadoNum={descuentoAplicadoNum}
-                                    descuentoInvalido={descuentoInvalido}
-                                    totalCarrito={totalCarrito}
-                                    onAbrirCobro={() => {
-                                        limpiarAlertas();
-                                        setMostrarModalCobro(true);
-                                    }}
-                                    ultimoTicket={ultimoTicket}
-                                />
+                                <div className="xl:col-span-5 2xl:col-span-4 sticky top-4">
+                                    <CarritoVenta
+                                        carrito={carrito}
+                                        productos={productos}
+                                        cambiarCantidad={cambiarCantidad}
+                                        handleInputCantidad={handleInputCantidad}
+                                        finalizarEdicionCantidad={finalizarEdicionCantidad}
+                                        eliminarDelCarrito={eliminarDelCarrito}
+                                        vaciarCarrito={vaciarCarrito}
+                                        subtotalBrutoCarrito={subtotalBrutoCarrito}
+                                        descuentoAplicadoNum={descuentoAplicadoNum}
+                                        descuentoInvalido={descuentoInvalido}
+                                        totalCarrito={totalCarrito}
+                                        onAbrirCobro={() => {
+                                            limpiarAlertas();
+                                            setMostrarModalCobro(true);
+                                        }}
+                                        ultimoTicket={ultimoTicket}
+                                    />
+                                </div>
                             </div>
                         )}
 

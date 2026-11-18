@@ -1,7 +1,10 @@
 'use client';
 
 import { useState } from 'react';
-import { cardStyle, inputStyle, btnPrimario, btnSecundario, btnOscuro } from './cajaStyles';
+import Link from 'next/link';
+import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
 
 export default function LoginCaja({
     usuarios = [],
@@ -54,85 +57,109 @@ export default function LoginCaja({
     }
 
     return (
-        <div style={{ maxWidth: '460px', margin: '3rem auto', padding: '1.5rem' }}>
-            <div style={cardStyle}>
-                <h2 style={{ marginTop: 0 }}>Iniciar Sesión en Caja</h2>
-                <p style={{ color: '#555', fontSize: '0.9rem' }}>
-                    Identifícate con tu PIN para registrar quién realiza cada venta o movimiento.
-                </p>
-                <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                    {!modoLoginManualCaja ? (
-                        <label>
-                            Selecciona tu Usuario:
-                            <select
-                                value={loginUsuarioId}
-                                onChange={(e) => setLoginUsuarioId(e.target.value)}
-                                required
-                                style={inputStyle}
-                            >
-                                {usuarios.map((u) => (
-                                    <option key={u.id} value={u.id}>
-                                        {u.nombre}
-                                    </option>
-                                ))}
-                            </select>
-                        </label>
-                    ) : (
-                        <label>
-                            Nombre de Usuario:
-                            <input
-                                type="text"
-                                placeholder="Ingresa tu nombre de usuario"
-                                value={loginNombreManualCaja}
-                                onChange={(e) => setLoginNombreManualCaja(e.target.value)}
-                                required
-                                style={inputStyle}
-                            />
-                            <small style={{ display: 'block', color: '#64748b', marginTop: '0.3rem' }}>
-                                Administradores: escriban su nombre de usuario (no aparecen en la lista).
-                            </small>
-                        </label>
-                    )}
-                    <label>
-                        PIN / Contraseña:
-                        <input
-                            type="password"
-                            placeholder="Ingresa tu PIN o contraseña"
-                            value={loginPin}
-                            onChange={(e) => setLoginPin(e.target.value)}
-                            required
-                            style={inputStyle}
-                        />
-                    </label>
-                    <button
-                        type="submit"
-                        disabled={procesando}
-                        style={{
-                            ...btnPrimario,
-                            opacity: procesando ? 0.6 : 1,
-                            cursor: procesando ? 'not-allowed' : 'pointer'
-                        }}
-                    >
-                        {procesando ? 'Verificando...' : 'Ingresar a Caja'}
-                    </button>
-                    <button
-                        type="button"
-                        onClick={() => {
-                            if (typeof onLimpiarAlertas === 'function') onLimpiarAlertas();
-                            setModoLoginManualCaja(!modoLoginManualCaja);
-                            setLoginNombreManualCaja('');
-                            setLoginPin('');
-                        }}
-                        style={{ background: 'none', border: 'none', color: '#64748b', fontSize: '0.78rem', cursor: 'pointer', textDecoration: 'underline', padding: '0.2rem' }}
-                    >
-                        {modoLoginManualCaja ? 'Seleccionar usuario de la lista' : 'Ingresar nombre de usuario manualmente'}
-                    </button>
-                    <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'space-between' }}>
-                        <a href="/" style={{ ...btnSecundario, flex: 1, textAlign: 'center' }}>Inicio</a>
-                        <a href="/admin" style={{ ...btnOscuro, flex: 1, textAlign: 'center' }}>Panel Admin</a>
+        <div className="min-h-[80vh] flex items-center justify-center p-4">
+            <Card className="w-full max-w-md shadow-lg border-slate-200">
+                <CardHeader className="text-center pb-4">
+                    <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 text-primary">
+                        <span className="text-2xl">🔐</span>
                     </div>
-                </form>
-            </div>
+                    <CardTitle className="text-2xl font-bold tracking-tight">Iniciar Sesión en Caja</CardTitle>
+                    <CardDescription className="text-slate-500 text-sm">
+                        Identifícate con tu PIN o contraseña para registrar tus operaciones y ventas.
+                    </CardDescription>
+                </CardHeader>
+
+                <CardContent>
+                    <form onSubmit={handleLogin} className="space-y-4">
+                        {!modoLoginManualCaja ? (
+                            <div className="space-y-1.5">
+                                <label className="text-sm font-semibold text-slate-700">
+                                    Selecciona tu Usuario
+                                </label>
+                                <select
+                                    value={loginUsuarioId}
+                                    onChange={(e) => setLoginUsuarioId(e.target.value)}
+                                    required
+                                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                    {usuarios.map((u) => (
+                                        <option key={u.id} value={u.id}>
+                                            {u.nombre}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+                        ) : (
+                            <div className="space-y-1.5">
+                                <label className="text-sm font-semibold text-slate-700">
+                                    Nombre de Usuario
+                                </label>
+                                <Input
+                                    type="text"
+                                    placeholder="Ingresa tu nombre de usuario"
+                                    value={loginNombreManualCaja}
+                                    onChange={(e) => setLoginNombreManualCaja(e.target.value)}
+                                    required
+                                />
+                                <p className="text-xs text-slate-500">
+                                    Administradores y soporte: escriban su nombre de usuario.
+                                </p>
+                            </div>
+                        )}
+
+                        <div className="space-y-1.5">
+                            <label className="text-sm font-semibold text-slate-700">
+                                PIN / Contraseña
+                            </label>
+                            <Input
+                                type="password"
+                                placeholder="Ingresa tu PIN o contraseña"
+                                value={loginPin}
+                                onChange={(e) => setLoginPin(e.target.value)}
+                                required
+                            />
+                        </div>
+
+                        <Button
+                            type="submit"
+                            disabled={procesando}
+                            className="w-full h-11 text-base font-semibold transition-all"
+                        >
+                            {procesando ? 'Verificando...' : 'Ingresar a Caja'}
+                        </Button>
+
+                        <div className="text-center pt-1">
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    if (typeof onLimpiarAlertas === 'function') onLimpiarAlertas();
+                                    setModoLoginManualCaja(!modoLoginManualCaja);
+                                    setLoginNombreManualCaja('');
+                                    setLoginPin('');
+                                }}
+                                className="text-xs font-medium text-slate-500 hover:text-primary transition-colors underline underline-offset-4"
+                            >
+                                {modoLoginManualCaja
+                                    ? '← Seleccionar usuario de la lista'
+                                    : '¿Ingresar nombre de usuario manualmente?'}
+                            </button>
+                        </div>
+                    </form>
+                </CardContent>
+
+                <CardFooter className="flex gap-2 pt-2 border-t border-slate-100 bg-slate-50/50 rounded-b-lg">
+                    <Button variant="outline" asChild className="flex-1">
+                        <Link href="/">
+                            🏠 Inicio
+                        </Link>
+                    </Button>
+                    <Button variant="outline" asChild className="flex-1">
+                        <Link href="/admin">
+                            🛡️ Panel Admin
+                        </Link>
+                    </Button>
+                </CardFooter>
+            </Card>
         </div>
     );
 }

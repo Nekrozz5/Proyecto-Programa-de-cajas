@@ -1,7 +1,9 @@
 'use client';
 
 import { useState } from 'react';
-import { cardStyle, formCol, inputStyle, btnPrimario, btnSecundario } from './adminStyles';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Badge } from '@/components/ui/badge';
 import {
     crearUsuarioAction,
     borrarUsuarioAction,
@@ -163,33 +165,33 @@ export default function TabUsuariosCajas({
     }
 
     return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.4fr', gap: '1.5rem', alignItems: 'start' }}>
+        <div className="flex flex-col gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
                 {/* REGISTRAR NUEVO USUARIO */}
-                <section style={cardStyle}>
-                    <h3 style={{ marginTop: 0 }}>👥 Registrar Nuevo Usuario</h3>
-                    <p style={{ margin: '0 0 0.75rem', fontSize: '0.85rem', color: '#555' }}>
+                <section className="bg-white p-5 rounded-lg border border-slate-200 shadow-sm">
+                    <h3 className="text-lg font-bold text-slate-900 mt-0 mb-1">👥 Registrar Nuevo Usuario</h3>
+                    <p className="text-xs text-slate-600 mb-4">
                         Jerarquía activa: <strong>Super Admin</strong> &gt; <strong>Admin</strong> &gt; <strong>Cajero (user)</strong>.
                     </p>
-                    <form onSubmit={handleCrearUsuario} style={formCol}>
-                        <input
+                    <form onSubmit={handleCrearUsuario} className="flex flex-col gap-3">
+                        <Input
                             placeholder="Nombre completo o usuario"
                             required
                             value={nuevoUsuarioNombre}
                             onChange={(e) => setNuevoUsuarioNombre(e.target.value)}
-                            style={inputStyle}
+                            className="bg-white"
                         />
-                        <input
+                        <Input
                             placeholder="PIN o Contraseña inicial"
                             required
                             value={nuevoUsuarioPin}
                             onChange={(e) => setNuevoUsuarioPin(e.target.value)}
-                            style={inputStyle}
+                            className="bg-white"
                         />
                         <select
                             value={nuevoUsuarioRol}
                             onChange={(e) => setNuevoUsuarioRol(e.target.value)}
-                            style={inputStyle}
+                            className="w-full h-9 rounded-md border border-slate-300 bg-white px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-slate-950"
                         >
                             <option value="user">Cajero (user)</option>
                             {(adminAutenticado?.rol === 'superadmin' || adminAutenticado?.rol === 'developer') && (
@@ -199,93 +201,98 @@ export default function TabUsuariosCajas({
                                 <option value="superadmin">Super Admin (superadmin) — Exclusivo Developer</option>
                             )}
                         </select>
-                        <button type="submit" style={btnPrimario}>Crear Usuario</button>
+                        <Button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white font-bold mt-1">
+                            Crear Usuario
+                        </Button>
                     </form>
                 </section>
 
                 {/* DIRECTORIO DE USUARIOS */}
-                <section style={cardStyle}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.5rem' }}>
-                        <h3 style={{ margin: 0 }}>Directorio de Usuarios y Control de PIN</h3>
+                <section className="bg-white p-5 rounded-lg border border-slate-200 shadow-sm">
+                    <div className="flex justify-between items-center flex-wrap gap-2 mb-3">
+                        <h3 className="text-lg font-bold text-slate-900 m-0">Directorio de Usuarios y Control de PIN</h3>
                         {adminAutenticado?.rol === 'developer' && (
-                            <button
+                            <Button
                                 type="button"
+                                size="sm"
                                 onClick={() => {
                                     setUsuarioCambioPin(adminAutenticado);
                                     setPinActualInput('');
                                     setNuevoPinInput('');
                                 }}
-                                style={{ padding: '0.32rem 0.65rem', background: '#0f172a', color: '#facc15', border: '1px solid #334155', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 'bold' }}
+                                className="h-8 bg-slate-900 hover:bg-slate-800 text-amber-400 border border-slate-700 font-bold text-xs"
                             >
                                 💻 Cambiar mi PIN (developer)
-                            </button>
+                            </Button>
                         )}
                     </div>
-                    <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+                    <ul className="list-none p-0 m-0 divide-y divide-slate-100">
                         {(datos?.usuarios || []).map((u) => {
                             const esMismoUsuario = Number(u.id) === Number(adminAutenticado?.id);
                             const esInferior = NIVEL_ROL[adminAutenticado?.rol || 'user'] > NIVEL_ROL[u.rol || 'user'];
-                            const etiquetaRol = u.rol === 'superadmin' ? '👑 SUPER ADMIN' : u.rol === 'admin' ? '🛡️ ADMIN' : '👤 CAJERO';
+                            const rolBadge = u.rol === 'superadmin' ? (
+                                <Badge className="bg-amber-100 text-amber-900 border border-amber-300 hover:bg-amber-100 font-bold text-[11px]">
+                                    👑 SUPER ADMIN
+                                </Badge>
+                            ) : u.rol === 'admin' ? (
+                                <Badge className="bg-blue-100 text-blue-800 border border-blue-300 hover:bg-blue-100 font-bold text-[11px]">
+                                    🛡️ ADMIN
+                                </Badge>
+                            ) : (
+                                <Badge variant="secondary" className="bg-slate-100 text-slate-700 border border-slate-200 font-bold text-[11px]">
+                                    👤 CAJERO
+                                </Badge>
+                            );
 
                             return (
-                                <li key={u.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.7rem 0', borderBottom: '1px solid #eee', gap: '0.5rem', flexWrap: 'wrap' }}>
-                                    <div>
-                                        <strong>{u.nombre}</strong>{' '}
-                                        <span style={{
-                                            fontSize: '0.75rem',
-                                            padding: '0.15rem 0.45rem',
-                                            borderRadius: '4px',
-                                            background: u.rol === 'superadmin' ? '#fef3c7' : u.rol === 'admin' ? '#dbeafe' : '#f3f4f6',
-                                            color: u.rol === 'superadmin' ? '#92400e' : u.rol === 'admin' ? '#1e40af' : '#374151',
-                                            fontWeight: 'bold'
-                                        }}>
-                                            {etiquetaRol}
-                                        </span>{' '}
-                                        <small style={{ color: '#6b7280' }}>ID #{u.id}</small>
+                                <li key={u.id} className="flex justify-between items-center py-3 flex-wrap gap-2">
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                        <strong className="text-sm text-slate-900">{u.nombre}</strong>
+                                        {rolBadge}
+                                        <small className="text-slate-400 text-xs">ID #{u.id}</small>
                                     </div>
-                                    <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                                    <div className="flex gap-1.5 items-center flex-wrap">
                                         <button
                                             type="button"
                                             onClick={() => handleTogglePermisoFiscalUsuario(u.id, Number(u.puede_registrar_respaldo_fiscal ?? 1) === 1, u.nombre)}
-                                            style={{
-                                                padding: '0.3rem 0.55rem',
-                                                background: Number(u.puede_registrar_respaldo_fiscal ?? 1) === 1 ? '#dcfce7' : '#f1f5f9',
-                                                color: Number(u.puede_registrar_respaldo_fiscal ?? 1) === 1 ? '#166534' : '#64748b',
-                                                border: `1px solid ${Number(u.puede_registrar_respaldo_fiscal ?? 1) === 1 ? '#86efac' : '#cbd5e1'}`,
-                                                borderRadius: '4px',
-                                                cursor: 'pointer',
-                                                fontSize: '0.76rem',
-                                                fontWeight: 'bold'
-                                            }}
+                                            className={`px-2 py-1 rounded text-xs font-semibold border transition-colors ${
+                                                Number(u.puede_registrar_respaldo_fiscal ?? 1) === 1
+                                                    ? 'bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100'
+                                                    : 'bg-slate-100 text-slate-600 border-slate-300 hover:bg-slate-200'
+                                            }`}
                                             title="Habilitar o deshabilitar que este usuario pueda registrar datos de factura/respaldo en ventas y egresos"
                                         >
-                                            🧾 Respaldo Fiscal: {Number(u.puede_registrar_respaldo_fiscal ?? 1) === 1 ? 'SÍ' : 'NO'}
+                                            🧾 Respaldo: {Number(u.puede_registrar_respaldo_fiscal ?? 1) === 1 ? 'SÍ' : 'NO'}
                                         </button>
                                         {(esMismoUsuario || esInferior) ? (
-                                            <button
+                                            <Button
                                                 type="button"
+                                                size="sm"
+                                                variant="outline"
                                                 onClick={() => {
                                                     setUsuarioCambioPin(u);
                                                     setPinActualInput('');
                                                     setNuevoPinInput('');
                                                 }}
-                                                style={{ padding: '0.32rem 0.65rem', background: '#0284c7', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.82rem' }}
+                                                className="h-7 text-xs border-sky-300 text-sky-700 hover:bg-sky-50"
                                             >
                                                 {esMismoUsuario ? 'Cambiar mi PIN' : 'Cambiar PIN'}
-                                            </button>
+                                            </Button>
                                         ) : (
-                                            <span style={{ fontSize: '0.78rem', color: '#9ca3af' }}>
+                                            <span className="text-xs text-slate-400 italic">
                                                 🔒 Rango igual/superior
                                             </span>
                                         )}
                                         {esInferior && (
-                                            <button
+                                            <Button
                                                 type="button"
+                                                size="sm"
+                                                variant="destructive"
                                                 onClick={() => handleBorrarUsuario(u.id)}
-                                                style={{ padding: '0.32rem 0.65rem', background: '#dc2626', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.82rem' }}
+                                                className="h-7 text-xs bg-red-600 hover:bg-red-700"
                                             >
                                                 Dar de baja
-                                            </button>
+                                            </Button>
                                         )}
                                     </div>
                                 </li>
@@ -295,29 +302,33 @@ export default function TabUsuariosCajas({
 
                     {/* FORMULARIO DE CAMBIO DE PIN */}
                     {usuarioCambioPin && (
-                        <form onSubmit={confirmarCambioPassword} style={{ marginTop: '1rem', padding: '1rem', background: '#f8fafc', borderRadius: '8px', border: '1px solid #cbd5e1', display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
-                            <strong>Cambiar PIN / Contraseña de: {usuarioCambioPin.nombre}</strong>
+                        <form onSubmit={confirmarCambioPassword} className="mt-4 p-4 bg-slate-50 rounded-lg border border-slate-300 flex flex-col gap-2.5">
+                            <strong className="text-xs text-slate-800">Cambiar PIN / Contraseña de: {usuarioCambioPin.nombre}</strong>
                             {Number(usuarioCambioPin.id) === Number(adminAutenticado?.id) && (
-                                <input
+                                <Input
                                     type="password"
                                     placeholder="Tu PIN / Contraseña actual"
                                     required
                                     value={pinActualInput}
                                     onChange={(e) => setPinActualInput(e.target.value)}
-                                    style={inputStyle}
+                                    className="bg-white h-9"
                                 />
                             )}
-                            <input
+                            <Input
                                 type="password"
                                 placeholder="Nuevo PIN / Contraseña"
                                 required
                                 value={nuevoPinInput}
                                 onChange={(e) => setNuevoPinInput(e.target.value)}
-                                style={inputStyle}
+                                className="bg-white h-9"
                             />
-                            <div style={{ display: 'flex', gap: '0.5rem' }}>
-                                <button type="submit" style={btnPrimario}>Guardar Nuevo PIN</button>
-                                <button type="button" onClick={() => setUsuarioCambioPin(null)} style={btnSecundario}>Cancelar</button>
+                            <div className="flex gap-2 mt-1">
+                                <Button type="submit" size="sm" className="bg-blue-600 hover:bg-blue-700 text-white font-bold">
+                                    Guardar Nuevo PIN
+                                </Button>
+                                <Button type="button" size="sm" variant="secondary" onClick={() => setUsuarioCambioPin(null)}>
+                                    Cancelar
+                                </Button>
                             </div>
                         </form>
                     )}
@@ -325,28 +336,28 @@ export default function TabUsuariosCajas({
             </div>
 
             {/* SECCIÓN ESTACIONES FÍSICAS DE CAJA */}
-            <section style={cardStyle}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem', marginBottom: '0.75rem' }}>
+            <section className="bg-white p-5 rounded-lg border border-slate-200 shadow-sm">
+                <div className="flex justify-between items-center flex-wrap gap-3 mb-3">
                     <div>
-                        <h3 style={{ margin: 0, color: '#0f172a' }}>🏢 Estaciones Físicas de Caja (Puntos de Venta)</h3>
-                        <p style={{ margin: '0.2rem 0 0', color: '#64748b', fontSize: '0.85rem' }}>
+                        <h3 className="text-lg font-bold text-slate-900 m-0">🏢 Estaciones Físicas de Caja (Puntos de Venta)</h3>
+                        <p className="text-xs text-slate-500 m-0 mt-0.5">
                             Gestiona las estaciones de cobro del local. Se requiere al menos una caja física activa para operar.
                         </p>
                     </div>
-                    <form onSubmit={handleCrearCajaFisica} style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                        <input
+                    <form onSubmit={handleCrearCajaFisica} className="flex gap-2 items-center">
+                        <Input
                             type="text"
                             value={nuevaCajaFisicaNombre}
                             onChange={(e) => setNuevaCajaFisicaNombre(e.target.value)}
                             placeholder="ej. Caja 2 - Barra"
-                            style={{ padding: '0.45rem 0.6rem', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.85rem', minWidth: '170px' }}
+                            className="h-8 text-xs min-w-[170px] bg-white"
                         />
-                        <button type="submit" style={{ ...btnPrimario, fontSize: '0.82rem', padding: '0.45rem 0.8rem' }}>
+                        <Button type="submit" size="sm" className="h-8 text-xs bg-blue-600 hover:bg-blue-700 text-white font-bold">
                             + Crear Caja
-                        </button>
+                        </Button>
                     </form>
                 </div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '0.75rem' }}>
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
                     {(datos?.cajasFisicas || []).map((cf) => {
                         const esActiva = Number(cf.activa) === 1;
                         const totalActivas = (datos?.cajasFisicas || []).filter((c) => Number(c.activa) === 1).length;
@@ -355,95 +366,65 @@ export default function TabUsuariosCajas({
                         return (
                             <div
                                 key={cf.id}
-                                style={{
-                                    background: esActiva ? '#fff' : '#f1f5f9',
-                                    border: `1px solid ${esActiva ? '#e2e8f0' : '#cbd5e1'}`,
-                                    borderRadius: '6px',
-                                    padding: '0.75rem',
-                                    display: 'flex',
-                                    flexDirection: 'column',
-                                    gap: '0.4rem',
-                                    opacity: esActiva ? 1 : 0.65
-                                }}
+                                className={`rounded-lg p-3.5 flex flex-col gap-2 border transition-all ${
+                                    esActiva ? 'bg-white border-slate-200 shadow-sm' : 'bg-slate-100 border-slate-300 opacity-70'
+                                }`}
                             >
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                    <strong style={{ fontSize: '0.92rem', color: '#0f172a' }}>{cf.nombre}</strong>
-                                    <span
-                                        style={{
-                                            fontSize: '0.72rem',
-                                            fontWeight: 'bold',
-                                            padding: '0.15rem 0.45rem',
-                                            borderRadius: '4px',
-                                            background: esActiva ? '#dcfce7' : '#e2e8f0',
-                                            color: esActiva ? '#166534' : '#64748b'
-                                        }}
-                                    >
-                                        {esActiva ? 'ACTIVA' : 'INACTIVA'}
-                                    </span>
+                                <div className="flex justify-between items-center">
+                                    <strong className="text-sm text-slate-900">{cf.nombre}</strong>
+                                    {esActiva ? (
+                                        <Badge className="bg-emerald-100 text-emerald-800 hover:bg-emerald-100 border border-emerald-200 text-[10px] font-bold">
+                                            ACTIVA
+                                        </Badge>
+                                    ) : (
+                                        <Badge variant="secondary" className="text-[10px] font-bold">
+                                            INACTIVA
+                                        </Badge>
+                                    )}
                                 </div>
-                                <div style={{ fontSize: '0.8rem', color: '#64748b' }}>
+                                <div className="text-xs text-slate-600">
                                     {tieneTurno ? (
-                                        <span style={{ color: '#16a34a', fontWeight: '600' }}>
+                                        <span className="text-emerald-700 font-semibold">
                                             🟢 Turno #{cf.turno_abierto_id} en curso ({cf.operador_abierto || 'Cajero'})
                                         </span>
                                     ) : (
                                         <span>⚪ Sin turno abierto actualmente</span>
                                     )}
                                 </div>
-                                <div style={{ marginTop: '0.3rem', display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+                                <div className="mt-1 flex gap-1.5 flex-wrap">
                                     <button
                                         type="button"
                                         onClick={() => handleTogglePermisoFiscalCaja(cf.id, Number(cf.habilita_respaldo_fiscal ?? 1) === 1, cf.nombre)}
-                                        style={{
-                                            fontSize: '0.73rem',
-                                            padding: '0.25rem 0.55rem',
-                                            borderRadius: '4px',
-                                            border: `1px solid ${Number(cf.habilita_respaldo_fiscal ?? 1) === 1 ? '#38bdf8' : '#cbd5e1'}`,
-                                            background: Number(cf.habilita_respaldo_fiscal ?? 1) === 1 ? '#e0f2fe' : '#f1f5f9',
-                                            color: Number(cf.habilita_respaldo_fiscal ?? 1) === 1 ? '#0369a1' : '#64748b',
-                                            cursor: 'pointer',
-                                            fontWeight: '600'
-                                        }}
+                                        className={`text-[11px] px-2 py-1 rounded font-semibold border transition-colors ${
+                                            Number(cf.habilita_respaldo_fiscal ?? 1) === 1
+                                                ? 'bg-sky-50 text-sky-800 border-sky-300 hover:bg-sky-100'
+                                                : 'bg-slate-100 text-slate-600 border-slate-300 hover:bg-slate-200'
+                                        }`}
                                         title="Habilitar o deshabilitar el registro de factura/respaldo en ventas y egresos de esta estación"
                                     >
-                                        🧾 Respaldo Fiscal: {Number(cf.habilita_respaldo_fiscal ?? 1) === 1 ? 'SÍ' : 'NO'}
+                                        🧾 Respaldo: {Number(cf.habilita_respaldo_fiscal ?? 1) === 1 ? 'SÍ' : 'NO'}
                                     </button>
                                     {esActiva ? (
-                                        <button
+                                        <Button
                                             type="button"
+                                            size="sm"
+                                            variant="destructive"
                                             disabled={totalActivas <= 1 || tieneTurno}
                                             onClick={() => handleDesactivarCajaFisica(cf.id, cf.nombre)}
                                             title={totalActivas <= 1 ? 'El sistema debe mantener al menos 1 caja activa' : tieneTurno ? 'Cierra el turno antes de desactivarla' : 'Desactivar esta caja'}
-                                            style={{
-                                                fontSize: '0.75rem',
-                                                padding: '0.25rem 0.55rem',
-                                                borderRadius: '4px',
-                                                border: '1px solid #f87171',
-                                                background: totalActivas <= 1 || tieneTurno ? '#f1f5f9' : '#fee2e2',
-                                                color: totalActivas <= 1 || tieneTurno ? '#94a3b8' : '#991b1b',
-                                                cursor: totalActivas <= 1 || tieneTurno ? 'not-allowed' : 'pointer',
-                                                fontWeight: '600'
-                                            }}
+                                            className="h-6 text-[11px] px-2 bg-red-100 text-red-800 border border-red-200 hover:bg-red-200 disabled:opacity-50"
                                         >
-                                            {totalActivas <= 1 ? 'Mínimo 1 requerida' : tieneTurno ? 'Turno en curso' : 'Desactivar'}
-                                        </button>
+                                            {totalActivas <= 1 ? 'Mínimo 1' : tieneTurno ? 'En curso' : 'Desactivar'}
+                                        </Button>
                                     ) : (
-                                        <button
+                                        <Button
                                             type="button"
+                                            size="sm"
                                             onClick={() => handleReactivarCajaFisica(cf.id, cf.nombre)}
-                                            style={{
-                                                fontSize: '0.75rem',
-                                                padding: '0.25rem 0.55rem',
-                                                borderRadius: '4px',
-                                                border: '1px solid #86efac',
-                                                background: '#dcfce7',
-                                                color: '#166534',
-                                                cursor: 'pointer',
-                                                fontWeight: '600'
-                                            }}
+                                            className="h-6 text-[11px] px-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold"
                                         >
                                             Reactivar
-                                        </button>
+                                        </Button>
                                     )}
                                 </div>
                             </div>

@@ -1,14 +1,6 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import {
-    modalOverlay,
-    modalCard,
-    inputStyle,
-    btnPrimario,
-    btnSecundario,
-    btnBillete
-} from './cajaStyles';
 import { registrarVentaAction } from '../../../server/actions/ventas.actions';
 
 export default function ModalCobro({
@@ -112,6 +104,16 @@ export default function ModalCobro({
         const num = Number(valor);
         if (valor !== '' && !isNaN(num) && num >= 0 && num <= totalCarrito) {
             setMontoMixtoEfectivo(String(Number((totalCarrito - num).toFixed(2))));
+        }
+    }
+
+    function handleSeleccionarMetodoPago(nuevoMetodo) {
+        setMetodoPago(nuevoMetodo);
+        if (nuevoMetodo === 'mixto' && totalCarrito > 0) {
+            const mitadEf = Number((totalCarrito / 2).toFixed(2));
+            const mitadQr = Number((totalCarrito - mitadEf).toFixed(2));
+            setMontoMixtoEfectivo(String(mitadEf));
+            setMontoMixtoQr(String(mitadQr));
         }
     }
 
@@ -245,79 +247,57 @@ export default function ModalCobro({
     const hayCantidadInvalida = carrito.some((i) => !i.cantidad || Number(i.cantidad) <= 0);
 
     return (
-        <div style={modalOverlay}>
-            <div style={{ ...modalCard, maxWidth: '580px' }}>
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150">
+            <div className="bg-white rounded-xl shadow-2xl border border-slate-200 max-w-[580px] w-full max-h-[92vh] flex flex-col overflow-hidden">
                 {/* Cabecera del Modal */}
-                <div style={{ padding: '1rem 1.25rem', borderBottom: '1px solid #e2e8f0', background: '#f8fafc', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div className="px-5 py-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center shrink-0">
                     <div>
-                        <h3 style={{ margin: 0, fontSize: '1.25rem', color: '#0f172a' }}>
-                            💳 Cobro y Salida de Cambio
+                        <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                            <span>💳</span> Cobro y Salida de Cambio
                         </h3>
-                        <div style={{ fontSize: '0.84rem', color: '#64748b', marginTop: '0.2rem' }}>
+                        <div className="text-xs text-slate-500 mt-0.5">
                             {cajaAbierta ? `Turno #${cajaAbierta.id} • ${cajaAbierta.caja_fisica_nombre || 'Caja Principal'}` : ''}
                         </div>
                     </div>
                     <button
                         type="button"
                         onClick={onClose}
-                        style={{
-                            background: 'none',
-                            border: 'none',
-                            fontSize: '1.2rem',
-                            cursor: 'pointer',
-                            color: '#64748b',
-                            padding: '0.2rem 0.5rem',
-                            borderRadius: '4px'
-                        }}
+                        className="text-slate-400 hover:text-slate-600 hover:bg-slate-200/60 rounded-md p-1.5 transition-colors cursor-pointer text-lg leading-none"
+                        aria-label="Cerrar modal"
                     >
                         ✕
                     </button>
                 </div>
 
                 {/* Contenido / Formulario de Cobro */}
-                <form onSubmit={handleConfirmarCobro} style={{ padding: '1.25rem', overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: '0.9rem' }}>
+                <form onSubmit={handleConfirmarCobro} className="p-5 overflow-y-auto flex-1 flex flex-col gap-4 text-slate-800">
                     {/* Alerta de Error dentro del Modal */}
                     {errorLocal && (
-                        <div style={{
-                            background: '#fef2f2',
-                            border: '1px solid #f87171',
-                            borderRadius: '8px',
-                            padding: '0.85rem 1rem',
-                            color: '#991b1b',
-                            fontSize: '0.88rem'
-                        }}>
-                            <strong>⚠️ Error al procesar:</strong> {errorLocal}
+                        <div className="bg-red-50 border border-red-300 rounded-lg p-3 text-red-800 text-sm">
+                            <div className="font-semibold flex items-center gap-1.5">
+                                <span>⚠️</span>
+                                <span>Error al procesar: {errorLocal}</span>
+                            </div>
 
                             {sesionExpirada && (
-                                <div style={{ marginTop: '0.65rem', paddingTop: '0.65rem', borderTop: '1px solid #fca5a5' }}>
-                                    <div style={{ fontSize: '0.82rem', marginBottom: '0.45rem', color: '#7f1d1d' }}>
+                                <div className="mt-3 pt-3 border-t border-red-200">
+                                    <div className="text-xs text-red-900 mb-2">
                                         Ingresa el PIN de <strong>{usuarioActual?.nombre || 'tu usuario'}</strong> para restaurar la sesión y completar el cobro sin perder los productos:
                                     </div>
-                                    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                                    <div className="flex gap-2 items-center">
                                         <input
                                             type="password"
                                             placeholder="Ingresa tu PIN"
                                             value={pinReconexion}
                                             onChange={(e) => setPinReconexion(e.target.value)}
-                                            style={{
-                                                padding: '0.4rem 0.6rem',
-                                                borderRadius: '6px',
-                                                border: '1px solid #dc2626',
-                                                fontSize: '0.9rem',
-                                                flex: 1
-                                            }}
+                                            className="flex-1 px-3 py-1.5 rounded-md border border-red-400 text-sm bg-white focus:outline-hidden focus:ring-2 focus:ring-red-400"
                                             autoFocus
                                         />
                                         <button
                                             type="button"
                                             onClick={handleReautenticarYCobrar}
                                             disabled={reautenticando}
-                                            style={{
-                                                ...btnPrimario,
-                                                padding: '0.4rem 0.85rem',
-                                                fontSize: '0.85rem',
-                                                background: '#16a34a'
-                                            }}
+                                            className="px-3.5 py-1.5 text-xs font-semibold rounded-md bg-emerald-600 hover:bg-emerald-700 text-white transition-colors cursor-pointer disabled:opacity-60"
                                         >
                                             {reautenticando ? 'Reconectando...' : 'Reanudar y Cobrar'}
                                         </button>
@@ -326,29 +306,38 @@ export default function ModalCobro({
                             )}
                         </div>
                     )}
+
                     {/* CASILLAS SUPERIORES: TOTAL / CAMBIO REACTIVO */}
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-                        <div style={{ background: '#eff6ff', border: '2px solid #3b82f6', borderRadius: '8px', padding: '0.75rem' }}>
-                            <div style={{ fontSize: '0.78rem', color: '#1d4ed8', fontWeight: 'bold', textTransform: 'uppercase' }}>
-                                Total a Cobrar
-                            </div>
-                            <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#1e3a8a', marginTop: '0.2rem' }}>
-                                Bs {totalCarrito.toFixed(2)}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div className="bg-blue-50/80 border-2 border-blue-500 rounded-xl p-3.5 flex flex-col justify-between">
+                            <div>
+                                <div className="text-xs font-bold text-blue-700 uppercase tracking-wide">
+                                    Total a Cobrar
+                                </div>
+                                <div className="text-2xl font-black text-blue-950 mt-0.5">
+                                    Bs {totalCarrito.toFixed(2)}
+                                </div>
                             </div>
                             {descuentoAplicadoNum > 0 && !descuentoInvalido && (
-                                <div style={{ fontSize: '0.74rem', color: '#475569', marginTop: '0.15rem' }}>
-                                    Sub: Bs {subtotalBrutoCarrito.toFixed(2)} | <span style={{ color: '#dc2626', fontWeight: 600 }}>Desc: -Bs {descuentoAplicadoNum.toFixed(2)}</span>
+                                <div className="text-xs text-slate-600 mt-1.5 flex items-center gap-1.5 flex-wrap">
+                                    <span>Sub: Bs {subtotalBrutoCarrito.toFixed(2)}</span>
+                                    <span className="text-red-600 font-semibold bg-red-100/70 px-1.5 py-0.5 rounded text-[11px]">
+                                        Desc: -Bs {descuentoAplicadoNum.toFixed(2)}
+                                    </span>
                                 </div>
                             )}
                         </div>
 
-                        <div style={{
-                            background: (metodoPago === 'efectivo' || metodoPago === 'mixto') ? (faltaDineroRecibido ? '#fef2f2' : '#f0fdf4') : '#f8fafc',
-                            border: `2px solid ${(metodoPago === 'efectivo' || metodoPago === 'mixto') ? (faltaDineroRecibido ? '#ef4444' : '#22c55e') : '#cbd5e1'}`,
-                            borderRadius: '8px',
-                            padding: '0.75rem'
-                        }}>
-                            <div style={{ fontSize: '0.78rem', color: faltaDineroRecibido ? '#b91c1c' : '#15803d', fontWeight: 'bold', textTransform: 'uppercase' }}>
+                        <div className={`border-2 rounded-xl p-3.5 flex flex-col justify-between transition-colors ${
+                            (metodoPago === 'efectivo' || metodoPago === 'mixto')
+                                ? (faltaDineroRecibido ? 'bg-red-50/80 border-red-400' : 'bg-emerald-50/80 border-emerald-500')
+                                : 'bg-slate-50 border-slate-300'
+                        }`}>
+                            <div className={`text-xs font-bold uppercase tracking-wide ${
+                                (metodoPago === 'efectivo' || metodoPago === 'mixto')
+                                    ? (faltaDineroRecibido ? 'text-red-700' : 'text-emerald-700')
+                                    : 'text-slate-500'
+                            }`}>
                                 {(metodoPago === 'efectivo' || metodoPago === 'mixto') ? 'Cambio que Sale de Caja (Bs)' : 'Pago QR (Sin Cambio)'}
                             </div>
                             {(metodoPago === 'efectivo' || metodoPago === 'mixto') ? (
@@ -359,21 +348,10 @@ export default function ModalCobro({
                                     placeholder="0.00"
                                     value={cambioManual}
                                     onChange={(e) => setCambioManual(e.target.value)}
-                                    style={{
-                                        width: '100%',
-                                        marginTop: '0.35rem',
-                                        padding: '0.45rem 0.6rem',
-                                        fontSize: '1.25rem',
-                                        fontWeight: 'bold',
-                                        color: '#166534',
-                                        border: '2px solid #16a34a',
-                                        borderRadius: '6px',
-                                        background: '#fff',
-                                        boxSizing: 'border-box'
-                                    }}
+                                    className="w-full mt-1 px-3 py-1 text-2xl font-black text-emerald-800 border-2 border-emerald-500 rounded-lg bg-white focus:outline-hidden focus:ring-2 focus:ring-emerald-400"
                                 />
                             ) : (
-                                <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#64748b', marginTop: '0.2rem' }}>
+                                <div className="text-2xl font-black text-slate-400 mt-1">
                                     Bs 0.00
                                 </div>
                             )}
@@ -381,9 +359,9 @@ export default function ModalCobro({
                     </div>
 
                     {/* Descuento sobre el Ticket */}
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.6rem' }}>
-                        <label style={{ fontSize: '0.84rem', fontWeight: 'bold' }}>
-                            🏷️ Descuento Ticket (Bs, Opcional):
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-end">
+                        <label className="text-xs font-bold text-slate-700 flex flex-col gap-1">
+                            <span>🏷️ Descuento Ticket (Bs, Opcional):</span>
                             <input
                                 type="number"
                                 step="0.01"
@@ -402,69 +380,96 @@ export default function ModalCobro({
                                         setMontoMixtoQr(String(mitadQr));
                                     }
                                 }}
-                                style={{
-                                    ...inputStyle,
-                                    borderColor: descuentoInvalido ? '#ef4444' : '#cbd5e1',
-                                    background: descuentoInvalido ? '#fef2f2' : '#fff'
-                                }}
+                                className={`w-full px-3 py-2 rounded-lg border text-sm transition-colors focus:outline-hidden focus:ring-2 ${
+                                    descuentoInvalido
+                                        ? 'border-red-400 bg-red-50 text-red-900 focus:ring-red-300'
+                                        : 'border-slate-300 bg-white text-slate-800 focus:ring-blue-400'
+                                }`}
                             />
                         </label>
-                        <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', fontSize: '0.78rem', color: descuentoInvalido ? '#b91c1c' : '#64748b', paddingBottom: '0.35rem' }}>
+                        <div className="text-xs pb-2">
                             {descuentoInvalido ? (
-                                <strong>⚠️ El descuento debe ser menor al subtotal (Bs {subtotalBrutoCarrito.toFixed(2)}).</strong>
+                                <span className="font-semibold text-red-600">
+                                    ⚠️ El descuento debe ser menor al subtotal (Bs {subtotalBrutoCarrito.toFixed(2)}).
+                                </span>
                             ) : (
-                                <span>Subtotal bruto: <strong>Bs {subtotalBrutoCarrito.toFixed(2)}</strong></span>
+                                <span className="text-slate-500">
+                                    Subtotal bruto: <strong className="text-slate-700">Bs {subtotalBrutoCarrito.toFixed(2)}</strong>
+                                </span>
                             )}
                         </div>
                     </div>
 
-                    {/* Método de Pago y Billete Recibido */}
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.6rem' }}>
-                        <label style={{ fontSize: '0.88rem', fontWeight: 'bold' }}>
+                    {/* Selector de Método de Pago con Pestañas / Tabs */}
+                    <div className="space-y-1.5">
+                        <span className="text-xs font-bold text-slate-700 block">
                             Método de Pago:
-                            <select
-                                value={metodoPago}
-                                onChange={(e) => {
-                                    const nuevoMetodo = e.target.value;
-                                    setMetodoPago(nuevoMetodo);
-                                    if (nuevoMetodo === 'mixto' && totalCarrito > 0) {
-                                        const mitadEf = Number((totalCarrito / 2).toFixed(2));
-                                        const mitadQr = Number((totalCarrito - mitadEf).toFixed(2));
-                                        setMontoMixtoEfectivo(String(mitadEf));
-                                        setMontoMixtoQr(String(mitadQr));
-                                    }
-                                }}
-                                style={inputStyle}
+                        </span>
+                        <div className="grid grid-cols-3 gap-1.5 p-1 bg-slate-100 rounded-lg border border-slate-200">
+                            <button
+                                type="button"
+                                onClick={() => handleSeleccionarMetodoPago('efectivo')}
+                                className={`py-2 px-2 text-xs sm:text-sm font-bold rounded-md transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                                    metodoPago === 'efectivo'
+                                        ? 'bg-white shadow-xs text-blue-700 border border-slate-200/80'
+                                        : 'text-slate-600 hover:text-slate-900'
+                                }`}
                             >
-                                <option value="efectivo">💵 Efectivo Físico</option>
-                                <option value="qr">📱 Pago por QR</option>
-                                <option value="mixto">🔀 Pago Mixto (Efectivo + QR)</option>
-                            </select>
-                        </label>
+                                <span>💵</span>
+                                <span>Efectivo</span>
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => handleSeleccionarMetodoPago('qr')}
+                                className={`py-2 px-2 text-xs sm:text-sm font-bold rounded-md transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                                    metodoPago === 'qr'
+                                        ? 'bg-white shadow-xs text-blue-700 border border-slate-200/80'
+                                        : 'text-slate-600 hover:text-slate-900'
+                                }`}
+                            >
+                                <span>📱</span>
+                                <span>QR</span>
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => handleSeleccionarMetodoPago('mixto')}
+                                className={`py-2 px-2 text-xs sm:text-sm font-bold rounded-md transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                                    metodoPago === 'mixto'
+                                        ? 'bg-white shadow-xs text-blue-700 border border-slate-200/80'
+                                        : 'text-slate-600 hover:text-slate-900'
+                                }`}
+                            >
+                                <span>🔀</span>
+                                <span>Mixto</span>
+                            </button>
+                        </div>
+                    </div>
 
+                    {/* Inputs según Método de Pago */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-end">
                         {(metodoPago === 'efectivo' || metodoPago === 'mixto') && (
-                            <label style={{ fontSize: '0.88rem', fontWeight: 'bold' }}>
-                                Billete Recibido (Opcional):
+                            <label className="text-xs font-bold text-slate-700 flex flex-col gap-1 sm:col-span-2">
+                                <span>Billete Recibido (Opcional):</span>
                                 <input
                                     type="number"
                                     step="0.01"
                                     placeholder={`Ej. ${montoEfectivoRequerido.toFixed(2)}`}
                                     value={montoRecibido}
                                     onChange={(e) => handleChangeMontoRecibido(e.target.value)}
-                                    style={{ ...inputStyle, fontWeight: 'bold', borderColor: '#0070f3' }}
+                                    className="w-full px-3 py-2 rounded-lg border-2 border-blue-400 bg-white text-base font-bold text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-blue-300"
                                 />
                             </label>
                         )}
 
                         {metodoPago === 'qr' && (
-                            <label style={{ fontSize: '0.88rem', fontWeight: 'bold' }}>
-                                N° Ref. / Comprobante QR:
+                            <label className="text-xs font-bold text-slate-700 flex flex-col gap-1 sm:col-span-2">
+                                <span>N° Ref. / Comprobante QR:</span>
                                 <input
                                     type="text"
                                     placeholder="Ej. 849201"
                                     value={referenciaQr}
                                     onChange={(e) => setReferenciaQr(e.target.value)}
-                                    style={inputStyle}
+                                    className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-sm text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-blue-400"
                                 />
                             </label>
                         )}
@@ -472,15 +477,21 @@ export default function ModalCobro({
 
                     {/* Botones rápidos de billetes en efectivo */}
                     {(metodoPago === 'efectivo' || metodoPago === 'mixto') && montoEfectivoRequerido > 0 && (
-                        <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', alignItems: 'center' }}>
-                            <span style={{ fontSize: '0.78rem', color: '#64748b', fontWeight: 600 }}>Billetes rápidos:</span>
-                            <button type="button" onClick={() => handleChangeMontoRecibido(String(montoEfectivoRequerido))} style={btnBillete}>Exacto</button>
+                        <div className="flex gap-1.5 flex-wrap items-center">
+                            <span className="text-xs text-slate-500 font-semibold">Billetes rápidos:</span>
+                            <button
+                                type="button"
+                                onClick={() => handleChangeMontoRecibido(String(montoEfectivoRequerido))}
+                                className="px-2.5 py-1 rounded-md text-xs font-bold bg-blue-50 border border-blue-200 text-blue-700 hover:bg-blue-100 hover:border-blue-300 transition-colors cursor-pointer"
+                            >
+                                Exacto
+                            </button>
                             {[10, 20, 50, 100, 200].map((billete) => (
                                 <button
                                     key={billete}
                                     type="button"
                                     onClick={() => handleChangeMontoRecibido(String(billete))}
-                                    style={btnBillete}
+                                    className="px-2.5 py-1 rounded-md text-xs font-bold bg-blue-50 border border-blue-200 text-blue-700 hover:bg-blue-100 hover:border-blue-300 transition-colors cursor-pointer"
                                 >
                                     Bs {billete}
                                 </button>
@@ -490,13 +501,14 @@ export default function ModalCobro({
 
                     {/* Desglose de Pago Mixto */}
                     {metodoPago === 'mixto' && (
-                        <div style={{ background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '8px', padding: '0.7rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                            <div style={{ fontSize: '0.8rem', fontWeight: 'bold', color: '#0f172a' }}>
-                                🔀 Desglose de Pago Mixto (Total: Bs {totalCarrito.toFixed(2)})
+                        <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 flex flex-col gap-3">
+                            <div className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                                <span>🔀</span>
+                                <span>Desglose de Pago Mixto (Total: Bs {totalCarrito.toFixed(2)})</span>
                             </div>
-                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.6rem' }}>
-                                <label style={{ fontSize: '0.82rem', fontWeight: 600 }}>
-                                    💵 Parte en Efectivo (Bs):
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                <label className="text-xs font-semibold text-slate-700 flex flex-col gap-1">
+                                    <span>💵 Parte en Efectivo (Bs):</span>
                                     <input
                                         type="number"
                                         step="0.01"
@@ -504,11 +516,11 @@ export default function ModalCobro({
                                         required
                                         value={montoMixtoEfectivo}
                                         onChange={(e) => handleChangeMixtoEfectivo(e.target.value)}
-                                        style={{ ...inputStyle, borderColor: '#16a34a', fontWeight: 'bold' }}
+                                        className="w-full px-3 py-2 rounded-lg border-2 border-emerald-500 font-bold text-slate-800 text-sm bg-white focus:outline-hidden focus:ring-2 focus:ring-emerald-300"
                                     />
                                 </label>
-                                <label style={{ fontSize: '0.82rem', fontWeight: 600 }}>
-                                    📱 Parte por QR (Bs):
+                                <label className="text-xs font-semibold text-slate-700 flex flex-col gap-1">
+                                    <span>📱 Parte por QR (Bs):</span>
                                     <input
                                         type="number"
                                         step="0.01"
@@ -516,22 +528,22 @@ export default function ModalCobro({
                                         required
                                         value={montoMixtoQr}
                                         onChange={(e) => handleChangeMixtoQr(e.target.value)}
-                                        style={{ ...inputStyle, borderColor: '#0284c7', fontWeight: 'bold' }}
+                                        className="w-full px-3 py-2 rounded-lg border-2 border-sky-500 font-bold text-slate-800 text-sm bg-white focus:outline-hidden focus:ring-2 focus:ring-sky-300"
                                     />
                                 </label>
                             </div>
-                            <label style={{ fontSize: '0.8rem' }}>
-                                N° Ref. / Comprobante QR (Opcional):
+                            <label className="text-xs text-slate-700 flex flex-col gap-1">
+                                <span>N° Ref. / Comprobante QR (Opcional):</span>
                                 <input
                                     type="text"
                                     placeholder="Código de transacción bancaria QR..."
                                     value={referenciaQr}
                                     onChange={(e) => setReferenciaQr(e.target.value)}
-                                    style={inputStyle}
+                                    className="w-full px-3 py-1.5 rounded-lg border border-slate-300 text-sm bg-white focus:outline-hidden focus:ring-2 focus:ring-blue-400"
                                 />
                             </label>
                             {mixtoDescuadrado && totalCarrito > 0 && (
-                                <div style={{ fontSize: '0.78rem', color: '#b91c1c', fontWeight: 'bold' }}>
+                                <div className="text-xs font-bold text-red-600">
                                     ⚠️ Efectivo + QR suma Bs {(montoEfectivoRequerido + montoQrRequerido).toFixed(2)} (debe sumar Bs {totalCarrito.toFixed(2)}).
                                 </div>
                             )}
@@ -543,24 +555,25 @@ export default function ModalCobro({
                         Number(configuracionNegocio?.emite_factura) === 1 &&
                         Number(usuarioActual?.puede_registrar_respaldo_fiscal ?? 1) === 1 &&
                         Number(cajaAbierta?.habilita_respaldo_fiscal ?? 1) === 1 && (
-                        <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '0.55rem 0.7rem' }}>
-                            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.84rem', fontWeight: 600, cursor: 'pointer', color: '#1e293b' }}>
+                        <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-2.5">
+                            <label className="flex items-center gap-2 text-xs font-bold text-slate-800 cursor-pointer">
                                 <input
                                     type="checkbox"
                                     checked={conFacturaVenta}
                                     onChange={(e) => setConFacturaVenta(e.target.checked)}
+                                    className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 h-4 w-4"
                                 />
-                                🧾 Registrar con Factura / Datos Fiscales del Cliente
+                                <span>🧾 Registrar con Factura / Datos Fiscales del Cliente</span>
                             </label>
                             {conFacturaVenta && (
-                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', marginTop: '0.5rem' }}>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
                                     <input
                                         type="text"
                                         required
                                         placeholder="NIT / CI del cliente"
                                         value={nitClienteVenta}
                                         onChange={(e) => setNitClienteVenta(e.target.value)}
-                                        style={{ ...inputStyle, marginTop: 0, fontSize: '0.82rem', padding: '0.4rem' }}
+                                        className="w-full px-3 py-1.5 rounded-lg border border-slate-300 text-xs bg-white focus:outline-hidden focus:ring-2 focus:ring-blue-400"
                                     />
                                     <input
                                         type="text"
@@ -568,14 +581,14 @@ export default function ModalCobro({
                                         placeholder="N° Factura (ej. 104)"
                                         value={nroFacturaVenta}
                                         onChange={(e) => setNroFacturaVenta(e.target.value)}
-                                        style={{ ...inputStyle, marginTop: 0, fontSize: '0.82rem', padding: '0.4rem' }}
+                                        className="w-full px-3 py-1.5 rounded-lg border border-slate-300 text-xs bg-white focus:outline-hidden focus:ring-2 focus:ring-blue-400"
                                     />
                                     <input
                                         type="text"
                                         placeholder="Nombre / Razón Social del cliente"
                                         value={razonSocialVenta}
                                         onChange={(e) => setRazonSocialVenta(e.target.value)}
-                                        style={{ ...inputStyle, marginTop: 0, fontSize: '0.82rem', padding: '0.4rem', gridColumn: '1 / -1' }}
+                                        className="w-full px-3 py-1.5 rounded-lg border border-slate-300 text-xs bg-white sm:col-span-2 focus:outline-hidden focus:ring-2 focus:ring-blue-400"
                                     />
                                 </div>
                             )}
@@ -583,23 +596,18 @@ export default function ModalCobro({
                     )}
 
                     {/* Botones de Acción */}
-                    <div style={{ display: 'flex', gap: '0.6rem', marginTop: '0.5rem', justifyContent: 'flex-end' }}>
+                    <div className="flex gap-2.5 pt-2 border-t border-slate-200 justify-end items-center shrink-0">
                         <button
                             type="button"
                             onClick={onClose}
-                            style={{ ...btnSecundario, padding: '0.65rem 1rem' }}
+                            className="px-4 py-2 text-sm font-semibold rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors cursor-pointer"
                         >
                             Cancelar
                         </button>
                         <button
                             type="submit"
                             disabled={guardando || carrito.length === 0 || faltaDineroRecibido || hayCantidadInvalida || mixtoDescuadrado || descuentoInvalido}
-                            style={{
-                                ...btnPrimario,
-                                padding: '0.65rem 1.4rem',
-                                opacity: (guardando || carrito.length === 0 || faltaDineroRecibido || hayCantidadInvalida || mixtoDescuadrado || descuentoInvalido) ? 0.6 : 1,
-                                cursor: (guardando || carrito.length === 0 || faltaDineroRecibido || hayCantidadInvalida || mixtoDescuadrado || descuentoInvalido) ? 'not-allowed' : 'pointer'
-                            }}
+                            className="px-5 py-2 text-sm font-bold rounded-lg bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white shadow-xs transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                             {guardando ? 'Procesando...' : `Confirmar Cobro (${metodoPago.toUpperCase()})`}
                         </button>

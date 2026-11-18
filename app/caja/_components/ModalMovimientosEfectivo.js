@@ -2,15 +2,6 @@
 
 import { useState, useEffect } from 'react';
 import {
-    modalOverlay,
-    modalCard,
-    cardStyle,
-    inputStyle,
-    btnPrimario,
-    btnOscuro,
-    btnSecundario
-} from './cajaStyles';
-import {
     registrarEgresoAction,
     registrarIngresoEfectivoAction
 } from '../../../server/actions/ventas.actions';
@@ -145,52 +136,44 @@ export default function ModalMovimientosEfectivo({
     }
 
     const contenidoFormulario = (
-        <div>
+        <div className="space-y-4">
             {/* Pestañas para alternar entre Ingreso y Egreso */}
-            <div style={{ display: 'flex', gap: '0.4rem', marginBottom: '1.2rem', borderBottom: '1px solid #e2e8f0', paddingBottom: '0.5rem' }}>
+            <div className="flex gap-1.5 p-1 bg-slate-100 rounded-lg border border-slate-200">
                 <button
                     type="button"
                     onClick={() => { if (typeof onLimpiarAlertas === 'function') onLimpiarAlertas(); setPestaña('ingreso'); }}
-                    style={{
-                        padding: '0.45rem 0.9rem',
-                        borderRadius: '6px',
-                        border: 'none',
-                        background: pestaña === 'ingreso' ? '#0284c7' : '#f1f5f9',
-                        color: pestaña === 'ingreso' ? '#ffffff' : '#475569',
-                        fontWeight: pestaña === 'ingreso' ? 'bold' : 500,
-                        cursor: 'pointer',
-                        fontSize: '0.88rem'
-                    }}
+                    className={`flex-1 py-2 px-3 text-xs sm:text-sm font-bold rounded-md transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                        pestaña === 'ingreso'
+                            ? 'bg-white shadow-xs text-sky-700 border border-slate-200/80'
+                            : 'text-slate-600 hover:text-slate-900'
+                    }`}
                 >
-                    📥 Ingreso de Sencillo
+                    <span>📥</span>
+                    <span>Ingreso de Sencillo</span>
                 </button>
                 <button
                     type="button"
                     onClick={() => { if (typeof onLimpiarAlertas === 'function') onLimpiarAlertas(); setPestaña('egreso'); }}
-                    style={{
-                        padding: '0.45rem 0.9rem',
-                        borderRadius: '6px',
-                        border: 'none',
-                        background: pestaña === 'egreso' ? '#0284c7' : '#f1f5f9',
-                        color: pestaña === 'egreso' ? '#ffffff' : '#475569',
-                        fontWeight: pestaña === 'egreso' ? 'bold' : 500,
-                        cursor: 'pointer',
-                        fontSize: '0.88rem'
-                    }}
+                    className={`flex-1 py-2 px-3 text-xs sm:text-sm font-bold rounded-md transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                        pestaña === 'egreso'
+                            ? 'bg-white shadow-xs text-sky-700 border border-slate-200/80'
+                            : 'text-slate-600 hover:text-slate-900'
+                    }`}
                 >
-                    💸 Salida / Egreso
+                    <span>💸</span>
+                    <span>Salida / Egreso</span>
                 </button>
             </div>
 
             {pestaña === 'ingreso' ? (
-                <div>
-                    <p style={{ color: '#555', fontSize: '0.88rem', margin: '0 0 1rem' }}>
+                <div className="space-y-4">
+                    <p className="p-3 bg-sky-50 border border-sky-200 rounded-lg text-xs text-sky-950 leading-relaxed m-0">
                         Usa esta opción cuando el dueño o administrador entregue billetes o monedas adicionales a la caja para tener cambio disponible.
                         Este monto <strong>se suma al dinero esperado en el cajón</strong>, pero <strong>no cuenta como venta de productos</strong>.
                     </p>
-                    <form onSubmit={handleRegistrarIngreso} style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
-                        <label style={{ fontSize: '0.88rem', fontWeight: 600 }}>
-                            Monto en Efectivo que Entra al Cajón (Bs):
+                    <form onSubmit={handleRegistrarIngreso} className="space-y-3.5 text-slate-800">
+                        <label className="text-xs font-bold text-slate-700 flex flex-col gap-1">
+                            <span>Monto en Efectivo que Entra al Cajón (Bs):</span>
                             <input
                                 type="number"
                                 step="0.01"
@@ -199,35 +182,34 @@ export default function ModalMovimientosEfectivo({
                                 placeholder="Ej. 200.00"
                                 value={montoIngresoEfectivo}
                                 onChange={(e) => setMontoIngresoEfectivo(e.target.value)}
-                                style={inputStyle}
+                                className="w-full px-3 py-2 rounded-lg border-2 border-emerald-400 bg-white text-base font-bold text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-emerald-300"
                             />
                         </label>
-                        <label style={{ fontSize: '0.88rem', fontWeight: 600 }}>
-                            Motivo Obligatorio (Justificación):
+                        <label className="text-xs font-bold text-slate-700 flex flex-col gap-1">
+                            <span>Motivo Obligatorio (Justificación):</span>
                             <input
                                 type="text"
                                 required
                                 placeholder="Ej. Aporte del director para sencillo, cambio de billetes grandes..."
                                 value={motivoIngresoEfectivo}
                                 onChange={(e) => setMotivoIngresoEfectivo(e.target.value)}
-                                style={inputStyle}
+                                className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-sm text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-blue-400"
                             />
                         </label>
-                        <div style={{ display: 'flex', gap: '0.6rem', marginTop: '0.5rem', justifyContent: 'flex-end' }}>
+                        <div className="flex gap-2.5 pt-2 border-t border-slate-200 justify-end items-center">
                             {isModal && onClose && (
-                                <button type="button" onClick={onClose} style={{ ...btnSecundario, padding: '0.65rem 1rem' }}>
+                                <button
+                                    type="button"
+                                    onClick={onClose}
+                                    className="px-4 py-2 text-sm font-semibold rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors cursor-pointer"
+                                >
                                     Cancelar
                                 </button>
                             )}
                             <button
                                 type="submit"
                                 disabled={guardando}
-                                style={{
-                                    ...btnPrimario,
-                                    padding: '0.65rem 1.2rem',
-                                    opacity: guardando ? 0.6 : 1,
-                                    cursor: guardando ? 'not-allowed' : 'pointer'
-                                }}
+                                className="px-5 py-2 text-sm font-bold rounded-lg bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white shadow-xs transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
                             >
                                 {guardando ? 'Guardando...' : 'Confirmar Entrada de Efectivo'}
                             </button>
@@ -235,13 +217,13 @@ export default function ModalMovimientosEfectivo({
                     </form>
                 </div>
             ) : (
-                <div>
-                    <p style={{ color: '#555', fontSize: '0.88rem', margin: '0 0 1rem' }}>
+                <div className="space-y-4">
+                    <p className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-950 leading-relaxed m-0">
                         Registra aquí cualquier salida de efectivo autorizada para gastos operativos del día (deja siempre el recibo o comprobante físico dentro del cajón).
                     </p>
-                    <form onSubmit={handleRegistrarEgreso} style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
-                        <label style={{ fontSize: '0.88rem', fontWeight: 600 }}>
-                            Monto que sale de Caja (Bs):
+                    <form onSubmit={handleRegistrarEgreso} className="space-y-3.5 text-slate-800">
+                        <label className="text-xs font-bold text-slate-700 flex flex-col gap-1">
+                            <span>Monto que sale de Caja (Bs):</span>
                             <input
                                 type="number"
                                 step="0.01"
@@ -250,27 +232,35 @@ export default function ModalMovimientosEfectivo({
                                 placeholder="0.00"
                                 value={montoEgreso}
                                 onChange={(e) => setMontoEgreso(e.target.value)}
-                                style={inputStyle}
+                                className="w-full px-3 py-2 rounded-lg border-2 border-slate-400 bg-white text-base font-bold text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-blue-400"
                             />
                         </label>
 
                         {usuarioActual?.rol === 'user' ? (
-                            <div style={{ fontSize: '0.85rem', color: '#374151', background: '#f3f4f6', padding: '0.65rem', borderRadius: '6px' }}>
+                            <div className="text-xs text-slate-700 bg-slate-100 border border-slate-200 px-3 py-2 rounded-lg">
                                 Modalidad: <strong>Efectivo Físico del Cajón</strong>
                             </div>
                         ) : (
-                            <label style={{ fontSize: '0.88rem', fontWeight: 600 }}>
-                                Método de Salida:
-                                <select value={metodoEgreso} onChange={(e) => setMetodoEgreso(e.target.value)} style={inputStyle}>
+                            <label className="text-xs font-bold text-slate-700 flex flex-col gap-1">
+                                <span>Método de Salida:</span>
+                                <select
+                                    value={metodoEgreso}
+                                    onChange={(e) => setMetodoEgreso(e.target.value)}
+                                    className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-sm text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-blue-400"
+                                >
                                     <option value="efectivo">Efectivo del Cajón</option>
                                     <option value="qr">Transferencia / QR (Solo Admin)</option>
                                 </select>
                             </label>
                         )}
 
-                        <label style={{ fontSize: '0.88rem', fontWeight: 600 }}>
-                            Categoría Contable de la Salida:
-                            <select value={categoriaEgreso} onChange={(e) => setCategoriaEgreso(e.target.value)} style={inputStyle}>
+                        <label className="text-xs font-bold text-slate-700 flex flex-col gap-1">
+                            <span>Categoría Contable de la Salida:</span>
+                            <select
+                                value={categoriaEgreso}
+                                onChange={(e) => setCategoriaEgreso(e.target.value)}
+                                className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-sm text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-blue-400"
+                            >
                                 <option value="gasto_operativo">🧹 Gasto Operativo Menor (Hielo, limpieza, transporte...)</option>
                                 <option value="compra_insumo">🧱 Compra Urgente de Insumo / Mercadería</option>
                                 <option value="pago_proveedor">🚚 Pago a Proveedor / Distribuidora</option>
@@ -282,10 +272,14 @@ export default function ModalMovimientosEfectivo({
                         {(Number(configuracionNegocio?.usa_respaldo_compras_egresos ?? 1) === 1 &&
                             Number(usuarioActual?.puede_registrar_respaldo_fiscal ?? 1) === 1 &&
                             Number(cajaAbierta?.habilita_respaldo_fiscal ?? 1) === 1) && (
-                            <div style={{ background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '8px', padding: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
-                                <label style={{ fontSize: '0.88rem', fontWeight: 'bold' }}>
-                                    🧾 Tipo de Respaldo Contable:
-                                    <select value={tipoComprobanteEgreso} onChange={(e) => setTipoComprobanteEgreso(e.target.value)} style={inputStyle}>
+                            <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-2.5">
+                                <label className="text-xs font-bold text-slate-700 flex flex-col gap-1">
+                                    <span>🧾 Tipo de Respaldo Contable:</span>
+                                    <select
+                                        value={tipoComprobanteEgreso}
+                                        onChange={(e) => setTipoComprobanteEgreso(e.target.value)}
+                                        className="w-full px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-sm text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-blue-400"
+                                    >
                                         <option value="recibo">Recibo / Nota de Venta Interna</option>
                                         <option value="factura">Factura Fiscal (Crédito Fiscal IVA)</option>
                                         <option value="sin_respaldo">Sin Comprobante Físico</option>
@@ -296,17 +290,17 @@ export default function ModalMovimientosEfectivo({
                                     placeholder="Nombre del Proveedor / Comercio (Opcional)"
                                     value={nombreProveedorEgreso}
                                     onChange={(e) => setNombreProveedorEgreso(e.target.value)}
-                                    style={{ ...inputStyle, marginTop: 0 }}
+                                    className="w-full px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-xs text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-blue-400"
                                 />
                                 {tipoComprobanteEgreso === 'factura' && (
-                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
                                         <input
                                             type="text"
                                             required
                                             placeholder="NIT del Proveedor"
                                             value={nitProveedorEgreso}
                                             onChange={(e) => setNitProveedorEgreso(e.target.value)}
-                                            style={{ ...inputStyle, marginTop: 0 }}
+                                            className="w-full px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-xs text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-blue-400"
                                         />
                                         <input
                                             type="text"
@@ -314,40 +308,39 @@ export default function ModalMovimientosEfectivo({
                                             placeholder="N° de Factura"
                                             value={nroFacturaEgreso}
                                             onChange={(e) => setNroFacturaEgreso(e.target.value)}
-                                            style={{ ...inputStyle, marginTop: 0 }}
+                                            className="w-full px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-xs text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-blue-400"
                                         />
                                     </div>
                                 )}
                             </div>
                         )}
 
-                        <label style={{ fontSize: '0.88rem', fontWeight: 600 }}>
-                            Motivo Obligatorio:
+                        <label className="text-xs font-bold text-slate-700 flex flex-col gap-1">
+                            <span>Motivo Obligatorio:</span>
                             <input
                                 type="text"
                                 required
                                 placeholder="Ej. Compra de hielo, botellón de agua, bolsas..."
                                 value={motivoEgreso}
                                 onChange={(e) => setMotivoEgreso(e.target.value)}
-                                style={inputStyle}
+                                className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-sm text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-blue-400"
                             />
                         </label>
 
-                        <div style={{ display: 'flex', gap: '0.6rem', marginTop: '0.5rem', justifyContent: 'flex-end' }}>
+                        <div className="flex gap-2.5 pt-2 border-t border-slate-200 justify-end items-center">
                             {isModal && onClose && (
-                                <button type="button" onClick={onClose} style={{ ...btnSecundario, padding: '0.65rem 1rem' }}>
+                                <button
+                                    type="button"
+                                    onClick={onClose}
+                                    className="px-4 py-2 text-sm font-semibold rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors cursor-pointer"
+                                >
                                     Cancelar
                                 </button>
                             )}
                             <button
                                 type="submit"
                                 disabled={guardando}
-                                style={{
-                                    ...btnOscuro,
-                                    padding: '0.65rem 1.2rem',
-                                    opacity: guardando ? 0.6 : 1,
-                                    cursor: guardando ? 'not-allowed' : 'pointer'
-                                }}
+                                className="px-5 py-2 text-sm font-bold rounded-lg bg-slate-900 hover:bg-slate-800 active:bg-black text-white shadow-xs transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
                             >
                                 {guardando ? 'Guardando...' : 'Confirmar Salida de Efectivo'}
                             </button>
@@ -360,14 +353,15 @@ export default function ModalMovimientosEfectivo({
 
     if (isModal) {
         return (
-            <div style={modalOverlay}>
-                <div style={{ ...modalCard, maxWidth: '540px' }}>
-                    <div style={{ padding: '1rem 1.25rem', borderBottom: '1px solid #e2e8f0', background: '#f8fafc', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150">
+                <div className="bg-white rounded-xl shadow-2xl border border-slate-200 max-w-[540px] w-full max-h-[92vh] flex flex-col overflow-hidden">
+                    <div className="px-5 py-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center shrink-0">
                         <div>
-                            <h3 style={{ margin: 0, fontSize: '1.2rem', color: '#0f172a' }}>
-                                {pestaña === 'ingreso' ? '📥 Ingresar Efectivo / Sencillo' : '💸 Registrar Egreso de Caja'}
+                            <h3 className="text-lg font-bold text-slate-900 flex items-center gap-1.5">
+                                <span>{pestaña === 'ingreso' ? '📥' : '💸'}</span>
+                                <span>{pestaña === 'ingreso' ? 'Ingresar Efectivo / Sencillo' : 'Registrar Egreso de Caja'}</span>
                             </h3>
-                            <div style={{ fontSize: '0.82rem', color: '#64748b', marginTop: '0.2rem' }}>
+                            <div className="text-xs text-slate-500 mt-0.5">
                                 Turno #{cajaAbierta?.id} • {cajaAbierta?.caja_fisica_nombre || 'Principal'}
                             </div>
                         </div>
@@ -375,21 +369,14 @@ export default function ModalMovimientosEfectivo({
                             <button
                                 type="button"
                                 onClick={onClose}
-                                style={{
-                                    background: 'none',
-                                    border: 'none',
-                                    fontSize: '1.2rem',
-                                    cursor: 'pointer',
-                                    color: '#64748b',
-                                    padding: '0.2rem 0.5rem',
-                                    borderRadius: '4px'
-                                }}
+                                className="text-slate-400 hover:text-slate-600 hover:bg-slate-200/60 rounded-md p-1.5 transition-colors cursor-pointer text-lg leading-none"
+                                aria-label="Cerrar modal"
                             >
                                 ✕
                             </button>
                         )}
                     </div>
-                    <div style={{ padding: '1.25rem' }}>
+                    <div className="p-5 overflow-y-auto">
                         {contenidoFormulario}
                     </div>
                 </div>
@@ -398,9 +385,10 @@ export default function ModalMovimientosEfectivo({
     }
 
     return (
-        <section style={{ ...cardStyle, maxWidth: '540px' }}>
-            <h2 style={{ marginTop: 0 }}>
-                {pestaña === 'ingreso' ? '📥 Ingresar Efectivo / Sencillo' : '💸 Registrar Egreso de Caja'}
+        <section className="bg-white rounded-xl border border-slate-200 shadow-xs p-6 max-w-[540px]">
+            <h2 className="text-lg font-bold text-slate-900 mb-4 flex items-center gap-1.5">
+                <span>{pestaña === 'ingreso' ? '📥' : '💸'}</span>
+                <span>{pestaña === 'ingreso' ? 'Ingresar Efectivo / Sencillo' : 'Registrar Egreso de Caja'}</span>
             </h2>
             {contenidoFormulario}
         </section>

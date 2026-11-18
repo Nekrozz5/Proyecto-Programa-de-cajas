@@ -1,7 +1,10 @@
 'use client';
 
 import { useState } from 'react';
-import { cardStyle, formCol, inputStyle, btnPrimario, btnOscuro, btnSecundario, thTd } from './adminStyles';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Badge } from '@/components/ui/badge';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import TabKardex from './TabKardex';
 import {
     crearCategoriaAction,
@@ -534,60 +537,48 @@ export default function TabCatalogo({
     }
 
     return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+        <div className="flex flex-col gap-5">
             {/* SELECTOR DE SUB-SECCIÓN: ARTÍCULOS, MODIFICADORES O KARDEX */}
-            <div style={{ display: 'flex', gap: '0.5rem', background: '#e2e8f0', padding: '0.35rem', borderRadius: '8px', alignSelf: 'flex-start', flexWrap: 'wrap' }}>
-                <button
+            <div className="flex gap-2 bg-slate-200 p-1.5 rounded-lg self-start flex-wrap">
+                <Button
                     type="button"
+                    variant={subSeccionCatalogo === 'articulos' ? 'default' : 'ghost'}
+                    size="sm"
                     onClick={() => setSubSeccionCatalogo('articulos')}
-                    style={{
-                        padding: '0.45rem 1rem',
-                        borderRadius: '6px',
-                        border: 'none',
-                        fontWeight: 'bold',
-                        fontSize: '0.88rem',
-                        cursor: 'pointer',
-                        background: subSeccionCatalogo === 'articulos' ? '#ffffff' : 'transparent',
-                        color: subSeccionCatalogo === 'articulos' ? '#0f172a' : '#64748b',
-                        boxShadow: subSeccionCatalogo === 'articulos' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none'
-                    }}
+                    className={`text-xs font-bold ${
+                        subSeccionCatalogo === 'articulos'
+                            ? 'bg-white text-slate-900 shadow-sm hover:bg-white'
+                            : 'text-slate-600 hover:text-slate-900'
+                    }`}
                 >
                     📦 Artículos y Catálogo ({(datos?.productos || []).length})
-                </button>
-                <button
+                </Button>
+                <Button
                     type="button"
+                    variant={subSeccionCatalogo === 'modificadores' ? 'default' : 'ghost'}
+                    size="sm"
                     onClick={() => setSubSeccionCatalogo('modificadores')}
-                    style={{
-                        padding: '0.45rem 1rem',
-                        borderRadius: '6px',
-                        border: 'none',
-                        fontWeight: 'bold',
-                        fontSize: '0.88rem',
-                        cursor: 'pointer',
-                        background: subSeccionCatalogo === 'modificadores' ? '#ffffff' : 'transparent',
-                        color: subSeccionCatalogo === 'modificadores' ? '#0284c7' : '#64748b',
-                        boxShadow: subSeccionCatalogo === 'modificadores' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none'
-                    }}
+                    className={`text-xs font-bold ${
+                        subSeccionCatalogo === 'modificadores'
+                            ? 'bg-white text-sky-700 shadow-sm hover:bg-white'
+                            : 'text-slate-600 hover:text-sky-700'
+                    }`}
                 >
                     ✨ Complementos y Modificadores ({(datos?.gruposModificadores || []).length})
-                </button>
-                <button
+                </Button>
+                <Button
                     type="button"
+                    variant={subSeccionCatalogo === 'kardex' ? 'default' : 'ghost'}
+                    size="sm"
                     onClick={() => setSubSeccionCatalogo('kardex')}
-                    style={{
-                        padding: '0.45rem 1rem',
-                        borderRadius: '6px',
-                        border: 'none',
-                        fontWeight: 'bold',
-                        fontSize: '0.88rem',
-                        cursor: 'pointer',
-                        background: subSeccionCatalogo === 'kardex' ? '#ffffff' : 'transparent',
-                        color: subSeccionCatalogo === 'kardex' ? '#15803d' : '#64748b',
-                        boxShadow: subSeccionCatalogo === 'kardex' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none'
-                    }}
+                    className={`text-xs font-bold ${
+                        subSeccionCatalogo === 'kardex'
+                            ? 'bg-white text-emerald-700 shadow-sm hover:bg-white'
+                            : 'text-slate-600 hover:text-emerald-700'
+                    }`}
                 >
                     📜 Kardex Cronológico e Integridad
-                </button>
+                </Button>
             </div>
 
             {/* VISTA 1: KARDEX */}
@@ -601,46 +592,49 @@ export default function TabCatalogo({
                 />
             ) : subSeccionCatalogo === 'modificadores' ? (
                 /* VISTA 2: MODIFICADORES */
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1.5rem', alignItems: 'start' }}>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
                     {/* CREAR NUEVO GRUPO */}
-                    <section style={cardStyle}>
-                        <h3 style={{ marginTop: 0, marginBottom: '0.35rem' }}>✨ Crear Grupo de Complementos / Modificadores</h3>
-                        <p style={{ color: '#64748b', fontSize: '0.85rem', marginTop: 0, marginBottom: '1rem' }}>
-                            Configura grupos como <em>"Tipo de Leche"</em> (reemplazo) o <em>"Extras / Jarabes"</em> (adiciones) con sus precios e insumos.
-                        </p>
+                    <section className="bg-white p-5 rounded-lg border border-slate-200 shadow-sm flex flex-col gap-3">
+                        <div>
+                            <h3 className="text-lg font-bold text-slate-900 m-0">✨ Crear Grupo de Complementos / Modificadores</h3>
+                            <p className="text-xs text-slate-500 m-0 mt-0.5">
+                                Configura grupos como <em>&ldquo;Tipo de Leche&rdquo;</em> (reemplazo) o <em>&ldquo;Extras / Jarabes&rdquo;</em> (adiciones) con sus precios e insumos.
+                            </p>
+                        </div>
 
-                        <form onSubmit={handleCrearGrupoModificador} style={formCol}>
-                            <label style={{ fontSize: '0.85rem', color: '#334155' }}>
+                        <form onSubmit={handleCrearGrupoModificador} className="flex flex-col gap-3">
+                            <label className="text-xs font-semibold text-slate-700 flex flex-col gap-1">
                                 Nombre del Grupo:
-                                <input
+                                <Input
                                     type="text"
                                     placeholder="Ej. Tipo de Leche, Extras / Jarabes, Adicionales"
                                     required
                                     value={nombreGrupoMod}
                                     onChange={(e) => setNombreGrupoMod(e.target.value)}
-                                    style={inputStyle}
+                                    className="bg-white"
                                 />
                             </label>
 
-                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginTop: '0.2rem' }}>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-end">
                                 <div>
-                                    <label style={{ fontSize: '0.85rem', color: '#334155', fontWeight: 'bold' }}>Tipo de Selección:</label>
+                                    <label className="text-xs font-semibold text-slate-700 block mb-1">Tipo de Selección:</label>
                                     <select
                                         value={tipoSeleccionGrupoMod}
                                         onChange={(e) => setTipoSeleccionGrupoMod(e.target.value)}
-                                        style={inputStyle}
+                                        className="w-full h-9 rounded-md border border-slate-300 bg-white px-2.5 text-xs shadow-sm focus:outline-none"
                                     >
                                         <option value="unica">🔘 Selección Única (Excluyente / Reemplazo)</option>
                                         <option value="multiple">☑️ Múltiples Opciones (Extras / Agregados)</option>
                                     </select>
                                 </div>
 
-                                <div style={{ display: 'flex', alignItems: 'center', marginTop: '1.4rem' }}>
-                                    <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem', color: '#334155', cursor: 'pointer' }}>
+                                <div className="flex items-center h-9">
+                                    <label className="flex items-center gap-2 text-xs text-slate-700 cursor-pointer">
                                         <input
                                             type="checkbox"
                                             checked={esObligatorioGrupoMod}
                                             onChange={(e) => setEsObligatorioGrupoMod(e.target.checked)}
+                                            className="rounded border-slate-300 text-sky-600 focus:ring-sky-500"
                                         />
                                         <strong>¿Obligatorio al cobrar?</strong>
                                     </label>
@@ -648,71 +642,65 @@ export default function TabCatalogo({
                             </div>
 
                             {/* OPCIONES DEL GRUPO */}
-                            <div style={{ marginTop: '0.75rem', background: '#f8fafc', padding: '0.85rem', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-                                    <span style={{ fontSize: '0.85rem', fontWeight: 'bold', color: '#334155' }}>
+                            <div className="bg-slate-50 p-3.5 rounded-lg border border-slate-200 mt-1">
+                                <div className="flex justify-between items-center mb-2">
+                                    <span className="text-xs font-bold text-slate-800">
                                         Opciones del Grupo ({opcionesGrupoMod.length})
                                     </span>
-                                    <span style={{ fontSize: '0.75rem', color: '#64748b' }}>
+                                    <span className="text-[11px] text-slate-500">
                                         Insumo, cantidad y recargo al cliente
                                     </span>
                                 </div>
 
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
+                                <div className="flex flex-col gap-2.5">
                                     {opcionesGrupoMod.map((op, idx) => {
                                         const insumoActual = (datos?.insumos || []).find((i) => String(i.id) === String(op.insumoId));
                                         return (
-                                            <div key={idx} style={{ background: '#fff', padding: '0.75rem', borderRadius: '6px', border: '1px solid #cbd5e1', display: 'flex', flexDirection: 'column', gap: '0.45rem' }}>
-                                                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                                                    <input
+                                            <div key={idx} className="bg-white p-3 rounded-md border border-slate-300 flex flex-col gap-2">
+                                                <div className="flex gap-2 items-center">
+                                                    <Input
                                                         type="text"
-                                                        placeholder="Nombre de la opción (Ej. Leche de Almendras, Shot Extra)"
+                                                        placeholder="Nombre de la opción (Ej. Leche Almendras)"
                                                         required
                                                         value={op.nombre}
                                                         onChange={(e) => cambiarOpcionGrupoMod(idx, 'nombre', e.target.value)}
-                                                        style={{ ...inputStyle, margin: 0, flex: 2 }}
+                                                        className="flex-grow bg-white h-8 text-xs"
                                                     />
-                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', flex: 1 }}>
-                                                        <span style={{ fontSize: '0.8rem', color: '#64748b' }}>+Bs</span>
-                                                        <input
+                                                    <div className="flex items-center gap-1 w-28">
+                                                        <span className="text-xs text-slate-500 font-bold">+Bs</span>
+                                                        <Input
                                                             type="number"
                                                             step="0.01"
                                                             min="0"
                                                             placeholder="0.00"
                                                             value={op.precioAdicional}
                                                             onChange={(e) => cambiarOpcionGrupoMod(idx, 'precioAdicional', e.target.value)}
-                                                            style={{ ...inputStyle, margin: 0 }}
+                                                            className="bg-white h-8 text-xs"
                                                             title="Recargo adicional para el cliente"
                                                         />
                                                     </div>
-                                                    <button
+                                                    <Button
                                                         type="button"
+                                                        variant="ghost"
+                                                        size="sm"
                                                         onClick={() => quitarOpcionGrupoMod(idx)}
                                                         disabled={opcionesGrupoMod.length <= 1}
-                                                        style={{
-                                                            background: '#fee2e2',
-                                                            color: '#b91c1c',
-                                                            border: '1px solid #fecaca',
-                                                            borderRadius: '4px',
-                                                            padding: '0.4rem 0.6rem',
-                                                            cursor: opcionesGrupoMod.length <= 1 ? 'not-allowed' : 'pointer',
-                                                            fontSize: '0.85rem'
-                                                        }}
+                                                        className="h-8 px-2 text-red-600 hover:bg-red-50 hover:text-red-700 disabled:opacity-40"
                                                         title="Quitar opción"
                                                     >
                                                         ✕
-                                                    </button>
+                                                    </Button>
                                                 </div>
 
-                                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '0.4rem', alignItems: 'center', fontSize: '0.8rem' }}>
+                                                <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 items-center text-xs">
                                                     <div>
-                                                        <span style={{ fontSize: '0.72rem', color: '#64748b' }}>Insumo que descuenta:</span>
+                                                        <span className="text-[11px] text-slate-500 block mb-0.5">Insumo que descuenta:</span>
                                                         <select
                                                             value={op.insumoId}
                                                             onChange={(e) => cambiarOpcionGrupoMod(idx, 'insumoId', e.target.value)}
-                                                            style={{ ...inputStyle, margin: 0, fontSize: '0.8rem', padding: '0.35rem' }}
+                                                            className="w-full h-8 rounded border border-slate-300 bg-white px-1 text-xs"
                                                         >
-                                                            <option value="">-- Sin insumo físico --</option>
+                                                            <option value="">-- Sin insumo --</option>
                                                             {(datos?.insumos || []).map((ins) => (
                                                                 <option key={ins.id} value={ins.id}>
                                                                     {ins.nombre} ({ins.unidad_medida})
@@ -722,26 +710,26 @@ export default function TabCatalogo({
                                                     </div>
 
                                                     <div>
-                                                        <span style={{ fontSize: '0.72rem', color: '#64748b' }}>Cantidad ({insumoActual?.unidad_medida || 'u.'}):</span>
-                                                        <input
+                                                        <span className="text-[11px] text-slate-500 block mb-0.5">Cantidad ({insumoActual?.unidad_medida || 'u.'}):</span>
+                                                        <Input
                                                             type="number"
                                                             step="0.001"
                                                             min="0"
                                                             placeholder="0.2"
                                                             value={op.cantidadInsumo}
                                                             onChange={(e) => cambiarOpcionGrupoMod(idx, 'cantidadInsumo', e.target.value)}
-                                                            style={{ ...inputStyle, margin: 0, fontSize: '0.8rem', padding: '0.35rem' }}
+                                                            className="h-8 text-xs bg-white"
                                                         />
                                                     </div>
 
                                                     <div>
-                                                        <span style={{ fontSize: '0.72rem', color: '#64748b' }}>Insumo que sustituye:</span>
+                                                        <span className="text-[11px] text-slate-500 block mb-0.5">Insumo que sustituye:</span>
                                                         <select
                                                             value={op.insumoReemplazadoId}
                                                             onChange={(e) => cambiarOpcionGrupoMod(idx, 'insumoReemplazadoId', e.target.value)}
-                                                            style={{ ...inputStyle, margin: 0, fontSize: '0.8rem', padding: '0.35rem' }}
+                                                            className="w-full h-8 rounded border border-slate-300 bg-white px-1 text-xs"
                                                         >
-                                                            <option value="">-- Ninguno (Es extra/adicional) --</option>
+                                                            <option value="">-- Ninguno (Es extra) --</option>
                                                             {(datos?.insumos || []).map((ins) => (
                                                                 <option key={ins.id} value={ins.id}>
                                                                     Sustituye a: {ins.nombre}
@@ -750,55 +738,47 @@ export default function TabCatalogo({
                                                         </select>
                                                     </div>
 
-                                                    <label style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', marginTop: '1rem', cursor: 'pointer' }}>
+                                                    <label className="flex items-center gap-1.5 pt-4 cursor-pointer">
                                                         <input
                                                             type="checkbox"
                                                             checked={op.esDefault}
                                                             onChange={(e) => cambiarOpcionGrupoMod(idx, 'esDefault', e.target.checked)}
+                                                            className="rounded border-slate-300 text-sky-600 focus:ring-sky-500"
                                                         />
-                                                        <span style={{ fontSize: '0.72rem', color: '#334155' }}>Por defecto</span>
+                                                        <span className="text-xs text-slate-700 font-medium">Por defecto</span>
                                                     </label>
                                                 </div>
                                             </div>
                                         );
                                     })}
 
-                                    <button
+                                    <Button
                                         type="button"
+                                        variant="outline"
                                         onClick={agregarOpcionGrupoMod}
-                                        style={{
-                                            width: '100%',
-                                            padding: '0.45rem',
-                                            background: '#f1f5f9',
-                                            color: '#0284c7',
-                                            border: '1px dashed #cbd5e1',
-                                            borderRadius: '6px',
-                                            cursor: 'pointer',
-                                            fontSize: '0.82rem',
-                                            fontWeight: 'bold'
-                                        }}
+                                        className="w-full h-8 border-dashed text-xs text-sky-700 hover:bg-sky-50 font-bold"
                                     >
                                         ➕ Agregar otra opción al grupo
-                                    </button>
+                                    </Button>
                                 </div>
                             </div>
 
-                            <button type="submit" style={{ ...btnPrimario, marginTop: '0.75rem', padding: '0.7rem' }}>
+                            <Button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2">
                                 ✅ Guardar Grupo de Modificadores
-                            </button>
+                            </Button>
                         </form>
                     </section>
 
                     {/* ASIGNACIÓN A PRODUCTOS Y LISTADO EXISTENTE */}
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-                        <section style={cardStyle}>
-                            <h3 style={{ marginTop: 0, fontSize: '1rem' }}>🔗 Asignar a Productos con Receta</h3>
-                            <p style={{ color: '#64748b', fontSize: '0.84rem', marginTop: 0 }}>
+                    <div className="flex flex-col gap-5">
+                        <section className="bg-white p-5 rounded-lg border border-slate-200 shadow-sm flex flex-col gap-3">
+                            <h3 className="text-base font-bold text-slate-900 m-0">🔗 Asignar a Productos con Receta</h3>
+                            <p className="text-xs text-slate-500 m-0">
                                 Indica qué productos con receta ofrecerán estos modificadores en la pantalla de cobro.
                             </p>
 
-                            <form onSubmit={handleGuardarAsignacionModificadores} style={formCol}>
-                                <label style={{ fontSize: '0.85rem', color: '#334155' }}>
+                            <form onSubmit={handleGuardarAsignacionModificadores} className="flex flex-col gap-3">
+                                <label className="text-xs font-semibold text-slate-700 flex flex-col gap-1">
                                     Selecciona el Producto con Receta:
                                     <select
                                         value={productoAsignarModId}
@@ -808,7 +788,7 @@ export default function TabCatalogo({
                                             const prod = (datos?.productos || []).find((p) => String(p.id) === String(pId));
                                             setGruposAsignarIds(prod?.grupos_modificadores_ids || []);
                                         }}
-                                        style={inputStyle}
+                                        className="w-full h-9 rounded-md border border-slate-300 bg-white px-2.5 text-xs shadow-sm focus:outline-none"
                                         required
                                     >
                                         <option value="">-- Elige un producto con receta --</option>
@@ -823,23 +803,24 @@ export default function TabCatalogo({
                                 </label>
 
                                 {productoAsignarModId && (
-                                    <div style={{ background: '#f8fafc', padding: '0.75rem', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
-                                        <div style={{ fontSize: '0.8rem', fontWeight: 'bold', color: '#334155', marginBottom: '0.4rem' }}>
+                                    <div className="bg-slate-50 p-3 rounded-md border border-slate-200">
+                                        <div className="text-xs font-bold text-slate-700 mb-2">
                                             Grupos que aplican a este producto:
                                         </div>
                                         {(datos?.gruposModificadores || []).length === 0 ? (
-                                            <p style={{ fontSize: '0.8rem', color: '#94a3b8', margin: 0 }}>No hay grupos creados todavía.</p>
+                                            <p className="text-xs text-slate-400 m-0">No hay grupos creados todavía.</p>
                                         ) : (
-                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                                            <div className="flex flex-col gap-1.5">
                                                 {(datos?.gruposModificadores || []).map((g) => (
-                                                    <label key={g.id} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.84rem', color: '#334155', cursor: 'pointer' }}>
+                                                    <label key={g.id} className="flex items-center gap-2 text-xs text-slate-800 cursor-pointer">
                                                         <input
                                                             type="checkbox"
                                                             checked={gruposAsignarIds.includes(g.id)}
                                                             onChange={() => toggleGrupoAsignar(g.id)}
+                                                            className="rounded border-slate-300 text-sky-600 focus:ring-sky-500"
                                                         />
                                                         <strong>{g.nombre}</strong>
-                                                        <span style={{ fontSize: '0.75rem', color: '#64748b' }}>
+                                                        <span className="text-[11px] text-slate-500">
                                                             ({g.tipo_seleccion === 'unica' ? 'Única' : 'Múltiple'} • {g.opciones?.length || 0} opciones)
                                                         </span>
                                                     </label>
@@ -849,51 +830,50 @@ export default function TabCatalogo({
                                     </div>
                                 )}
 
-                                <button type="submit" disabled={!productoAsignarModId} style={{ ...btnOscuro, padding: '0.5rem', fontSize: '0.85rem' }}>
+                                <Button
+                                    type="submit"
+                                    disabled={!productoAsignarModId}
+                                    className="bg-slate-900 hover:bg-slate-800 text-white font-bold h-8 text-xs disabled:opacity-50"
+                                >
                                     Guardar Asignación
-                                </button>
+                                </Button>
                             </form>
                         </section>
 
-                        <section style={cardStyle}>
-                            <h3 style={{ marginTop: 0, fontSize: '1rem' }}>
+                        <section className="bg-white p-5 rounded-lg border border-slate-200 shadow-sm flex flex-col gap-3">
+                            <h3 className="text-base font-bold text-slate-900 m-0">
                                 📋 Grupos Registrados ({(datos?.gruposModificadores || []).length})
                             </h3>
                             {(datos?.gruposModificadores || []).length === 0 ? (
-                                <p style={{ color: '#94a3b8', fontSize: '0.85rem', margin: 0 }}>No hay grupos registrados.</p>
+                                <p className="text-slate-400 text-xs m-0">No hay grupos registrados.</p>
                             ) : (
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                                <div className="flex flex-col gap-2.5">
                                     {(datos?.gruposModificadores || []).map((g) => (
-                                        <div key={g.id} style={{ border: '1px solid #e2e8f0', borderRadius: '8px', padding: '0.75rem', background: '#f8fafc' }}>
-                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                                <span style={{ fontWeight: 'bold', fontSize: '0.92rem', color: '#0f172a' }}>
+                                        <div key={g.id} className="border border-slate-200 rounded-lg p-3 bg-slate-50">
+                                            <div className="flex justify-between items-center">
+                                                <span className="font-bold text-sm text-slate-900">
                                                     {g.nombre}
                                                 </span>
-                                                <button
+                                                <Button
                                                     type="button"
+                                                    variant="ghost"
+                                                    size="sm"
                                                     onClick={() => handleEliminarGrupoModificador(g.id, g.nombre)}
-                                                    style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: '0.8rem' }}
+                                                    className="h-6 text-xs text-red-600 hover:text-red-700 hover:bg-red-50 p-1"
                                                     title="Eliminar grupo"
                                                 >
                                                     🗑️ Eliminar
-                                                </button>
+                                                </Button>
                                             </div>
-                                            <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '0.2rem' }}>
+                                            <div className="text-[11px] text-slate-500 mt-0.5">
                                                 {g.tipo_seleccion === 'unica' ? '🔘 Selección única' : '☑️ Selección múltiple'}
                                                 {g.es_obligatorio ? ' • Obligatorio' : ' • Opcional'}
                                             </div>
-                                            <div style={{ marginTop: '0.4rem', display: 'flex', flexWrap: 'wrap', gap: '0.3rem' }}>
+                                            <div className="mt-2 flex flex-wrap gap-1.5">
                                                 {(g.opciones || []).map((op) => (
                                                     <span
                                                         key={op.id}
-                                                        style={{
-                                                            fontSize: '0.72rem',
-                                                            background: '#ffffff',
-                                                            border: '1px solid #cbd5e1',
-                                                            padding: '0.15rem 0.45rem',
-                                                            borderRadius: '4px',
-                                                            color: '#334155'
-                                                        }}
+                                                        className="text-[11px] bg-white border border-slate-300 px-2 py-0.5 rounded text-slate-700 font-medium"
                                                     >
                                                         {op.nombre} {Number(op.precio_adicional || 0) > 0 ? `(+Bs ${Number(op.precio_adicional).toFixed(2)})` : ''}
                                                         {op.insumo_reemplazado_nombre ? ` (Sustituye: ${op.insumo_reemplazado_nombre})` : ''}
@@ -911,30 +891,23 @@ export default function TabCatalogo({
                 /* VISTA 3: ARTÍCULOS */
                 <>
                     {/* BARRA DE CATEGORÍAS */}
-                    <div style={{ background: '#fff', padding: '0.85rem 1.25rem', borderRadius: '10px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', border: '1px solid #e2e8f0' }}>
-                        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
-                            <span style={{ fontSize: '0.85rem', fontWeight: 'bold', color: '#475569', marginRight: '0.25rem' }}>
+                    <div className="bg-white p-4 rounded-lg shadow-sm border border-slate-200">
+                        <div className="flex gap-2 flex-wrap items-center">
+                            <span className="text-xs font-bold text-slate-600 mr-1">
                                 Categorías:
                             </span>
-                            <button
+                            <Button
                                 type="button"
+                                size="sm"
+                                variant={categoriaTabActiva === 'todas' ? 'default' : 'secondary'}
                                 onClick={() => {
                                     setCategoriaTabActiva('todas');
                                     setPaginaProductos(1);
                                 }}
-                                style={{
-                                    padding: '0.4rem 0.9rem',
-                                    borderRadius: '999px',
-                                    border: 'none',
-                                    fontWeight: 'bold',
-                                    fontSize: '0.84rem',
-                                    cursor: 'pointer',
-                                    background: categoriaTabActiva === 'todas' ? '#0284c7' : '#f1f5f9',
-                                    color: categoriaTabActiva === 'todas' ? '#fff' : '#334155'
-                                }}
+                                className="rounded-full h-8 text-xs font-bold"
                             >
                                 🌐 Todas ({(datos?.productos || []).length})
-                            </button>
+                            </Button>
                             {(datos?.categorias || []).map((cat) => {
                                 const cant = (datos?.productos || []).filter((p) => {
                                     const cats = (p.categoria || '').split(',').map((c) => c.trim().toLowerCase());
@@ -942,88 +915,76 @@ export default function TabCatalogo({
                                 }).length;
                                 const activa = categoriaTabActiva.toLowerCase() === cat.nombre?.toLowerCase();
                                 return (
-                                    <button
+                                    <Button
                                         key={cat.id || cat.nombre}
                                         type="button"
+                                        size="sm"
+                                        variant={activa ? 'default' : 'secondary'}
                                         onClick={() => {
                                             setCategoriaTabActiva(cat.nombre);
                                             setProdCategorias([cat.nombre]);
                                             setPaginaProductos(1);
                                         }}
-                                        style={{
-                                            padding: '0.4rem 0.9rem',
-                                            borderRadius: '999px',
-                                            border: 'none',
-                                            fontWeight: 'bold',
-                                            fontSize: '0.84rem',
-                                            cursor: 'pointer',
-                                            background: activa ? '#0284c7' : '#f1f5f9',
-                                            color: activa ? '#fff' : '#334155'
-                                        }}
+                                        className="rounded-full h-8 text-xs font-bold"
                                     >
                                         🏷️ {cat.nombre} ({cant})
-                                    </button>
+                                    </Button>
                                 );
                             })}
-                            <button
+                            <Button
                                 type="button"
+                                size="sm"
+                                variant="outline"
                                 onClick={() => setMostrarModalNuevaCat(!mostrarModalNuevaCat)}
-                                style={{
-                                    padding: '0.35rem 0.8rem',
-                                    borderRadius: '999px',
-                                    border: '1px dashed #0284c7',
-                                    background: '#f0f9ff',
-                                    color: '#0284c7',
-                                    fontWeight: 'bold',
-                                    fontSize: '0.82rem',
-                                    cursor: 'pointer'
-                                }}
+                                className="rounded-full h-8 text-xs font-bold border-dashed border-sky-600 text-sky-700 bg-sky-50 hover:bg-sky-100"
                             >
                                 ➕ {mostrarModalNuevaCat ? 'Cancelar' : 'Nueva Categoría'}
-                            </button>
+                            </Button>
                         </div>
 
                         {mostrarModalNuevaCat && (
-                            <form onSubmit={handleCrearCategoria} style={{ marginTop: '0.85rem', display: 'flex', gap: '0.5rem', alignItems: 'center', background: '#f8fafc', padding: '0.65rem 0.85rem', borderRadius: '8px', border: '1px solid #cbd5e1' }}>
-                                <input
+                            <form onSubmit={handleCrearCategoria} className="mt-3 flex gap-2 items-center bg-slate-50 p-2.5 rounded-lg border border-slate-300">
+                                <Input
                                     type="text"
                                     placeholder="Nombre de la nueva categoría (Ej. Bebidas, Repuestos, Postres)"
                                     required
                                     value={nuevaCatNombre}
                                     onChange={(e) => setNuevaCatNombre(e.target.value)}
-                                    style={{ ...inputStyle, margin: 0, flex: 1 }}
+                                    className="bg-white h-9 text-xs flex-grow"
                                 />
-                                <button type="submit" style={{ ...btnPrimario, padding: '0.55rem 1rem' }}>
+                                <Button type="submit" size="sm" className="bg-blue-600 hover:bg-blue-700 text-white font-bold h-9">
                                     Guardar Categoría
-                                </button>
+                                </Button>
                             </form>
                         )}
                     </div>
 
                     {/* CUERPO PRINCIPAL DEL CATÁLOGO */}
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '1.5rem', alignItems: 'start' }}>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
                         {/* FORMULARIO DE REGISTRO */}
-                        <section style={cardStyle}>
-                            <h3 style={{ marginTop: 0, marginBottom: '0.35rem' }}>📦 Registrar Artículo / Producto</h3>
-                            <p style={{ color: '#64748b', fontSize: '0.85rem', marginTop: 0, marginBottom: '1rem' }}>
-                                El costo y la disponibilidad se calculan matemáticamente de forma automática a partir de los insumos seleccionados.
-                            </p>
+                        <section className="bg-white p-5 rounded-lg border border-slate-200 shadow-sm flex flex-col gap-3">
+                            <div>
+                                <h3 className="text-lg font-bold text-slate-900 m-0">📦 Registrar Artículo / Producto</h3>
+                                <p className="text-xs text-slate-500 m-0 mt-0.5">
+                                    El costo y la disponibilidad se calculan matemáticamente de forma automática a partir de los insumos seleccionados.
+                                </p>
+                            </div>
 
-                            <form onSubmit={handleCrearProducto} style={formCol}>
-                                <label style={{ fontSize: '0.85rem', color: '#334155' }}>
+                            <form onSubmit={handleCrearProducto} className="flex flex-col gap-3">
+                                <label className="text-xs font-semibold text-slate-700 flex flex-col gap-1">
                                     Nombre del Artículo / Producto:
-                                    <input
+                                    <Input
                                         placeholder="Ej. Café Capuchino, Filtro de Aceite, Tarta de Chocolate"
                                         required
                                         value={prodNombre}
                                         onChange={(e) => setProdNombre(e.target.value)}
-                                        style={inputStyle}
+                                        className="bg-white"
                                     />
                                 </label>
 
-                                <label style={{ fontSize: '0.85rem', color: '#334155' }}>
+                                <label className="text-xs font-semibold text-slate-700 flex flex-col gap-1">
                                     Precio de Venta al Público (Bs):
-                                    <input
+                                    <Input
                                         type="number"
                                         step="0.01"
                                         min="0.01"
@@ -1031,31 +992,18 @@ export default function TabCatalogo({
                                         required
                                         value={prodPrecio}
                                         onChange={(e) => setProdPrecio(e.target.value)}
-                                        style={inputStyle}
+                                        className="bg-white"
                                     />
                                 </label>
 
                                 {/* BARRA DE ASIGNACIÓN MÚLTIPLE DE CATEGORÍAS */}
-                                <div style={{ marginTop: '0.2rem', marginBottom: '0.4rem' }}>
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem' }}>
-                                        <span style={{ fontSize: '0.85rem', fontWeight: 'bold', color: '#334155' }}>
-                                            Categorías del Producto:
-                                        </span>
-                                    </div>
-
-                                    <div style={{
-                                        display: 'flex',
-                                        gap: '0.45rem',
-                                        flexWrap: 'wrap',
-                                        alignItems: 'center',
-                                        padding: '0.65rem 0.85rem',
-                                        background: '#f8fafc',
-                                        borderRadius: '8px',
-                                        border: '1px solid #e2e8f0',
-                                        minHeight: '44px'
-                                    }}>
+                                <div>
+                                    <span className="text-xs font-bold text-slate-700 block mb-1">
+                                        Categorías del Producto:
+                                    </span>
+                                    <div className="flex gap-1.5 flex-wrap items-center p-2.5 bg-slate-50 rounded-lg border border-slate-200 min-h-[44px]">
                                         {(!datos?.categorias || datos.categorias.length === 0) ? (
-                                            <div style={{ fontSize: '0.82rem', color: '#64748b' }}>
+                                            <div className="text-xs text-slate-400">
                                                 Aún no hay categorías registradas.
                                             </div>
                                         ) : (
@@ -1068,20 +1016,11 @@ export default function TabCatalogo({
                                                         key={cat.id || cat.nombre}
                                                         type="button"
                                                         onClick={() => toggleCategoriaProducto(cat.nombre)}
-                                                        style={{
-                                                            padding: '0.35rem 0.8rem',
-                                                            borderRadius: '999px',
-                                                            border: seleccionada ? '1px solid #0284c7' : '1px solid #cbd5e1',
-                                                            fontWeight: 'bold',
-                                                            fontSize: '0.82rem',
-                                                            cursor: 'pointer',
-                                                            display: 'flex',
-                                                            alignItems: 'center',
-                                                            gap: '0.35rem',
-                                                            background: seleccionada ? '#0284c7' : '#ffffff',
-                                                            color: seleccionada ? '#ffffff' : '#334155',
-                                                            boxShadow: seleccionada ? '0 1px 2px rgba(2,132,199,0.2)' : 'none'
-                                                        }}
+                                                        className={`px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1 transition-all ${
+                                                            seleccionada
+                                                                ? 'bg-sky-600 text-white shadow-sm'
+                                                                : 'bg-white text-slate-700 border border-slate-300 hover:border-slate-400'
+                                                        }`}
                                                     >
                                                         <span>{seleccionada ? '✓' : '🏷️'}</span>
                                                         <span>{cat.nombre}</span>
@@ -1091,14 +1030,14 @@ export default function TabCatalogo({
                                         )}
                                     </div>
                                     {prodCategorias.length > 0 && (
-                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.35rem' }}>
-                                            <span style={{ fontSize: '0.78rem', color: '#0369a1', fontWeight: 500 }}>
+                                        <div className="flex justify-between items-center mt-1">
+                                            <span className="text-[11px] text-sky-700 font-medium">
                                                 Asignadas: <strong>{prodCategorias.join(', ')}</strong>
                                             </span>
                                             <button
                                                 type="button"
                                                 onClick={() => setProdCategorias([])}
-                                                style={{ background: 'none', border: 'none', color: '#64748b', fontSize: '0.75rem', cursor: 'pointer', textDecoration: 'underline' }}
+                                                className="text-[11px] text-slate-500 hover:text-slate-700 underline"
                                             >
                                                 Limpiar selección
                                             </button>
@@ -1107,155 +1046,92 @@ export default function TabCatalogo({
                                 </div>
 
                                 {/* MODO DE COMPOSICIÓN */}
-                                <div style={{ marginTop: '0.4rem' }}>
-                                    <span style={{ fontSize: '0.85rem', fontWeight: 'bold', color: '#334155', display: 'block', marginBottom: '0.4rem' }}>
+                                <div>
+                                    <span className="text-xs font-bold text-slate-700 block mb-1.5">
                                         Composición y Origen de Inventario:
                                     </span>
-                                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(70px, 1fr))', gap: '0.35rem' }}>
-                                        <button
-                                            type="button"
-                                            onClick={() => setTipoComposicion('directo')}
-                                            style={{
-                                                padding: '0.55rem 0.35rem',
-                                                borderRadius: '8px',
-                                                border: tipoComposicion === 'directo' ? '2px solid #0284c7' : '1px solid #cbd5e1',
-                                                background: tipoComposicion === 'directo' ? '#f0f9ff' : '#fff',
-                                                cursor: 'pointer',
-                                                textAlign: 'center',
-                                                fontSize: '0.78rem'
-                                            }}
-                                        >
-                                            <strong>📦 Directo</strong>
-                                            <div style={{ fontSize: '0.68rem', color: '#64748b', marginTop: '0.15rem' }}>Stock propio</div>
-                                        </button>
-
-                                        <button
-                                            type="button"
-                                            onClick={() => setTipoComposicion('unitario')}
-                                            style={{
-                                                padding: '0.55rem 0.35rem',
-                                                borderRadius: '8px',
-                                                border: tipoComposicion === 'unitario' ? '2px solid #0284c7' : '1px solid #cbd5e1',
-                                                background: tipoComposicion === 'unitario' ? '#f0f9ff' : '#fff',
-                                                cursor: 'pointer',
-                                                textAlign: 'center',
-                                                fontSize: '0.78rem'
-                                            }}
-                                        >
-                                            <strong>🔗 Unitario</strong>
-                                            <div style={{ fontSize: '0.68rem', color: '#64748b', marginTop: '0.15rem' }}>1 a 1 Insumo</div>
-                                        </button>
-
-                                        <button
-                                            type="button"
-                                            onClick={() => setTipoComposicion('receta')}
-                                            style={{
-                                                padding: '0.55rem 0.35rem',
-                                                borderRadius: '8px',
-                                                border: tipoComposicion === 'receta' ? '2px solid #0284c7' : '1px solid #cbd5e1',
-                                                background: tipoComposicion === 'receta' ? '#f0f9ff' : '#fff',
-                                                cursor: 'pointer',
-                                                textAlign: 'center',
-                                                fontSize: '0.78rem'
-                                            }}
-                                        >
-                                            <strong>🧪 Receta</strong>
-                                            <div style={{ fontSize: '0.68rem', color: '#64748b', marginTop: '0.15rem' }}>Insumos</div>
-                                        </button>
-
-                                        <button
-                                            type="button"
-                                            onClick={() => setTipoComposicion('combo')}
-                                            style={{
-                                                padding: '0.55rem 0.35rem',
-                                                borderRadius: '8px',
-                                                border: tipoComposicion === 'combo' ? '2px solid #0284c7' : '1px solid #cbd5e1',
-                                                background: tipoComposicion === 'combo' ? '#f0f9ff' : '#fff',
-                                                cursor: 'pointer',
-                                                textAlign: 'center',
-                                                fontSize: '0.78rem'
-                                            }}
-                                        >
-                                            <strong>🎁 Combo</strong>
-                                            <div style={{ fontSize: '0.68rem', color: '#64748b', marginTop: '0.15rem' }}>Agrupa</div>
-                                        </button>
-
-                                        <button
-                                            type="button"
-                                            onClick={() => setTipoComposicion('libre')}
-                                            style={{
-                                                padding: '0.55rem 0.35rem',
-                                                borderRadius: '8px',
-                                                border: tipoComposicion === 'libre' ? '2px solid #0284c7' : '1px solid #cbd5e1',
-                                                background: tipoComposicion === 'libre' ? '#f0f9ff' : '#fff',
-                                                cursor: 'pointer',
-                                                textAlign: 'center',
-                                                fontSize: '0.78rem'
-                                            }}
-                                        >
-                                            <strong>✨ Libre</strong>
-                                            <div style={{ fontSize: '0.68rem', color: '#64748b', marginTop: '0.15rem' }}>Servicio</div>
-                                        </button>
+                                    <div className="grid grid-cols-5 gap-1.5">
+                                        {[
+                                            { id: 'directo', label: '📦 Directo', sub: 'Stock propio' },
+                                            { id: 'unitario', label: '🔗 Unitario', sub: '1 a 1 Insumo' },
+                                            { id: 'receta', label: '🧪 Receta', sub: 'Insumos' },
+                                            { id: 'combo', label: '🎁 Combo', sub: 'Agrupa' },
+                                            { id: 'libre', label: '✨ Libre', sub: 'Servicio' }
+                                        ].map((m) => (
+                                            <button
+                                                key={m.id}
+                                                type="button"
+                                                onClick={() => setTipoComposicion(m.id)}
+                                                className={`p-2 rounded-lg border text-center cursor-pointer transition-all ${
+                                                    tipoComposicion === m.id
+                                                        ? 'border-2 border-sky-600 bg-sky-50 text-slate-900 shadow-sm'
+                                                        : 'border-slate-300 bg-white hover:border-slate-400 text-slate-700'
+                                                }`}
+                                            >
+                                                <strong className="text-xs block">{m.label}</strong>
+                                                <span className="text-[10px] text-slate-500 block mt-0.5">{m.sub}</span>
+                                            </button>
+                                        ))}
                                     </div>
                                 </div>
 
                                 {/* CAMPOS ESPECÍFICOS POR TIPO */}
                                 {tipoComposicion === 'directo' && (
-                                    <div style={{ background: '#f8fafc', padding: '0.85rem', borderRadius: '8px', border: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', gap: '0.55rem' }}>
-                                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
-                                            <label style={{ fontSize: '0.82rem', color: '#334155' }}>
+                                    <div className="bg-slate-50 p-3.5 rounded-lg border border-slate-200 flex flex-col gap-2.5">
+                                        <div className="grid grid-cols-2 gap-2.5">
+                                            <label className="text-xs text-slate-700 flex flex-col gap-1">
                                                 Stock Inicial:
-                                                <input
+                                                <Input
                                                     type="number"
                                                     step="1"
                                                     min="0"
                                                     required
                                                     value={prodDirectoStockIni}
                                                     onChange={(e) => setProdDirectoStockIni(e.target.value)}
-                                                    style={inputStyle}
+                                                    className="bg-white h-8 text-xs"
                                                 />
                                             </label>
-                                            <label style={{ fontSize: '0.82rem', color: '#334155' }}>
+                                            <label className="text-xs text-slate-700 flex flex-col gap-1">
                                                 Costo Inicial (Bs):
-                                                <input
+                                                <Input
                                                     type="number"
                                                     step="0.01"
                                                     min="0"
                                                     required
                                                     value={prodDirectoCostoIni}
                                                     onChange={(e) => setProdDirectoCostoIni(e.target.value)}
-                                                    style={inputStyle}
+                                                    className="bg-white h-8 text-xs"
                                                 />
                                             </label>
-                                            <label style={{ fontSize: '0.82rem', color: '#334155' }}>
+                                            <label className="text-xs text-slate-700 flex flex-col gap-1">
                                                 Stock Mínimo (Alerta):
-                                                <input
+                                                <Input
                                                     type="number"
                                                     step="1"
                                                     min="0"
                                                     value={prodDirectoStockMin}
                                                     onChange={(e) => setProdDirectoStockMin(e.target.value)}
-                                                    style={inputStyle}
+                                                    className="bg-white h-8 text-xs"
                                                 />
                                             </label>
-                                            <label style={{ fontSize: '0.82rem', color: '#334155' }}>
+                                            <label className="text-xs text-slate-700 flex flex-col gap-1">
                                                 Unidad de Medida:
-                                                <input
+                                                <Input
                                                     type="text"
                                                     value={prodDirectoUnidad}
                                                     onChange={(e) => setProdDirectoUnidad(e.target.value)}
-                                                    style={inputStyle}
+                                                    className="bg-white h-8 text-xs"
                                                 />
                                             </label>
                                         </div>
                                         {usaVencimiento && (
-                                            <label style={{ fontSize: '0.82rem', color: '#334155' }}>
+                                            <label className="text-xs text-slate-700 flex flex-col gap-1">
                                                 Fecha de Vencimiento (Opcional):
-                                                <input
+                                                <Input
                                                     type="date"
                                                     value={prodDirectoVencimiento}
                                                     onChange={(e) => setProdDirectoVencimiento(e.target.value)}
-                                                    style={inputStyle}
+                                                    className="bg-white h-8 text-xs"
                                                 />
                                             </label>
                                         )}
@@ -1263,14 +1139,14 @@ export default function TabCatalogo({
                                 )}
 
                                 {tipoComposicion === 'unitario' && (
-                                    <div style={{ background: '#f8fafc', padding: '0.85rem', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                                        <label style={{ fontSize: '0.84rem', color: '#334155' }}>
+                                    <div className="bg-slate-50 p-3.5 rounded-lg border border-slate-200">
+                                        <label className="text-xs text-slate-700 flex flex-col gap-1">
                                             Selecciona el Insumo del Inventario:
                                             <select
                                                 required
                                                 value={insumoUnitarioId}
                                                 onChange={(e) => setInsumoUnitarioId(e.target.value)}
-                                                style={inputStyle}
+                                                className="w-full h-9 rounded-md border border-slate-300 bg-white px-2.5 text-xs shadow-sm focus:outline-none"
                                             >
                                                 <option value="">-- Elige el insumo/artículo a vender --</option>
                                                 {(datos?.insumos || []).map((ins) => (
@@ -1284,12 +1160,12 @@ export default function TabCatalogo({
                                 )}
 
                                 {tipoComposicion === 'receta' && (
-                                    <div style={{ background: '#f8fafc', padding: '0.85rem', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-                                            <span style={{ fontSize: '0.84rem', fontWeight: 'bold', color: '#334155' }}>
+                                    <div className="bg-slate-50 p-3.5 rounded-lg border border-slate-200 flex flex-col gap-2">
+                                        <div className="flex justify-between items-center mb-1">
+                                            <span className="text-xs font-bold text-slate-800">
                                                 Insumos y Materiales de la Receta:
                                             </span>
-                                            <span style={{ fontSize: '0.78rem', color: filasReceta.length >= 30 ? '#dc2626' : '#0284c7', fontWeight: 'bold' }}>
+                                            <span className={`text-xs font-bold ${filasReceta.length >= 30 ? 'text-red-600' : 'text-sky-700'}`}>
                                                 {filasReceta.length} / 30 insumos
                                             </span>
                                         </div>
@@ -1299,12 +1175,12 @@ export default function TabCatalogo({
                                             const unidadAlm = insSel ? insSel.unidad_medida : 'unidades';
                                             const opcionesComp = obtenerUnidadesCompatibles(unidadAlm);
                                             return (
-                                                <div key={index} style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr 1fr 34px', gap: '0.4rem', marginBottom: '0.45rem', alignItems: 'center' }}>
+                                                <div key={index} className="grid grid-cols-[1.4fr_1fr_1fr_32px] gap-1.5 items-center">
                                                     <select
                                                         required
                                                         value={fila.insumoId}
                                                         onChange={(e) => cambiarFilaReceta(index, 'insumoId', e.target.value)}
-                                                        style={{ ...inputStyle, margin: 0, fontSize: '0.82rem' }}
+                                                        className="h-8 rounded border border-slate-300 bg-white px-1 text-xs"
                                                     >
                                                         <option value="">-- Insumo --</option>
                                                         {(datos?.insumos || []).map((i) => (
@@ -1314,7 +1190,7 @@ export default function TabCatalogo({
                                                         ))}
                                                     </select>
 
-                                                    <input
+                                                    <Input
                                                         type="number"
                                                         step="0.001"
                                                         min="0.001"
@@ -1322,13 +1198,13 @@ export default function TabCatalogo({
                                                         placeholder="Cantidad"
                                                         value={fila.cantidad}
                                                         onChange={(e) => cambiarFilaReceta(index, 'cantidad', e.target.value)}
-                                                        style={{ ...inputStyle, margin: 0, fontSize: '0.82rem' }}
+                                                        className="h-8 text-xs bg-white"
                                                     />
 
                                                     <select
                                                         value={fila.unidadReceta || unidadAlm}
                                                         onChange={(e) => cambiarFilaReceta(index, 'unidadReceta', e.target.value)}
-                                                        style={{ ...inputStyle, margin: 0, fontSize: '0.82rem' }}
+                                                        className="h-8 rounded border border-slate-300 bg-white px-1 text-xs"
                                                     >
                                                         {opcionesComp.map((o) => (
                                                             <option key={o.valor} value={o.valor}>{o.etiqueta}</option>
@@ -1339,15 +1215,7 @@ export default function TabCatalogo({
                                                         type="button"
                                                         disabled={filasReceta.length <= 1}
                                                         onClick={() => quitarFilaReceta(index)}
-                                                        style={{
-                                                            padding: '0.4rem',
-                                                            background: filasReceta.length <= 1 ? '#e2e8f0' : '#fee2e2',
-                                                            color: filasReceta.length <= 1 ? '#94a3b8' : '#b91c1c',
-                                                            border: 'none',
-                                                            borderRadius: '4px',
-                                                            cursor: filasReceta.length <= 1 ? 'not-allowed' : 'pointer',
-                                                            fontWeight: 'bold'
-                                                        }}
+                                                        className="h-8 w-8 rounded bg-red-100 text-red-700 hover:bg-red-200 font-bold text-xs disabled:opacity-40"
                                                         title="Quitar este insumo"
                                                     >
                                                         ✕
@@ -1356,187 +1224,159 @@ export default function TabCatalogo({
                                             );
                                         })}
 
-                                        <button
+                                        <Button
                                             type="button"
+                                            variant="outline"
                                             disabled={filasReceta.length >= 30}
                                             onClick={agregarFilaReceta}
-                                            style={{
-                                                width: '100%',
-                                                marginTop: '0.25rem',
-                                                padding: '0.4rem',
-                                                background: '#f1f5f9',
-                                                color: '#0284c7',
-                                                border: '1px dashed #cbd5e1',
-                                                borderRadius: '6px',
-                                                cursor: filasReceta.length >= 30 ? 'not-allowed' : 'pointer',
-                                                fontSize: '0.82rem',
-                                                fontWeight: 'bold'
-                                            }}
+                                            className="w-full h-8 border-dashed text-xs text-sky-700 hover:bg-sky-50 font-bold mt-1"
                                         >
-                                            ➕ Agregar otro insumo a la receta ({filasReceta.length}/30)
-                                        </button>
+                                            ➕ Agregar otro insumo ({filasReceta.length}/30)
+                                        </Button>
                                     </div>
                                 )}
 
                                 {tipoComposicion === 'combo' && (
-                                    <div style={{ background: '#f8fafc', padding: '0.85rem', borderRadius: '8px', border: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                            <span style={{ fontSize: '0.84rem', fontWeight: 'bold', color: '#334155' }}>
-                                                Productos Componentes del Combo:
+                                    <div className="bg-slate-50 p-3.5 rounded-lg border border-slate-200 flex flex-col gap-3">
+                                        <div className="flex justify-between items-center">
+                                            <span className="text-xs font-bold text-slate-800">
+                                                Componentes del Combo / Promoción:
                                             </span>
-                                            <span style={{ fontSize: '0.78rem', color: '#0284c7', fontWeight: 'bold' }}>
+                                            <span className="text-xs font-bold text-sky-700">
                                                 {filasCombo.length} / 20 productos
                                             </span>
                                         </div>
 
                                         {filasCombo.map((fila, index) => (
-                                            <div key={index} style={{ display: 'grid', gridTemplateColumns: '1.8fr 1fr 34px', gap: '0.4rem', alignItems: 'center' }}>
+                                            <div key={index} className="grid grid-cols-[2fr_1fr_32px] gap-2 items-center">
                                                 <select
                                                     required
                                                     value={fila.productoId}
                                                     onChange={(e) => {
-                                                        const val = e.target.value;
-                                                        setFilasCombo((prev) => prev.map((f, i) => i === index ? { ...f, productoId: val } : f));
+                                                        const copia = [...filasCombo];
+                                                        copia[index] = { ...copia[index], productoId: e.target.value };
+                                                        setFilasCombo(copia);
                                                     }}
-                                                    style={{ ...inputStyle, padding: '0.4rem', fontSize: '0.82rem' }}
+                                                    className="h-8 rounded border border-slate-300 bg-white px-2 text-xs"
                                                 >
-                                                    <option value="">-- Selecciona producto --</option>
+                                                    <option value="">-- Elige producto componente --</option>
                                                     {(datos?.productos || [])
                                                         .filter((p) => p.tipo_inventario !== 'combo')
-                                                        .map((prod) => (
-                                                            <option key={prod.id} value={prod.id}>
-                                                                {prod.nombre} (Costo: Bs {Number(prod.costo || 0).toFixed(2)} | {prod.tipo_inventario})
+                                                        .map((p) => (
+                                                            <option key={p.id} value={p.id}>
+                                                                {p.nombre} (Costo: Bs {Number(p.costo).toFixed(2)})
                                                             </option>
                                                         ))}
                                                 </select>
-                                                <input
+
+                                                <Input
                                                     type="number"
                                                     step="1"
                                                     min="1"
                                                     required
-                                                    placeholder="Cantidad"
+                                                    placeholder="Cant."
                                                     value={fila.cantidad}
                                                     onChange={(e) => {
-                                                        const val = e.target.value;
-                                                        setFilasCombo((prev) => prev.map((f, i) => i === index ? { ...f, cantidad: val } : f));
+                                                        const copia = [...filasCombo];
+                                                        copia[index] = { ...copia[index], cantidad: e.target.value };
+                                                        setFilasCombo(copia);
                                                     }}
-                                                    style={{ ...inputStyle, padding: '0.4rem', fontSize: '0.82rem' }}
+                                                    className="h-8 text-xs bg-white"
                                                 />
+
                                                 <button
                                                     type="button"
                                                     disabled={filasCombo.length <= 1}
-                                                    onClick={() => {
-                                                        if (filasCombo.length <= 1) return;
-                                                        setFilasCombo((prev) => prev.filter((_, i) => i !== index));
-                                                    }}
-                                                    style={{
-                                                        padding: '0.4rem',
-                                                        background: filasCombo.length <= 1 ? '#e2e8f0' : '#fee2e2',
-                                                        color: filasCombo.length <= 1 ? '#94a3b8' : '#b91c1c',
-                                                        border: 'none',
-                                                        borderRadius: '4px',
-                                                        cursor: filasCombo.length <= 1 ? 'not-allowed' : 'pointer',
-                                                        fontWeight: 'bold'
-                                                    }}
-                                                    title="Quitar este componente"
+                                                    onClick={() => setFilasCombo(filasCombo.filter((_, i) => i !== index))}
+                                                    className="h-8 w-8 rounded bg-red-100 text-red-700 hover:bg-red-200 font-bold text-xs disabled:opacity-40"
                                                 >
                                                     ✕
                                                 </button>
                                             </div>
                                         ))}
 
-                                        <button
+                                        <Button
                                             type="button"
+                                            variant="outline"
                                             disabled={filasCombo.length >= 20}
                                             onClick={() => setFilasCombo((prev) => [...prev, { productoId: '', cantidad: '1' }])}
-                                            style={{
-                                                width: '100%',
-                                                padding: '0.4rem',
-                                                background: '#f1f5f9',
-                                                color: '#0284c7',
-                                                border: '1px dashed #cbd5e1',
-                                                borderRadius: '6px',
-                                                cursor: filasCombo.length >= 20 ? 'not-allowed' : 'pointer',
-                                                fontSize: '0.82rem',
-                                                fontWeight: 'bold'
-                                            }}
+                                            className="w-full h-8 border-dashed text-xs text-sky-700 hover:bg-sky-50 font-bold"
                                         >
                                             ➕ Agregar otro producto al combo ({filasCombo.length}/20)
-                                        </button>
+                                        </Button>
 
                                         {/* Modo de Límite */}
-                                        <div style={{ marginTop: '0.4rem', borderTop: '1px solid #e2e8f0', paddingTop: '0.6rem' }}>
-                                            <span style={{ fontSize: '0.84rem', fontWeight: 'bold', color: '#334155', display: 'block', marginBottom: '0.35rem' }}>
+                                        <div className="border-t border-slate-200 pt-2.5">
+                                            <span className="text-xs font-bold text-slate-800 block mb-1.5">
                                                 Modo de Límite de Venta:
                                             </span>
-                                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', marginBottom: '0.5rem' }}>
-                                                <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.82rem', background: '#fff', padding: '0.5rem', borderRadius: '6px', border: comboModoLimite === 'sin_limite' ? '2px solid #0284c7' : '1px solid #cbd5e1', cursor: 'pointer' }}>
+                                            <div className="grid grid-cols-2 gap-2 mb-2">
+                                                <label className={`flex items-center gap-1.5 p-2 rounded-md border text-xs cursor-pointer ${comboModoLimite === 'sin_limite' ? 'border-sky-600 bg-sky-50 font-bold' : 'border-slate-300 bg-white'}`}>
                                                     <input
                                                         type="radio"
                                                         name="modo_combo"
                                                         checked={comboModoLimite === 'sin_limite'}
                                                         onChange={() => setComboModoLimite('sin_limite')}
                                                     />
-                                                    <span><strong>Sin límite</strong></span>
+                                                    <span>Sin límite</span>
                                                 </label>
-                                                <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.82rem', background: '#fff', padding: '0.5rem', borderRadius: '6px', border: comboModoLimite === 'cantidad_maxima' ? '2px solid #0284c7' : '1px solid #cbd5e1', cursor: 'pointer' }}>
+                                                <label className={`flex items-center gap-1.5 p-2 rounded-md border text-xs cursor-pointer ${comboModoLimite === 'cantidad_maxima' ? 'border-sky-600 bg-sky-50 font-bold' : 'border-slate-300 bg-white'}`}>
                                                     <input
                                                         type="radio"
                                                         name="modo_combo"
                                                         checked={comboModoLimite === 'cantidad_maxima'}
                                                         onChange={() => setComboModoLimite('cantidad_maxima')}
                                                     />
-                                                    <span><strong>Cantidad máxima</strong></span>
+                                                    <span>Cantidad máxima</span>
                                                 </label>
                                             </div>
 
                                             {comboModoLimite === 'cantidad_maxima' && (
-                                                <div style={{ marginBottom: '0.5rem' }}>
-                                                    <label style={{ fontSize: '0.82rem', color: '#334155' }}>
-                                                        Número máximo de combos a vender:
-                                                        <input
-                                                            type="number"
-                                                            min="1"
-                                                            step="1"
-                                                            required
-                                                            value={comboCantidadMaxima}
-                                                            onChange={(e) => setComboCantidadMaxima(e.target.value)}
-                                                            style={{ ...inputStyle, marginTop: '0.2rem' }}
-                                                        />
-                                                    </label>
-                                                </div>
+                                                <label className="text-xs text-slate-700 flex flex-col gap-1">
+                                                    Número máximo de combos a vender:
+                                                    <Input
+                                                        type="number"
+                                                        min="1"
+                                                        step="1"
+                                                        required
+                                                        value={comboCantidadMaxima}
+                                                        onChange={(e) => setComboCantidadMaxima(e.target.value)}
+                                                        className="h-8 text-xs bg-white"
+                                                    />
+                                                </label>
                                             )}
                                         </div>
 
                                         {/* Vigencia Temporal */}
-                                        <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: '0.6rem' }}>
-                                            <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.84rem', fontWeight: 'bold', color: '#334155', cursor: 'pointer' }}>
+                                        <div className="border-t border-slate-200 pt-2.5">
+                                            <label className="flex items-center gap-2 text-xs font-bold text-slate-800 cursor-pointer">
                                                 <input
                                                     type="checkbox"
                                                     checked={comboUsaVigencia}
                                                     onChange={(e) => setComboUsaVigencia(e.target.checked)}
+                                                    className="rounded border-slate-300 text-sky-600 focus:ring-sky-500"
                                                 />
                                                 Programar vigencia temporal (Fecha y Hora)
                                             </label>
 
                                             {comboUsaVigencia && (
-                                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', marginTop: '0.4rem' }}>
-                                                    <label style={{ fontSize: '0.8rem', color: '#475569' }}>
+                                                <div className="grid grid-cols-2 gap-2 mt-2">
+                                                    <label className="text-[11px] text-slate-600 flex flex-col gap-1">
                                                         Válido Desde:
-                                                        <input
+                                                        <Input
                                                             type="datetime-local"
                                                             value={comboFechaInicio}
                                                             onChange={(e) => setComboFechaInicio(e.target.value)}
-                                                            style={{ ...inputStyle, marginTop: '0.2rem', fontSize: '0.8rem' }}
+                                                            className="h-8 text-xs bg-white"
                                                         />
                                                     </label>
-                                                    <label style={{ fontSize: '0.8rem', color: '#475569' }}>
+                                                    <label className="text-[11px] text-slate-600 flex flex-col gap-1">
                                                         Válido Hasta:
-                                                        <input
+                                                        <Input
                                                             type="datetime-local"
                                                             value={comboFechaFin}
                                                             onChange={(e) => setComboFechaFin(e.target.value)}
-                                                            style={{ ...inputStyle, marginTop: '0.2rem', fontSize: '0.8rem' }}
+                                                            className="h-8 text-xs bg-white"
                                                         />
                                                     </label>
                                                 </div>
@@ -1546,101 +1386,101 @@ export default function TabCatalogo({
                                 )}
 
                                 {tipoComposicion === 'libre' && (
-                                    <div style={{ background: '#f8fafc', padding: '0.75rem', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '0.82rem', color: '#64748b' }}>
+                                    <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 text-xs text-slate-600">
                                         ✨ <em>Este producto se registrará como servicio o venta libre sin descontar stock físico del inventario.</em>
                                     </div>
                                 )}
 
                                 {/* Panel de cálculo en vivo */}
-                                <div style={{ background: '#f0fdf4', padding: '0.85rem', borderRadius: '8px', border: '1px solid #bbf7d0', display: 'flex', justifyContent: 'space-around', alignItems: 'center', textAlign: 'center' }}>
+                                <div className="bg-emerald-50/60 p-3.5 rounded-lg border border-emerald-200 flex justify-around items-center text-center">
                                     <div>
-                                        <div style={{ fontSize: '0.75rem', color: '#166534', textTransform: 'uppercase', fontWeight: 'bold' }}>Costo Calculado</div>
-                                        <div style={{ fontSize: '1.25rem', fontWeight: 'bold', color: '#15803d' }}>
+                                        <div className="text-[10px] text-emerald-800 uppercase font-bold">Costo Calculado</div>
+                                        <div className="text-lg font-bold text-emerald-700">
                                             Bs {costoEstimado.toFixed(2)}
                                         </div>
                                     </div>
-                                    <div style={{ borderLeft: '1px solid #86efac', height: '35px' }} />
+                                    <div className="border-l border-emerald-300 h-8" />
                                     <div>
-                                        <div style={{ fontSize: '0.75rem', color: '#166534', textTransform: 'uppercase', fontWeight: 'bold' }}>Ganancia Estimada</div>
-                                        <div style={{ fontSize: '1.25rem', fontWeight: 'bold', color: gananciaEstimada >= 0 ? '#15803d' : '#b91c1c' }}>
+                                        <div className="text-[10px] text-emerald-800 uppercase font-bold">Ganancia Estimada</div>
+                                        <div className={`text-lg font-bold ${gananciaEstimada >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
                                             Bs {gananciaEstimada.toFixed(2)}
                                         </div>
                                     </div>
-                                    <div style={{ borderLeft: '1px solid #86efac', height: '35px' }} />
+                                    <div className="border-l border-emerald-300 h-8" />
                                     <div>
-                                        <div style={{ fontSize: '0.75rem', color: '#166534', textTransform: 'uppercase', fontWeight: 'bold' }}>Margen Comercial</div>
-                                        <div style={{ fontSize: '1.25rem', fontWeight: 'bold', color: margenPorcentaje >= 0 ? '#0284c7' : '#b91c1c' }}>
+                                        <div className="text-[10px] text-emerald-800 uppercase font-bold">Margen Comercial</div>
+                                        <div className={`text-lg font-bold ${margenPorcentaje >= 0 ? 'text-sky-700' : 'text-red-700'}`}>
                                             {margenPorcentaje.toFixed(1)}%
                                         </div>
                                     </div>
                                 </div>
 
-                                <button type="submit" style={{ ...btnPrimario, marginTop: '0.5rem', padding: '0.75rem' }}>
+                                <Button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 mt-1">
                                     ✅ Guardar Producto en Catálogo
-                                </button>
+                                </Button>
                             </form>
                         </section>
 
                         {/* COLUMNA DERECHA: REABASTECIMIENTO Y MERMAS */}
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                            <section style={cardStyle}>
-                                <h3 style={{ marginTop: 0 }}>🧱 Materiales e Insumos en Almacén</h3>
-                                <div style={{ maxHeight: '220px', overflowY: 'auto', border: '1px solid #e2e8f0', borderRadius: '6px' }}>
-                                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
-                                        <thead style={{ background: '#f8fafc', position: 'sticky', top: 0 }}>
-                                            <tr style={{ borderBottom: '1px solid #e2e8f0', textAlign: 'left' }}>
-                                                <th style={{ padding: '0.4rem' }}>Insumo</th>
-                                                <th style={{ padding: '0.4rem' }}>Stock</th>
-                                                <th style={{ padding: '0.4rem' }}>Costo Unit.</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
+                        <div className="flex flex-col gap-5">
+                            <section className="bg-white p-5 rounded-lg border border-slate-200 shadow-sm flex flex-col gap-3">
+                                <h3 className="text-base font-bold text-slate-900 m-0">🧱 Materiales e Insumos en Almacén</h3>
+                                <div className="max-h-52 overflow-y-auto border border-slate-200 rounded-lg">
+                                    <Table className="text-xs">
+                                        <TableHeader className="sticky top-0 bg-slate-50">
+                                            <TableRow>
+                                                <TableHead className="font-bold text-slate-900">Insumo</TableHead>
+                                                <TableHead className="font-bold text-slate-900">Stock</TableHead>
+                                                <TableHead className="font-bold text-slate-900">Costo Unit.</TableHead>
+                                            </TableRow>
+                                        </TableHeader>
+                                        <TableBody>
                                             {(datos?.insumos || []).length === 0 ? (
-                                                <tr>
-                                                    <td colSpan="3" style={{ padding: '1rem', textAlign: 'center', color: '#94a3b8' }}>
+                                                <TableRow>
+                                                    <TableCell colSpan="3" className="text-center text-slate-400 py-4">
                                                         Aún no tienes insumos registrados.
-                                                    </td>
-                                                </tr>
+                                                    </TableCell>
+                                                </TableRow>
                                             ) : (
                                                 (datos?.insumos || []).map((ins) => (
-                                                    <tr key={ins.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                                                        <td style={{ padding: '0.4rem' }}><strong>{ins.nombre}</strong></td>
-                                                        <td style={{ padding: '0.4rem' }}>{ins.stock_actual} {ins.unidad_medida}</td>
-                                                        <td style={{ padding: '0.4rem' }}>Bs {Number(ins.costo_por_unidad).toFixed(2)}</td>
-                                                    </tr>
+                                                    <TableRow key={ins.id}>
+                                                        <TableCell className="font-bold">{ins.nombre}</TableCell>
+                                                        <TableCell>{ins.stock_actual} {ins.unidad_medida}</TableCell>
+                                                        <TableCell>Bs {Number(ins.costo_por_unidad).toFixed(2)}</TableCell>
+                                                    </TableRow>
                                                 ))
                                             )}
-                                        </tbody>
-                                    </table>
+                                        </TableBody>
+                                    </Table>
                                 </div>
-                                <div style={{ marginTop: '0.75rem' }}>
-                                    <button
-                                        type="button"
-                                        onClick={() => { limpiarAlertas?.(); setSeccionActiva?.('insumos'); }}
-                                        style={{ ...btnSecundario, width: '100%', fontSize: '0.82rem', padding: '0.45rem', textAlign: 'center' }}
-                                    >
-                                        🚚 Ir a Reabastecer Insumos
-                                    </button>
-                                </div>
+                                <Button
+                                    type="button"
+                                    variant="secondary"
+                                    size="sm"
+                                    onClick={() => { limpiarAlertas?.(); setSeccionActiva?.('insumos'); }}
+                                    className="w-full text-xs font-semibold"
+                                >
+                                    🚚 Ir a Reabastecer Insumos
+                                </Button>
                             </section>
 
                             {usaStockDirecto && (
                                 <>
                                     {/* REABASTECER ARTÍCULO DIRECTO */}
-                                    <section style={cardStyle}>
-                                        <h3 style={{ marginTop: 0, fontSize: '0.98rem' }}>🚚 Reabastecer Artículo Directo (NIC 2)</h3>
+                                    <section className="bg-white p-5 rounded-lg border border-slate-200 shadow-sm flex flex-col gap-3">
+                                        <h3 className="text-base font-bold text-slate-900 m-0">🚚 Reabastecer Artículo Directo (NIC 2)</h3>
                                         {(() => {
                                             const productosDirectos = (datos?.productos || []).filter((p) => p.tipo_inventario === 'directo');
                                             if (productosDirectos.length === 0) {
                                                 return (
-                                                    <p style={{ margin: 0, fontSize: '0.82rem', color: '#64748b' }}>
+                                                    <p className="m-0 text-xs text-slate-500">
                                                         No hay artículos de reventa directa registrados.
                                                     </p>
                                                 );
                                             }
                                             return (
-                                                <form onSubmit={handleComprarProductoDirecto} style={formCol}>
-                                                    <select value={compraProdId} onChange={(e) => setCompraProdId(e.target.value)} style={inputStyle}>
+                                                <form onSubmit={handleComprarProductoDirecto} className="flex flex-col gap-2.5">
+                                                    <select value={compraProdId} onChange={(e) => setCompraProdId(e.target.value)} className="w-full h-8 rounded border border-slate-300 bg-white px-2 text-xs">
                                                         <option value="">-- Selecciona el artículo directo --</option>
                                                         {productosDirectos.map((p) => (
                                                             <option key={p.id} value={p.id}>
@@ -1648,26 +1488,26 @@ export default function TabCatalogo({
                                                             </option>
                                                         ))}
                                                     </select>
-                                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.4rem' }}>
-                                                        <input type="number" step="0.01" min="0.01" placeholder="Cantidad" required value={compraProdCantidad} onChange={(e) => setCompraProdCantidad(e.target.value)} style={inputStyle} />
-                                                        <input type="number" step="0.01" min="0" placeholder="Costo Total (Bs)" required value={compraProdCostoTotal} onChange={(e) => setCompraProdCostoTotal(e.target.value)} style={inputStyle} />
+                                                    <div className="grid grid-cols-2 gap-2">
+                                                        <Input type="number" step="0.01" min="0.01" placeholder="Cantidad" required value={compraProdCantidad} onChange={(e) => setCompraProdCantidad(e.target.value)} className="h-8 text-xs bg-white" />
+                                                        <Input type="number" step="0.01" min="0" placeholder="Costo Total (Bs)" required value={compraProdCostoTotal} onChange={(e) => setCompraProdCostoTotal(e.target.value)} className="h-8 text-xs bg-white" />
                                                     </div>
-                                                    <input
+                                                    <Input
                                                         type="text"
                                                         placeholder="Proveedor / Distribuidora (Opcional)"
                                                         value={compraProdProveedor}
                                                         onChange={(e) => setCompraProdProveedor(e.target.value)}
-                                                        style={{ ...inputStyle, fontSize: '0.8rem' }}
+                                                        className="h-8 text-xs bg-white"
                                                     />
-                                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.4rem' }}>
-                                                        <input
+                                                    <div className="grid grid-cols-2 gap-2">
+                                                        <Input
                                                             type="text"
                                                             placeholder="NIT Proveedor (Opc.)"
                                                             value={compraProdNit}
                                                             onChange={(e) => setCompraProdNit(e.target.value)}
-                                                            style={{ ...inputStyle, fontSize: '0.8rem' }}
+                                                            className="h-8 text-xs bg-white"
                                                         />
-                                                        <input
+                                                        <Input
                                                             type="text"
                                                             placeholder="N° Factura (Opc.)"
                                                             value={compraProdNroFactura}
@@ -1675,33 +1515,36 @@ export default function TabCatalogo({
                                                                 setCompraProdNroFactura(e.target.value);
                                                                 if (e.target.value.trim() !== '') setCompraProdConFactura(true);
                                                             }}
-                                                            style={{ ...inputStyle, fontSize: '0.8rem' }}
+                                                            className="h-8 text-xs bg-white"
                                                         />
                                                     </div>
-                                                    <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.8rem', color: '#1e293b', cursor: 'pointer' }}>
+                                                    <label className="flex items-center gap-1.5 text-xs text-slate-800 cursor-pointer">
                                                         <input
                                                             type="checkbox"
                                                             checked={compraProdConFactura}
                                                             onChange={(e) => setCompraProdConFactura(e.target.checked)}
+                                                            className="rounded border-slate-300 text-sky-600 focus:ring-sky-500"
                                                         />
                                                         <span>🧾 Compra con Factura Fiscal (Crédito Fiscal IVA)</span>
                                                     </label>
-                                                    <button type="submit" style={{ ...btnOscuro, padding: '0.45rem', fontSize: '0.82rem' }}>Registrar Entrada CPP</button>
+                                                    <Button type="submit" size="sm" className="bg-slate-900 hover:bg-slate-800 text-white font-bold h-8 text-xs">
+                                                        Registrar Entrada CPP
+                                                    </Button>
                                                 </form>
                                             );
                                         })()}
                                     </section>
 
                                     {/* REGISTRAR MERMA PRODUCTO DIRECTO */}
-                                    <section style={{ ...cardStyle, border: '1px solid #fecaca', background: '#fffdfd' }}>
-                                        <h3 style={{ marginTop: 0, fontSize: '0.98rem', color: '#991b1b' }}>
+                                    <section className="bg-red-50/40 p-5 rounded-lg border border-red-200 shadow-sm flex flex-col gap-3">
+                                        <h3 className="text-base font-bold text-red-800 m-0">
                                             ⚠️ Registrar Merma / Baja de Producto Directo
                                         </h3>
                                         {(() => {
                                             const productosDirectos = (datos?.productos || []).filter((p) => p.tipo_inventario === 'directo');
                                             if (productosDirectos.length === 0) {
                                                 return (
-                                                    <p style={{ margin: 0, fontSize: '0.82rem', color: '#64748b' }}>
+                                                    <p className="m-0 text-xs text-slate-500">
                                                         No hay productos directos registrados para dar de baja por merma.
                                                     </p>
                                                 );
@@ -1715,8 +1558,8 @@ export default function TabCatalogo({
                                             const cantidadInvalidaMerma = mermaProdCantidad !== '' && (cantBajaNum <= 0 || superaStock);
 
                                             return (
-                                                <div style={formCol}>
-                                                    <label style={{ fontSize: '0.82rem', color: '#334155', fontWeight: 600 }}>
+                                                <div className="flex flex-col gap-2.5">
+                                                    <label className="text-xs font-semibold text-slate-700 flex flex-col gap-1">
                                                         1. Seleccionar Producto Directo:
                                                         <select
                                                             value={mermaProdId || prodMermaSel?.id}
@@ -1725,7 +1568,7 @@ export default function TabCatalogo({
                                                                 setMermaProdConfirmando(false);
                                                                 setMermaProdResultado(null);
                                                             }}
-                                                            style={{ ...inputStyle, marginTop: '0.25rem' }}
+                                                            className="w-full h-8 rounded border border-slate-300 bg-white px-2 text-xs"
                                                         >
                                                             {productosDirectos.map((p) => (
                                                                 <option key={p.id} value={p.id}>
@@ -1735,10 +1578,10 @@ export default function TabCatalogo({
                                                         </select>
                                                     </label>
 
-                                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.4rem', alignItems: 'end' }}>
-                                                        <label style={{ fontSize: '0.82rem', color: '#334155', fontWeight: 600 }}>
+                                                    <div className="grid grid-cols-2 gap-2 items-end">
+                                                        <label className="text-xs font-semibold text-slate-700 flex flex-col gap-1">
                                                             2. Cantidad a Dar de Baja:
-                                                            <input
+                                                            <Input
                                                                 type="number"
                                                                 step="1"
                                                                 min="1"
@@ -1749,27 +1592,22 @@ export default function TabCatalogo({
                                                                     setMermaProdCantidad(e.target.value);
                                                                     setMermaProdConfirmando(false);
                                                                 }}
-                                                                style={{
-                                                                    ...inputStyle,
-                                                                    marginTop: '0.25rem',
-                                                                    borderColor: cantidadInvalidaMerma ? '#ef4444' : '#ccc',
-                                                                    background: cantidadInvalidaMerma ? '#fef2f2' : '#fff'
-                                                                }}
+                                                                className={`h-8 text-xs bg-white ${cantidadInvalidaMerma ? 'border-red-500 bg-red-50' : ''}`}
                                                             />
                                                         </label>
-                                                        <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '6px', padding: '0.45rem 0.6rem', textAlign: 'right' }}>
-                                                            <div style={{ fontSize: '0.7rem', color: '#991b1b', textTransform: 'uppercase', fontWeight: 'bold' }}>
+                                                        <div className="bg-red-50 border border-red-200 rounded-md p-1.5 text-right h-8 flex flex-col justify-center">
+                                                            <div className="text-[10px] text-red-800 uppercase font-bold">
                                                                 Costo Estimado
                                                             </div>
-                                                            <div style={{ fontSize: '1.05rem', fontWeight: 'bold', color: '#b91c1c' }}>
+                                                            <div className="text-xs font-bold text-red-700">
                                                                 Bs {costoEstimadoPerdida.toFixed(2)}
                                                             </div>
                                                         </div>
                                                     </div>
 
-                                                    <label style={{ fontSize: '0.82rem', color: '#334155', fontWeight: 600 }}>
+                                                    <label className="text-xs font-semibold text-slate-700 flex flex-col gap-1">
                                                         3. Motivo de la Merma:
-                                                        <input
+                                                        <Input
                                                             type="text"
                                                             placeholder="Ej. Vencido, roto, merma..."
                                                             value={mermaProdMotivo}
@@ -1777,52 +1615,49 @@ export default function TabCatalogo({
                                                                 setMermaProdMotivo(e.target.value);
                                                                 setMermaProdConfirmando(false);
                                                             }}
-                                                            style={{ ...inputStyle, marginTop: '0.25rem' }}
+                                                            className="h-8 text-xs bg-white"
                                                         />
                                                     </label>
 
                                                     {!mermaProdConfirmando ? (
-                                                        <button
+                                                        <Button
                                                             type="button"
+                                                            size="sm"
                                                             disabled={!prodMermaSel || stockActualProd <= 0 || cantBajaNum <= 0 || superaStock || !mermaProdMotivo || mermaProdMotivo.trim().length < 3}
                                                             onClick={() => setMermaProdConfirmando(true)}
-                                                            style={{
-                                                                ...btnPrimario,
-                                                                background: '#dc2626',
-                                                                padding: '0.5rem',
-                                                                fontSize: '0.84rem',
-                                                                opacity: (!prodMermaSel || stockActualProd <= 0 || cantBajaNum <= 0 || superaStock || !mermaProdMotivo || mermaProdMotivo.trim().length < 3) ? 0.55 : 1,
-                                                                cursor: (!prodMermaSel || stockActualProd <= 0 || cantBajaNum <= 0 || superaStock || !mermaProdMotivo || mermaProdMotivo.trim().length < 3) ? 'not-allowed' : 'pointer'
-                                                            }}
+                                                            className="w-full bg-red-600 hover:bg-red-700 text-white font-bold h-8 text-xs disabled:opacity-50"
                                                         >
                                                             Registrar Baja por Merma
-                                                        </button>
+                                                        </Button>
                                                     ) : (
-                                                        <div style={{ background: '#fffbeb', border: '2px solid #f59e0b', borderRadius: '8px', padding: '0.7rem', display: 'flex', flexDirection: 'column', gap: '0.45rem' }}>
-                                                            <div style={{ fontSize: '0.82rem', color: '#92400e', fontWeight: 'bold' }}>
+                                                        <div className="bg-amber-50 border-2 border-amber-400 rounded-lg p-3 flex flex-col gap-2">
+                                                            <div className="text-xs text-amber-900 font-bold">
                                                                 ⚠️ ¿Confirmar baja de {cantBajaNum} {prodMermaSel?.unidad_medida || 'u.'}?
                                                             </div>
-                                                            <div style={{ display: 'flex', gap: '0.4rem' }}>
-                                                                <button
+                                                            <div className="flex gap-2">
+                                                                <Button
                                                                     type="button"
+                                                                    size="sm"
                                                                     onClick={handleConfirmarMermaProductoDirecto}
-                                                                    style={{ ...btnPrimario, background: '#dc2626', flex: 1, padding: '0.45rem', fontSize: '0.82rem' }}
+                                                                    className="flex-1 bg-red-600 hover:bg-red-700 text-white font-bold h-8 text-xs"
                                                                 >
                                                                     ✅ Confirmar Merma
-                                                                </button>
-                                                                <button
+                                                                </Button>
+                                                                <Button
                                                                     type="button"
+                                                                    size="sm"
+                                                                    variant="secondary"
                                                                     onClick={() => setMermaProdConfirmando(false)}
-                                                                    style={{ ...btnSecundario, padding: '0.45rem 0.75rem', fontSize: '0.82rem', cursor: 'pointer', border: '1px solid #cbd5e1' }}
+                                                                    className="h-8 text-xs"
                                                                 >
                                                                     Cancelar
-                                                                </button>
+                                                                </Button>
                                                             </div>
                                                         </div>
                                                     )}
 
                                                     {mermaProdResultado && (
-                                                        <div style={{ background: '#f0fdf4', border: '1px solid #86efac', borderRadius: '6px', padding: '0.6rem', fontSize: '0.8rem', color: '#166534' }}>
+                                                        <div className="bg-emerald-50 border border-emerald-200 rounded-md p-2 text-xs text-emerald-800">
                                                             <div><strong>✅ Merma registrada:</strong> {mermaProdResultado.productoNombre} (-{mermaProdResultado.cantidadPerdida} {mermaProdResultado.unidadMedida}) | Stock restante: <strong>{mermaProdResultado.stockRestante}</strong></div>
                                                         </div>
                                                     )}
@@ -1836,21 +1671,21 @@ export default function TabCatalogo({
                     </div>
 
                     {/* TABLA DE ARTÍCULOS */}
-                    <section style={{ ...cardStyle, marginTop: '0.5rem' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem', marginBottom: '0.85rem' }}>
+                    <section className="bg-white p-5 rounded-lg border border-slate-200 shadow-sm flex flex-col gap-4 mt-2">
+                        <div className="flex justify-between items-center flex-wrap gap-3">
                             <div>
-                                <h3 style={{ margin: 0 }}>
+                                <h3 className="text-lg font-bold text-slate-900 m-0">
                                     Catálogo de Artículos {categoriaTabActiva !== 'todas' ? `— Categoría: ${categoriaTabActiva}` : ''}
                                 </h3>
-                                <span style={{ fontSize: '0.82rem', color: '#64748b' }}>
+                                <span className="text-xs text-slate-500">
                                     {productosFiltrados.length} artículo(s) encontrado(s) de un total de {(datos?.productos || []).length}
                                 </span>
                             </div>
 
                             {/* Buscador Rápido y Selector de Límite de Productos */}
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-                                <div style={{ position: 'relative', minWidth: '240px' }}>
-                                    <input
+                            <div className="flex items-center gap-2 flex-wrap">
+                                <div className="relative min-w-[240px]">
+                                    <Input
                                         type="text"
                                         placeholder="🔍 Buscar artículo por nombre o categoría..."
                                         value={busquedaProductos}
@@ -1858,7 +1693,7 @@ export default function TabCatalogo({
                                             setBusquedaProductos(e.target.value);
                                             setPaginaProductos(1);
                                         }}
-                                        style={{ ...inputStyle, padding: '0.45rem 2rem 0.45rem 0.65rem', fontSize: '0.85rem' }}
+                                        className="h-9 pr-8 text-xs bg-white"
                                     />
                                     {busquedaProductos && (
                                         <button
@@ -1867,18 +1702,7 @@ export default function TabCatalogo({
                                                 setBusquedaProductos('');
                                                 setPaginaProductos(1);
                                             }}
-                                            style={{
-                                                position: 'absolute',
-                                                right: '8px',
-                                                top: '50%',
-                                                transform: 'translateY(-50%)',
-                                                background: 'transparent',
-                                                border: 'none',
-                                                color: '#94a3b8',
-                                                cursor: 'pointer',
-                                                fontWeight: 'bold',
-                                                fontSize: '0.9rem'
-                                            }}
+                                            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 font-bold text-xs"
                                             title="Limpiar búsqueda"
                                         >
                                             ✕
@@ -1892,7 +1716,7 @@ export default function TabCatalogo({
                                         setLimitePorPaginaProductos(Number(e.target.value));
                                         setPaginaProductos(1);
                                     }}
-                                    style={{ ...inputStyle, width: 'auto', padding: '0.45rem', fontSize: '0.85rem' }}
+                                    className="h-9 rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs shadow-sm focus:outline-none"
                                     title="Artículos por página"
                                 >
                                     <option value={5}>5 por pág.</option>
@@ -1904,153 +1728,151 @@ export default function TabCatalogo({
                         </div>
 
                         {productosFiltrados.length === 0 ? (
-                            <div style={{ padding: '2rem', textAlign: 'center', color: '#64748b', background: '#f8fafc', borderRadius: '6px' }}>
+                            <div className="p-8 text-center text-slate-500 bg-slate-50 rounded-lg text-sm">
                                 {busquedaProductos
                                     ? <>No se encontraron artículos que coincidan con &ldquo;<strong>{busquedaProductos}</strong>&rdquo;.</>
                                     : 'No hay artículos registrados en esta categoría.'}
                             </div>
                         ) : (
                             <>
-                                <div style={{ overflowX: 'auto' }}>
-                                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.88rem' }}>
-                                        <thead>
-                                            <tr style={{ borderBottom: '2px solid #e5e7eb', textAlign: 'left', background: '#f8fafc' }}>
-                                                <th style={thTd}>ID</th>
-                                                <th style={thTd}>Artículo</th>
-                                                <th style={thTd}>Categoría</th>
-                                                <th style={thTd}>Modalidad</th>
-                                                <th style={thTd}>Precio Venta</th>
-                                                <th style={thTd}>Costo Unitario</th>
-                                                <th style={thTd}>Ganancia Unitaria</th>
-                                                <th style={thTd}>Disponibilidad (Stock)</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
+                                <div className="overflow-x-auto border border-slate-200 rounded-lg">
+                                    <Table className="text-xs">
+                                        <TableHeader>
+                                            <TableRow className="bg-slate-50">
+                                                <TableHead className="font-bold text-slate-900">ID</TableHead>
+                                                <TableHead className="font-bold text-slate-900">Artículo</TableHead>
+                                                <TableHead className="font-bold text-slate-900">Categoría</TableHead>
+                                                <TableHead className="font-bold text-slate-900">Modalidad</TableHead>
+                                                <TableHead className="font-bold text-slate-900">Precio Venta</TableHead>
+                                                <TableHead className="font-bold text-slate-900">Costo Unitario</TableHead>
+                                                <TableHead className="font-bold text-slate-900">Ganancia Unitaria</TableHead>
+                                                <TableHead className="font-bold text-slate-900">Disponibilidad (Stock)</TableHead>
+                                            </TableRow>
+                                        </TableHeader>
+                                        <TableBody>
                                             {productosPaginados.map((p) => {
                                                 const gananciaUni = Number(p.precio) - Number(p.costo || 0);
                                                 const stockBajo = p.tipo_inventario === 'directo' && Number(p.stock) <= Number(p.stock_minimo || 0);
                                                 return (
-                                                    <tr key={p.id} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                                                        <td style={thTd}>#{p.id}</td>
-                                                        <td style={thTd}>
-                                                            <strong>{p.nombre}</strong>
+                                                    <TableRow key={p.id}>
+                                                        <TableCell className="font-medium text-slate-500">#{p.id}</TableCell>
+                                                        <TableCell>
+                                                            <strong className="text-slate-900">{p.nombre}</strong>
                                                             {p.grupos_modificadores && p.grupos_modificadores.length > 0 && (
-                                                                <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap', marginTop: '0.25rem' }}>
+                                                                <div className="flex gap-1 flex-wrap mt-1">
                                                                     {p.grupos_modificadores.map((g) => (
-                                                                        <span key={g.id} style={{ fontSize: '0.68rem', background: '#e0f2fe', color: '#0369a1', padding: '0.1rem 0.35rem', borderRadius: '4px', fontWeight: 600 }}>
+                                                                        <Badge key={g.id} variant="outline" className="bg-sky-50 text-sky-800 border-sky-200 text-[10px] font-semibold py-0 px-1.5">
                                                                             ✨ {g.nombre}
-                                                                        </span>
+                                                                        </Badge>
                                                                     ))}
                                                                 </div>
                                                             )}
-                                                        </td>
-                                                        <td style={thTd}>
+                                                        </TableCell>
+                                                        <TableCell>
                                                             {p.categoria && p.categoria.trim() ? (
-                                                                <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap' }}>
+                                                                <div className="flex gap-1 flex-wrap">
                                                                     {p.categoria.split(',').map((catItem, idx) => {
                                                                         const cTrim = catItem.trim();
                                                                         if (!cTrim) return null;
                                                                         return (
-                                                                            <span
+                                                                            <Badge
                                                                                 key={idx}
-                                                                                style={{
-                                                                                    background: '#eff6ff',
-                                                                                    color: '#0369a1',
-                                                                                    border: '1px solid #bae6fd',
-                                                                                    padding: '0.15rem 0.5rem',
-                                                                                    borderRadius: '999px',
-                                                                                    fontSize: '0.75rem',
-                                                                                    fontWeight: '600',
-                                                                                    whiteSpace: 'nowrap'
-                                                                                }}
+                                                                                variant="secondary"
+                                                                                className="bg-sky-50 text-sky-700 border border-sky-200 text-[11px] font-semibold"
                                                                             >
                                                                                 🏷️ {cTrim}
-                                                                            </span>
+                                                                            </Badge>
                                                                         );
                                                                     })}
                                                                 </div>
                                                             ) : (
-                                                                <span style={{ color: '#94a3b8', fontSize: '0.78rem', fontStyle: 'italic' }}>
+                                                                <span className="text-slate-400 text-xs italic">
                                                                     Sin categoría
                                                                 </span>
                                                             )}
-                                                        </td>
-                                                        <td style={thTd}>
-                                                            {p.tipo_inventario === 'receta'
-                                                                ? '🧪 Receta / Insumo'
-                                                                : p.tipo_inventario === 'directo'
-                                                                ? '📦 Reventa Directa'
-                                                                : p.tipo_inventario === 'combo'
-                                                                ? '🎁 Combo / Promo'
-                                                                : '✨ Libre'}
+                                                        </TableCell>
+                                                        <TableCell>
+                                                            <div>
+                                                                {p.tipo_inventario === 'receta' ? (
+                                                                    <Badge variant="outline" className="bg-purple-50 text-purple-700 border-purple-200 font-semibold text-[11px]">
+                                                                        🧪 Receta / Insumo
+                                                                    </Badge>
+                                                                ) : p.tipo_inventario === 'directo' ? (
+                                                                    <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200 font-semibold text-[11px]">
+                                                                        📦 Reventa Directa
+                                                                    </Badge>
+                                                                ) : p.tipo_inventario === 'combo' ? (
+                                                                    <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 font-semibold text-[11px]">
+                                                                        🎁 Combo / Promo
+                                                                    </Badge>
+                                                                ) : (
+                                                                    <Badge variant="outline" className="bg-slate-50 text-slate-700 border-slate-200 font-semibold text-[11px]">
+                                                                        ✨ Libre
+                                                                    </Badge>
+                                                                )}
+                                                            </div>
                                                             {p.tipo_inventario === 'combo' && Number(p.limite_maximo_activo) === 1 && (
-                                                                <div style={{ fontSize: '0.72rem', color: '#0284c7', marginTop: '0.2rem' }}>
+                                                                <div className="text-[11px] text-sky-700 mt-1 font-medium">
                                                                     Límite: {p.limite_unidades_restante}/{p.limite_unidades_total} u.
                                                                 </div>
                                                             )}
                                                             {p.tipo_inventario === 'combo' && (p.fecha_inicio_vigencia || p.fecha_fin_vigencia) && (
-                                                                <div style={{ fontSize: '0.7rem', color: p.esta_vigente === false ? '#dc2626' : '#166534', marginTop: '0.15rem' }}>
-                                                                    {p.esta_vigente === false ? `⛔ ${p.motivo_no_vigente || 'Fuera de vigencia'}` : '🟢 En vigencia'}
+                                                                <div className="mt-1">
+                                                                    {p.esta_vigente === false ? (
+                                                                        <Badge variant="destructive" className="bg-red-100 text-red-800 border-red-200 hover:bg-red-100 text-[10px]">
+                                                                            ⛔ {p.motivo_no_vigente || 'Fuera de vigencia'}
+                                                                        </Badge>
+                                                                    ) : (
+                                                                        <Badge className="bg-emerald-100 text-emerald-800 border-emerald-200 hover:bg-emerald-100 text-[10px]">
+                                                                            🟢 En vigencia
+                                                                        </Badge>
+                                                                    )}
                                                                 </div>
                                                             )}
-                                                        </td>
-                                                        <td style={{ ...thTd, fontWeight: 'bold' }}>Bs {Number(p.precio).toFixed(2)}</td>
-                                                        <td style={thTd}>Bs {Number(p.costo).toFixed(2)}</td>
-                                                        <td style={{ ...thTd, color: gananciaUni >= 0 ? '#15803d' : '#b91c1c', fontWeight: 'bold' }}>
+                                                        </TableCell>
+                                                        <TableCell className="font-bold text-slate-900">Bs {Number(p.precio).toFixed(2)}</TableCell>
+                                                        <TableCell>Bs {Number(p.costo).toFixed(2)}</TableCell>
+                                                        <TableCell className={`font-bold ${gananciaUni >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
                                                             Bs {gananciaUni.toFixed(2)}
-                                                        </td>
-                                                        <td style={{ ...thTd, fontWeight: 'bold', color: p.unidades_disponibles === 0 ? '#b91c1c' : '#166534' }}>
+                                                        </TableCell>
+                                                        <TableCell className={`font-bold ${p.unidades_disponibles === 0 ? 'text-red-700' : 'text-emerald-700'}`}>
                                                             {p.tipo_inventario === 'libre' || p.unidades_disponibles === null
                                                                 ? 'Libre (Servicio)'
                                                                 : `${p.unidades_disponibles} ${p.unidad_medida || 'u.'} ${p.insumo_limitante ? `(Límite: ${p.insumo_limitante})` : ''} ${stockBajo ? '⚠️ (Reponer)' : ''}`}
-                                                        </td>
-                                                    </tr>
+                                                        </TableCell>
+                                                    </TableRow>
                                                 );
                                             })}
-                                        </tbody>
-                                    </table>
+                                        </TableBody>
+                                    </Table>
                                 </div>
 
                                 {totalPaginasProductos > 1 && (
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '1rem', paddingTop: '0.75rem', borderTop: '1px solid #e2e8f0', flexWrap: 'wrap', gap: '0.5rem' }}>
-                                        <span style={{ fontSize: '0.82rem', color: '#64748b' }}>
+                                    <div className="flex justify-between items-center mt-3 pt-3 border-t border-slate-200 flex-wrap gap-2">
+                                        <span className="text-xs text-slate-500">
                                             Mostrando {inicioProductos + 1} - {Math.min(inicioProductos + limitePorPaginaProductos, productosFiltrados.length)} de {productosFiltrados.length}
                                         </span>
-                                        <div style={{ display: 'flex', gap: '0.35rem', alignItems: 'center' }}>
-                                            <button
+                                        <div className="flex gap-1.5 items-center">
+                                            <Button
                                                 type="button"
+                                                size="sm"
+                                                variant="outline"
                                                 disabled={paginaProductosValida <= 1}
                                                 onClick={() => setPaginaProductos((p) => Math.max(1, p - 1))}
-                                                style={{
-                                                    padding: '0.35rem 0.75rem',
-                                                    borderRadius: '4px',
-                                                    border: '1px solid #cbd5e1',
-                                                    background: paginaProductosValida <= 1 ? '#f1f5f9' : '#ffffff',
-                                                    color: paginaProductosValida <= 1 ? '#94a3b8' : '#0f172a',
-                                                    cursor: paginaProductosValida <= 1 ? 'not-allowed' : 'pointer',
-                                                    fontSize: '0.82rem',
-                                                    fontWeight: 'bold'
-                                                }}
+                                                className="h-7 text-xs font-bold"
                                             >
                                                 ◀ Anterior
-                                            </button>
-                                            <button
+                                            </Button>
+                                            <Button
                                                 type="button"
+                                                size="sm"
+                                                variant="outline"
                                                 disabled={paginaProductosValida >= totalPaginasProductos}
                                                 onClick={() => setPaginaProductos((p) => Math.min(totalPaginasProductos, p + 1))}
-                                                style={{
-                                                    padding: '0.35rem 0.75rem',
-                                                    borderRadius: '4px',
-                                                    border: '1px solid #cbd5e1',
-                                                    background: paginaProductosValida >= totalPaginasProductos ? '#f1f5f9' : '#ffffff',
-                                                    color: paginaProductosValida >= totalPaginasProductos ? '#94a3b8' : '#0f172a',
-                                                    cursor: paginaProductosValida >= totalPaginasProductos ? 'not-allowed' : 'pointer',
-                                                    fontSize: '0.82rem',
-                                                    fontWeight: 'bold'
-                                                }}
+                                                className="h-7 text-xs font-bold"
                                             >
                                                 Siguiente ▶
-                                            </button>
+                                            </Button>
                                         </div>
                                     </div>
                                 )}

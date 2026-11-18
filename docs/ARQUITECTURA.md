@@ -7,6 +7,7 @@ Este documento describe la arquitectura global del sistema POS y Control de Caja
 ## 1. Stack Tecnológico
 
 - **Frontend / Fullstack:** Next.js 16 (App Router) con React 19.
+- **Estilos y Componentes UI:** Tailwind CSS con Shadcn UI (`components/ui/*`, `@base-ui/react`, `class-variance-authority`, `lucide-react`) y diseño responsivo adaptado a terminal táctil y escritorio.
 - **Base de Datos:** SQLite3 local (`sqlite3@^6.0.1`) con SQL nativo parametrizado (`?`) sin ORMs.
 - **Autenticación y Criptografía:** JWT firmado con `jose` (`^6.2.17`) en cookies `HttpOnly` (`pos_session`) y hash de contraseñas con `bcryptjs` (`^3.0.3`) (10 rondas de salt).
 - **Reportes y Visualización:**
@@ -42,8 +43,7 @@ El sistema implementa una arquitectura en capas limpias que separa la interfaz v
 │   │       ├── TabKardex.js          # Kardex detallado e integridad matemática
 │   │       ├── TabConfigFiscal.js    # Régimen tributario, alícuotas y modalidad de negocio
 │   │       ├── TabExportacion.js     # Descarga de reportes contables
-│   │       ├── TabResumen.js         # Métricas ejecutivas y anulación de ventas
-│   │       └── adminStyles.js        # Estilos centralizados del panel de administración
+│   │       └── TabResumen.js         # Métricas ejecutivas y anulación de ventas
 │   └── caja/
 │       ├── page.js                   # Terminal POS del operador / cajero
 │       ├── _hooks/                   # Hooks personalizados de interfaz:
@@ -58,8 +58,10 @@ El sistema implementa una arquitectura en capas limpias que separa la interfaz v
 │           ├── ModalMovimientosEfectivo.js # Registro de egresos e inyecciones de cambio
 │           ├── HistorialTurno.js     # Ventas del turno actual y reemisión de tickets
 │           ├── AperturaTurno.js      # Selección de caja física y fondo inicial
-│           ├── LoginCaja.js          # Selector de cajero y PIN numérico
-│           └── cajaStyles.js         # Estilos visuales del POS táctil
+│           └── LoginCaja.js          # Selector de cajero y PIN numérico
+├── components/ui/                    # Primitivas UI reutilizables de Shadcn (button, card, input, badge, table, dialog, etc.)
+├── lib/
+│   └── utils.js                      # Utilidad cn() (clsx + tailwind-merge) para clases dinámicas
 ├── server/                           # Núcleo de backend y lógica del servidor
 │   ├── actions/                      # Capa de mutaciones protegidas con Server Actions ('use server')
 │   │   ├── _wrapper.js               # Envoltorio seguro: validación de sesión HttpOnly y RBAC estricto

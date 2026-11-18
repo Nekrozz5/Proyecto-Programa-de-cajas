@@ -1,7 +1,9 @@
 'use client';
 
 import { useState } from 'react';
-import { cardStyle, btnPrimario, inputStyle } from './adminStyles';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Badge } from '@/components/ui/badge';
 import { exportarReportePDF } from '../exportarPDF';
 
 export default function TabExportacion({
@@ -21,72 +23,74 @@ export default function TabExportacion({
     const est = datos?.estadisticas;
 
     return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', maxWidth: '1100px' }}>
+        <div className="flex flex-col gap-6 max-w-5xl">
             {/* Encabezado de la Sección */}
-            <section style={cardStyle}>
-                <h2 style={{ marginTop: 0, marginBottom: '0.35rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <section className="bg-white p-5 rounded-lg border border-slate-200 shadow-sm">
+                <h2 className="text-xl font-bold text-slate-900 m-0 mb-1.5 flex items-center gap-2">
                     📥 Centro de Exportación de Reportes
                 </h2>
-                <p style={{ color: '#475569', fontSize: '0.92rem', margin: 0 }}>
+                <p className="text-slate-600 text-sm m-0">
                     Exporta y audita los datos operativos y financieros del negocio en los 3 formatos oficiales: <strong>Excel (.xlsx)</strong>, <strong>PDF de Auditoría de Turno</strong> y <strong>CSV Contable</strong>. Puedes aplicar filtros por rango de fechas, operador y estación física de caja.
                 </p>
             </section>
 
             {/* Filtros de Exportación */}
-            <section style={{ ...cardStyle, background: '#f8fafc', border: '1px solid #e2e8f0' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.85rem', flexWrap: 'wrap', gap: '0.5rem' }}>
-                    <h3 style={{ margin: 0, fontSize: '1rem', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+            <section className="bg-slate-50 p-5 rounded-lg border border-slate-200 shadow-sm">
+                <div className="flex justify-between items-center mb-3.5 flex-wrap gap-2">
+                    <h3 className="m-0 text-sm font-bold text-slate-900 flex items-center gap-1.5">
                         📅 Filtros de Exportación (Excel y CSV)
                     </h3>
                     {(filtroExportDesde || filtroExportHasta || filtroExportUsuarioId || filtroExportCajaFisicaId) && (
-                        <button
+                        <Button
                             type="button"
+                            variant="secondary"
+                            size="sm"
                             onClick={() => {
                                 setFiltroExportDesde('');
                                 setFiltroExportHasta('');
                                 setFiltroExportUsuarioId('');
                                 setFiltroExportCajaFisicaId('');
                             }}
-                            style={{ padding: '0.3rem 0.65rem', background: '#e2e8f0', color: '#475569', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 'bold' }}
+                            className="h-7 text-xs font-semibold"
                         >
                             ✕ Limpiar Filtros
-                        </button>
+                        </Button>
                     )}
                 </div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.75rem' }}>
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
                     <div>
-                        <label style={{ display: 'block', fontSize: '0.8rem', color: '#64748b', fontWeight: 'bold', marginBottom: '0.25rem' }}>
+                        <label className="block text-xs text-slate-600 font-bold mb-1">
                             Fecha Desde:
                         </label>
-                        <input
+                        <Input
                             type="date"
                             title="Fecha desde"
                             value={filtroExportDesde}
                             onChange={(e) => setFiltroExportDesde(e.target.value)}
-                            style={{ ...inputStyle, padding: '0.45rem', fontSize: '0.88rem' }}
+                            className="h-9 bg-white text-sm"
                         />
                     </div>
                     <div>
-                        <label style={{ display: 'block', fontSize: '0.8rem', color: '#64748b', fontWeight: 'bold', marginBottom: '0.25rem' }}>
+                        <label className="block text-xs text-slate-600 font-bold mb-1">
                             Fecha Hasta:
                         </label>
-                        <input
+                        <Input
                             type="date"
                             title="Fecha hasta"
                             value={filtroExportHasta}
                             onChange={(e) => setFiltroExportHasta(e.target.value)}
-                            style={{ ...inputStyle, padding: '0.45rem', fontSize: '0.88rem' }}
+                            className="h-9 bg-white text-sm"
                         />
                     </div>
                     <div>
-                        <label style={{ display: 'block', fontSize: '0.8rem', color: '#64748b', fontWeight: 'bold', marginBottom: '0.25rem' }}>
+                        <label className="block text-xs text-slate-600 font-bold mb-1">
                             Operador / Cajero:
                         </label>
                         <select
                             title="Filtrar por operador"
                             value={filtroExportUsuarioId}
                             onChange={(e) => setFiltroExportUsuarioId(e.target.value)}
-                            style={{ ...inputStyle, padding: '0.45rem', fontSize: '0.88rem' }}
+                            className="w-full h-9 rounded-md border border-slate-300 bg-white px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-slate-950"
                         >
                             <option value="">Todos los operadores</option>
                             {(datos?.usuarios || []).map((u) => (
@@ -95,14 +99,14 @@ export default function TabExportacion({
                         </select>
                     </div>
                     <div>
-                        <label style={{ display: 'block', fontSize: '0.8rem', color: '#64748b', fontWeight: 'bold', marginBottom: '0.25rem' }}>
+                        <label className="block text-xs text-slate-600 font-bold mb-1">
                             Estación Física de Caja:
                         </label>
                         <select
                             title="Filtrar por estación física"
                             value={filtroExportCajaFisicaId}
                             onChange={(e) => setFiltroExportCajaFisicaId(e.target.value)}
-                            style={{ ...inputStyle, padding: '0.45rem', fontSize: '0.88rem' }}
+                            className="w-full h-9 rounded-md border border-slate-300 bg-white px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-slate-950"
                         >
                             <option value="">Todas las estaciones</option>
                             {(datos?.cajasFisicas || []).map((cf) => (
@@ -112,7 +116,7 @@ export default function TabExportacion({
                     </div>
                 </div>
                 {(filtroExportDesde || filtroExportHasta || filtroExportUsuarioId || filtroExportCajaFisicaId) && (
-                    <div style={{ marginTop: '0.75rem', fontSize: '0.8rem', color: '#0369a1', background: '#e0f2fe', padding: '0.4rem 0.65rem', borderRadius: '4px' }}>
+                    <div className="mt-3 text-xs text-sky-800 bg-sky-50 border border-sky-200 px-3 py-2 rounded-md flex flex-wrap gap-1">
                         ℹ️ Filtro activo: {[
                             filtroExportDesde ? `Desde: ${filtroExportDesde}` : '',
                             filtroExportHasta ? `Hasta: ${filtroExportHasta}` : '',
@@ -124,22 +128,22 @@ export default function TabExportacion({
             </section>
 
             {/* Las 3 Opciones de Formato */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(310px, 1fr))', gap: '1.25rem' }}>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
                 {/* Formato 1: Excel Contable (.xlsx) */}
-                <section style={{ ...cardStyle, display: 'flex', flexDirection: 'column', justifyContent: 'space-between', borderTop: '4px solid #16a34a' }}>
+                <section className="bg-white p-5 rounded-lg border border-slate-200 shadow-sm flex flex-col justify-between border-t-4 border-t-emerald-600 gap-4">
                     <div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-                            <h3 style={{ margin: 0, color: '#166534', fontSize: '1.15rem' }}>
+                        <div className="flex justify-between items-center mb-2">
+                            <h3 className="m-0 text-emerald-800 font-bold text-lg">
                                 📊 Excel Contable (.xlsx)
                             </h3>
-                            <span style={{ fontSize: '0.72rem', background: '#dcfce7', color: '#166534', padding: '0.2rem 0.5rem', borderRadius: '4px', fontWeight: 'bold' }}>
+                            <Badge className="bg-emerald-100 text-emerald-800 hover:bg-emerald-100 border border-emerald-300 font-bold">
                                 10 Hojas Contables
-                            </span>
+                            </Badge>
                         </div>
-                        <p style={{ color: '#475569', fontSize: '0.86rem', lineHeight: '1.4' }}>
+                        <p className="text-slate-600 text-xs leading-relaxed">
                             Libro contable y de auditoría integral con 10 hojas estructuradas:
                         </p>
-                        <ul style={{ color: '#64748b', fontSize: '0.8rem', paddingLeft: '1.2rem', margin: '0.5rem 0 1rem 0', lineHeight: '1.45' }}>
+                        <ul className="text-slate-500 text-xs pl-4 my-2 leading-relaxed list-disc">
                             <li>Movimientos y arqueos de caja auditados.</li>
                             <li>Detalle Ventas (CMV) con prorrateo exacto de descuentos.</li>
                             <li>Rentabilidad neta por producto y compras/mermas.</li>
@@ -149,34 +153,34 @@ export default function TabExportacion({
                     </div>
                     <a
                         href={`/api/reportes?formato=xlsx${filtroExportDesde ? `&desde=${filtroExportDesde}` : ''}${filtroExportHasta ? `&hasta=${filtroExportHasta}` : ''}${filtroExportUsuarioId ? `&usuarioId=${filtroExportUsuarioId}` : ''}${filtroExportCajaFisicaId ? `&cajaFisicaId=${filtroExportCajaFisicaId}` : ''}`}
-                        style={{ ...btnPrimario, background: '#16a34a', textAlign: 'center', fontSize: '0.92rem', padding: '0.75rem 1rem', display: 'block', borderRadius: '6px' }}
+                        className="w-full text-center py-2.5 px-4 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm shadow transition-colors block"
                     >
                         📊 Descargar Excel Contable (.xlsx)
                     </a>
                 </section>
 
                 {/* Formato 2: PDF de Auditoría de Turno */}
-                <section style={{ ...cardStyle, display: 'flex', flexDirection: 'column', justifyContent: 'space-between', borderTop: '4px solid #dc2626' }}>
+                <section className="bg-white p-5 rounded-lg border border-slate-200 shadow-sm flex flex-col justify-between border-t-4 border-t-red-600 gap-4">
                     <div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-                            <h3 style={{ margin: 0, color: '#991b1b', fontSize: '1.15rem' }}>
+                        <div className="flex justify-between items-center mb-2">
+                            <h3 className="m-0 text-red-800 font-bold text-lg">
                                 📄 PDF de Auditoría de Turno
                             </h3>
-                            <span style={{ fontSize: '0.72rem', background: '#fee2e2', color: '#991b1b', padding: '0.2rem 0.5rem', borderRadius: '4px', fontWeight: 'bold' }}>
+                            <Badge variant="destructive" className="bg-red-100 text-red-800 hover:bg-red-100 border border-red-300 font-bold">
                                 Turno #{datos?.cajaAuditada?.id || '—'}
-                            </span>
+                            </Badge>
                         </div>
-                        <p style={{ color: '#475569', fontSize: '0.86rem', lineHeight: '1.4' }}>
+                        <p className="text-slate-600 text-xs leading-relaxed">
                             Reporte imprimible de cierre y auditoría de turno con liquidación tributaria:
                         </p>
-                        <ul style={{ color: '#64748b', fontSize: '0.8rem', paddingLeft: '1.2rem', margin: '0.5rem 0 0.75rem 0', lineHeight: '1.45' }}>
+                        <ul className="text-slate-500 text-xs pl-4 my-2 leading-relaxed list-disc">
                             <li>Resumen ejecutivo y liquidación fiscal (IVA / IT).</li>
                             <li>Conciliación separada de efectivo vs. QR y arqueo ciego.</li>
                             <li>Ventas netas de descuentos y rentabilidad por producto.</li>
                             <li>Bitácora de movimientos y ventas anuladas.</li>
                         </ul>
-                        <div style={{ background: '#f8fafc', padding: '0.5rem', borderRadius: '6px', border: '1px solid #e2e8f0', marginBottom: '1rem' }}>
-                            <label style={{ display: 'block', fontSize: '0.75rem', color: '#64748b', fontWeight: 'bold', marginBottom: '0.25rem' }}>
+                        <div className="bg-slate-50 p-2.5 rounded-md border border-slate-200 my-2">
+                            <label className="block text-xs text-slate-600 font-bold mb-1">
                                 Turno Seleccionado para Auditoría:
                             </label>
                             <select
@@ -188,7 +192,7 @@ export default function TabExportacion({
                                         await cargarTodo?.(nuevoId);
                                     }
                                 }}
-                                style={{ ...inputStyle, padding: '0.35rem', fontSize: '0.8rem' }}
+                                className="w-full h-8 rounded-md border border-slate-300 bg-white px-2 py-0.5 text-xs shadow-sm focus:outline-none"
                             >
                                 {(datos?.historialCajas || []).map((c) => (
                                     <option key={c.id} value={c.id}>
@@ -198,8 +202,9 @@ export default function TabExportacion({
                             </select>
                         </div>
                     </div>
-                    <button
+                    <Button
                         type="button"
+                        variant="destructive"
                         onClick={() =>
                             exportarReportePDF({
                                 nombreNegocio: configActual.nombre_negocio,
@@ -211,27 +216,27 @@ export default function TabExportacion({
                                 desglosePagos: datos?.desglosePagos
                             })
                         }
-                        style={{ ...btnPrimario, background: '#dc2626', textAlign: 'center', fontSize: '0.92rem', padding: '0.75rem 1rem', width: '100%', cursor: 'pointer', borderRadius: '6px' }}
+                        className="w-full bg-red-600 hover:bg-red-700 text-white font-bold text-sm py-2.5 shadow"
                     >
                         📄 Descargar PDF (Turno #{datos?.cajaAuditada?.id || '—'})
-                    </button>
+                    </Button>
                 </section>
 
                 {/* Formato 3: CSV Contable */}
-                <section style={{ ...cardStyle, display: 'flex', flexDirection: 'column', justifyContent: 'space-between', borderTop: '4px solid #0284c7' }}>
+                <section className="bg-white p-5 rounded-lg border border-slate-200 shadow-sm flex flex-col justify-between border-t-4 border-t-sky-600 gap-4">
                     <div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-                            <h3 style={{ margin: 0, color: '#0369a1', fontSize: '1.15rem' }}>
+                        <div className="flex justify-between items-center mb-2">
+                            <h3 className="m-0 text-sky-800 font-bold text-lg">
                                 📥 CSV Contable
                             </h3>
-                            <span style={{ fontSize: '0.72rem', background: '#e0f2fe', color: '#0369a1', padding: '0.2rem 0.5rem', borderRadius: '4px', fontWeight: 'bold' }}>
+                            <Badge variant="outline" className="bg-sky-50 text-sky-800 border-sky-300 font-bold">
                                 Texto Plano UTF-8
-                            </span>
+                            </Badge>
                         </div>
-                        <p style={{ color: '#475569', fontSize: '0.86rem', lineHeight: '1.4' }}>
+                        <p className="text-slate-600 text-xs leading-relaxed">
                             Exportación de movimientos en formato plano delimitado por comas:
                         </p>
-                        <ul style={{ color: '#64748b', fontSize: '0.8rem', paddingLeft: '1.2rem', margin: '0.5rem 0 1rem 0', lineHeight: '1.45' }}>
+                        <ul className="text-slate-500 text-xs pl-4 my-2 leading-relaxed list-disc">
                             <li>Compatible con cualquier hoja de cálculo o sistema contable.</li>
                             <li>Ideal para importar a bases de datos o pipelines externos.</li>
                             <li>Incluye desglose por tipo, monto, método de pago y cajero.</li>
@@ -240,7 +245,7 @@ export default function TabExportacion({
                     </div>
                     <a
                         href={`/api/reportes?formato=csv${filtroExportDesde ? `&desde=${filtroExportDesde}` : ''}${filtroExportHasta ? `&hasta=${filtroExportHasta}` : ''}${filtroExportUsuarioId ? `&usuarioId=${filtroExportUsuarioId}` : ''}${filtroExportCajaFisicaId ? `&cajaFisicaId=${filtroExportCajaFisicaId}` : ''}`}
-                        style={{ ...btnPrimario, textAlign: 'center', fontSize: '0.92rem', padding: '0.75rem 1rem', display: 'block', borderRadius: '6px' }}
+                        className="w-full text-center py-2.5 px-4 rounded-md bg-sky-600 hover:bg-sky-700 text-white font-bold text-sm shadow transition-colors block"
                     >
                         📥 Descargar CSV Contable
                     </a>

@@ -1,12 +1,6 @@
 'use client';
 
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import {
-    modalOverlay,
-    modalCard,
-    btnPrimario,
-    btnSecundario
-} from './cajaStyles';
 
 export default function ModalModificadores({
     producto,
@@ -90,59 +84,49 @@ export default function ModalModificadores({
     if (!producto) return null;
 
     return (
-        <div style={modalOverlay}>
-            <div style={modalCard}>
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150">
+            <div className="bg-white rounded-xl shadow-2xl border border-slate-200 max-w-[540px] w-full max-h-[92vh] flex flex-col overflow-hidden">
                 {/* Cabecera */}
-                <div style={{ padding: '1rem 1.25rem', borderBottom: '1px solid #e2e8f0', background: '#f8fafc', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div className="px-5 py-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center shrink-0">
                     <div>
-                        <h3 style={{ margin: 0, fontSize: '1.2rem', color: '#0f172a' }}>
+                        <h3 className="text-lg font-bold text-slate-900">
                             Personalizar: {producto.nombre}
                         </h3>
-                        <div style={{ fontSize: '0.88rem', color: '#64748b', marginTop: '0.2rem' }}>
-                            Precio base: <strong style={{ color: '#0f172a' }}>Bs {Number(producto.precio).toFixed(2)}</strong>
+                        <div className="text-xs text-slate-500 mt-0.5">
+                            Precio base: <strong className="text-slate-800">Bs {Number(producto.precio).toFixed(2)}</strong>
                         </div>
                     </div>
                     <button
                         type="button"
                         onClick={onClose}
-                        style={{
-                            background: 'none',
-                            border: 'none',
-                            fontSize: '1.2rem',
-                            cursor: 'pointer',
-                            color: '#64748b',
-                            padding: '0.2rem 0.5rem',
-                            borderRadius: '4px'
-                        }}
+                        className="text-slate-400 hover:text-slate-600 hover:bg-slate-200/60 rounded-md p-1.5 transition-colors cursor-pointer text-lg leading-none"
+                        aria-label="Cerrar modal"
                     >
                         ✕
                     </button>
                 </div>
 
                 {/* Lista de grupos de opciones */}
-                <div style={{ padding: '1.25rem', overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+                <div className="p-5 overflow-y-auto flex-1 flex flex-col gap-4 text-slate-800">
                     {(producto.grupos_modificadores || []).map((grupo) => {
                         const seleccion = opcionesSeleccionadas[grupo.id];
                         return (
-                            <div key={grupo.id} style={{ background: '#f8fafc', padding: '0.9rem', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-                                    <span style={{ fontWeight: 'bold', fontSize: '0.95rem', color: '#1e293b' }}>
+                            <div key={grupo.id} className="bg-slate-50/70 p-3.5 rounded-xl border border-slate-200 space-y-3">
+                                <div className="flex justify-between items-center">
+                                    <span className="font-bold text-sm text-slate-900">
                                         {grupo.nombre}
                                     </span>
-                                    <span style={{
-                                        fontSize: '0.72rem',
-                                        padding: '0.15rem 0.5rem',
-                                        borderRadius: '999px',
-                                        background: grupo.es_obligatorio ? '#fee2e2' : '#e0f2fe',
-                                        color: grupo.es_obligatorio ? '#991b1b' : '#0369a1',
-                                        fontWeight: 600
-                                    }}>
+                                    <span className={`text-[11px] px-2.5 py-0.5 rounded-full font-semibold border ${
+                                        grupo.es_obligatorio
+                                            ? 'bg-red-100 text-red-800 border-red-200'
+                                            : 'bg-sky-100 text-sky-800 border-sky-200'
+                                    }`}>
                                         {grupo.tipo_seleccion === 'unica' ? 'Una sola opción' : 'Múltiples extras'}
                                         {grupo.es_obligatorio ? ' • Obligatorio' : ''}
                                     </span>
                                 </div>
 
-                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: '0.5rem' }}>
+                                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                                     {grupo.opciones.map((op) => {
                                         const esSeleccionado = grupo.tipo_seleccion === 'unica'
                                             ? seleccion === op.id
@@ -165,26 +149,16 @@ export default function ModalModificadores({
                                                         });
                                                     }
                                                 }}
-                                                style={{
-                                                    padding: '0.6rem 0.75rem',
-                                                    borderRadius: '6px',
-                                                    border: esSeleccionado ? '2px solid #0284c7' : '1px solid #cbd5e1',
-                                                    background: esSeleccionado ? '#e0f2fe' : '#ffffff',
-                                                    color: esSeleccionado ? '#0369a1' : '#334155',
-                                                    fontWeight: esSeleccionado ? 'bold' : 500,
-                                                    fontSize: '0.85rem',
-                                                    cursor: 'pointer',
-                                                    textAlign: 'left',
-                                                    transition: 'all 0.1s ease'
-                                                }}
+                                                className={`p-2.5 rounded-lg text-left transition-all cursor-pointer flex flex-col justify-between ${
+                                                    esSeleccionado
+                                                        ? 'border-2 border-sky-600 bg-sky-50/90 text-sky-950 font-bold shadow-xs'
+                                                        : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 hover:border-slate-400 font-medium'
+                                                }`}
                                             >
-                                                <div>{op.nombre}</div>
-                                                <div style={{
-                                                    fontSize: '0.75rem',
-                                                    color: Number(op.precio_adicional || 0) > 0 ? '#166534' : '#64748b',
-                                                    fontWeight: 'bold',
-                                                    marginTop: '0.2rem'
-                                                }}>
+                                                <div className="text-xs sm:text-sm line-clamp-2">{op.nombre}</div>
+                                                <div className={`text-xs mt-1.5 font-bold ${
+                                                    Number(op.precio_adicional || 0) > 0 ? 'text-emerald-700' : 'text-slate-400 font-normal'
+                                                }`}>
                                                     {Number(op.precio_adicional || 0) > 0 ? `+Bs ${Number(op.precio_adicional).toFixed(2)}` : 'Sin recargo'}
                                                 </div>
                                             </button>
@@ -197,26 +171,26 @@ export default function ModalModificadores({
                 </div>
 
                 {/* Pie del modal con total y confirmación */}
-                <div style={{ padding: '1rem 1.25rem', borderTop: '1px solid #e2e8f0', background: '#f8fafc', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div className="px-5 py-3.5 border-t border-slate-200 bg-slate-50 flex justify-between items-center shrink-0">
                     <div>
-                        <div style={{ fontSize: '0.78rem', color: '#64748b' }}>Total ítem con opciones:</div>
-                        <div style={{ fontSize: '1.25rem', fontWeight: 'bold', color: '#0f172a' }}>
+                        <div className="text-xs text-slate-500">Total ítem con opciones:</div>
+                        <div className="text-xl font-black text-slate-900">
                             Bs {totalCalculado.toFixed(2)}
                         </div>
                     </div>
 
-                    <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <div className="flex gap-2">
                         <button
                             type="button"
                             onClick={onClose}
-                            style={{ ...btnSecundario, padding: '0.55rem 0.9rem', fontSize: '0.88rem' }}
+                            className="px-4 py-2 text-sm font-semibold rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors cursor-pointer"
                         >
                             Cancelar
                         </button>
                         <button
                             type="button"
                             onClick={handleConfirmar}
-                            style={{ ...btnPrimario, padding: '0.55rem 1.2rem', fontSize: '0.92rem' }}
+                            className="px-5 py-2 text-sm font-bold rounded-lg bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white shadow-xs transition-colors cursor-pointer"
                         >
                             ✓ Agregar al Pedido
                         </button>

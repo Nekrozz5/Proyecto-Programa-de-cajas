@@ -8,16 +8,6 @@ import TabKardex from './_components/TabKardex';
 import TabUsuariosCajas from './_components/TabUsuariosCajas';
 import TabConfigFiscal from './_components/TabConfigFiscal';
 import TabExportacion from './_components/TabExportacion';
-import {
-    cardStyle,
-    formCol,
-    inputStyle,
-    btnPrimario,
-    btnSecundario,
-    btnOscuro,
-    sidebarStyle,
-    navBtnStyle
-} from './_components/adminStyles';
 
 export default function AdminPage() {
     const [cargando, setCargando] = useState(true);
@@ -186,26 +176,42 @@ export default function AdminPage() {
     }
 
     if (cargando) {
-        return <div style={{ padding: '2rem', fontFamily: 'sans-serif' }}>Cargando Panel de Administración...</div>;
+        return (
+            <div className="flex h-screen items-center justify-center bg-slate-50">
+                <div className="flex flex-col items-center gap-3">
+                    <div className="h-8 w-8 animate-spin rounded-full border-4 border-slate-300 border-t-slate-800" />
+                    <p className="text-sm font-medium text-slate-600">Cargando Panel de Administración...</p>
+                </div>
+            </div>
+        );
     }
 
     // 1. PANTALLA DE LOGIN SI NO HAY SESIÓN ADMINISTRATIVA
     if (!adminAutenticado) {
         return (
-            <div style={{ maxWidth: '460px', margin: '3rem auto', padding: '1.5rem', fontFamily: 'sans-serif' }}>
-                <div style={cardStyle}>
-                    <h2 style={{ marginTop: 0 }}>Acceso al Panel de Administración</h2>
-                    <p style={{ color: '#555', fontSize: '0.9rem' }}>
-                        Ingresa el PIN de Administrador o Super Admin para gestionar arqueos, ventas, inventario y usuarios.
-                    </p>
+            <div className="min-h-screen flex items-center justify-center bg-slate-100 p-4">
+                <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 sm:p-8 shadow-xl">
+                    <div className="mb-6 text-center">
+                        <div className="inline-flex h-12 w-12 items-center justify-center rounded-xl bg-slate-900 text-white text-xl mb-3 shadow-md">
+                            🔐
+                        </div>
+                        <h2 className="text-xl font-bold tracking-tight text-slate-900">Acceso Administrativo</h2>
+                        <p className="text-xs sm:text-sm text-slate-500 mt-1">
+                            Ingresa tus credenciales de Administrador para gestionar el negocio.
+                        </p>
+                    </div>
+
                     {error && (
-                        <div style={{ background: '#fee2e2', color: '#991b1b', padding: '0.75rem', borderRadius: '6px', marginBottom: '1rem' }}>
+                        <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700">
                             {error}
                         </div>
                     )}
-                    <form onSubmit={handleLoginAdmin} style={formCol}>
-                        <label>
-                            Usuario:
+
+                    <form onSubmit={handleLoginAdmin} className="space-y-4">
+                        <div>
+                            <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
+                                Usuario
+                            </label>
                             <input
                                 type="text"
                                 placeholder="Nombre de usuario"
@@ -213,22 +219,34 @@ export default function AdminPage() {
                                 required
                                 value={loginAdminNombreManual}
                                 onChange={(e) => setLoginAdminNombreManual(e.target.value)}
-                                style={inputStyle}
+                                className="w-full rounded-lg border border-slate-300 px-3.5 py-2 text-sm text-slate-900 placeholder-slate-400 focus:border-slate-800 focus:outline-none focus:ring-1 focus:ring-slate-800"
                             />
-                        </label>
-                        <label>
-                            PIN / Contraseña de Acceso:
+                        </div>
+                        <div>
+                            <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
+                                PIN / Contraseña
+                            </label>
                             <input
                                 type="password"
                                 placeholder="Ingresa tu PIN o contraseña"
                                 required
                                 value={loginAdminPin}
                                 onChange={(e) => setLoginAdminPin(e.target.value)}
-                                style={inputStyle}
+                                className="w-full rounded-lg border border-slate-300 px-3.5 py-2 text-sm text-slate-900 placeholder-slate-400 focus:border-slate-800 focus:outline-none focus:ring-1 focus:ring-slate-800"
                             />
-                        </label>
-                        <button type="submit" style={btnPrimario}>Entrar al Panel Admin</button>
-                        <a href="/" style={{ ...btnSecundario, textAlign: 'center', marginTop: '0.25rem' }}>Volver al Inicio</a>
+                        </div>
+                        <button
+                            type="submit"
+                            className="w-full rounded-lg bg-slate-900 py-2.5 text-sm font-semibold text-white shadow hover:bg-slate-800 transition-colors cursor-pointer"
+                        >
+                            Entrar al Panel Admin
+                        </button>
+                        <a
+                            href="/"
+                            className="block text-center text-xs font-medium text-slate-500 hover:text-slate-800 pt-2 transition-colors"
+                        >
+                            &larr; Volver al Inicio
+                        </a>
                     </form>
                 </div>
             </div>
@@ -246,221 +264,290 @@ export default function AdminPage() {
     const mostrarAsistenteConfig = esDeveloper && (esPrimeraEjecucion || seccionActiva === 'configuracion');
     const usaRecetas = Boolean(configActual.usa_recetas_ensamblaje);
 
+    // Lista de Pestañas para la Navegación Principal
+    const pestanas = [
+        { id: 'arqueos', label: '1. Arqueos y Cierres', icon: '🏦' },
+        { id: 'ventas', label: '2. Ventas y Resumen', icon: '📊' },
+        { id: 'catalogo', label: usaRecetas ? '3. Artículos y Ensamblaje' : '3. Catálogo y Stock', icon: '📦' },
+        ...(usaRecetas ? [{ id: 'insumos', label: '4. Materiales / Insumos', icon: '🧱' }] : []),
+        { id: 'usuarios', label: `${usaRecetas ? '5' : '4'}. Usuarios y Roles`, icon: '👥' },
+        { id: 'exportacion', label: `${usaRecetas ? '6' : '5'}. Exportar Reportes`, icon: '📥' },
+        ...(esDeveloper ? [{ id: 'configuracion', label: '⚙️ Modalidad', icon: '⚙️' }] : [])
+    ];
+
     return (
-        <div style={{ display: 'flex', minHeight: '100vh', background: '#f1f5f9', fontFamily: 'sans-serif' }}>
+        <div className="flex flex-col md:flex-row min-h-screen bg-slate-100 text-slate-900 font-sans">
             {/* BARRA LATERAL IZQUIERDA (SIDEBAR) */}
-            <aside style={sidebarStyle}>
-                <div style={{ padding: '1.25rem', borderBottom: '1px solid #334155' }}>
-                    <h2 style={{ margin: 0, fontSize: '1.1rem', color: '#fff' }}>
-                        {configActual.nombre_negocio || 'Panel Admin'}
-                    </h2>
-                    <div style={{ fontSize: '0.75rem', color: '#38bdf8', marginTop: '0.25rem' }}>
-                        {configActual.modalidad_nombre}
+            <aside className="w-full md:w-64 bg-slate-900 text-slate-100 flex-shrink-0 flex flex-col justify-between border-r border-slate-800">
+                <div>
+                    {/* Header Negocio */}
+                    <div className="p-4 border-b border-slate-800">
+                        <div className="flex items-center gap-2">
+                            <span className="text-xl">💼</span>
+                            <h2 className="font-bold text-sm tracking-tight text-white truncate">
+                                {configActual.nombre_negocio || 'Panel Admin'}
+                            </h2>
+                        </div>
+                        <div className="text-[11px] font-medium text-sky-400 mt-1">
+                            {configActual.modalidad_nombre}
+                        </div>
+                        <div className="text-[11px] mt-1.5">
+                            {(datos.cajasAbiertas || []).length > 0 ? (
+                                <span className="inline-flex items-center text-emerald-400 font-medium">
+                                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 mr-1.5 animate-pulse" />
+                                    {(datos.cajasAbiertas || []).length === 1
+                                        ? `Turno #${datos.cajasAbiertas[0].id}`
+                                        : `${(datos.cajasAbiertas || []).length} turnos activos`}
+                                </span>
+                            ) : (
+                                <span className="inline-flex items-center text-rose-400 font-medium">
+                                    <span className="h-1.5 w-1.5 rounded-full bg-rose-400 mr-1.5" />
+                                    Sin turnos abiertos
+                                </span>
+                            )}
+                        </div>
                     </div>
-                    <div style={{ fontSize: '0.78rem', color: '#94a3b8', marginTop: '0.3rem' }}>
-                        {(datos.cajasAbiertas || []).length > 0 ? (
-                            <span style={{ color: '#4ade80' }}>
-                                🟢 {(datos.cajasAbiertas || []).length === 1
-                                    ? `Turno #${datos.cajasAbiertas[0].id} (${datos.cajasAbiertas[0].caja_fisica_nombre || 'Caja'})`
-                                    : `${(datos.cajasAbiertas || []).length} turnos abiertos en simultáneo`}
-                            </span>
-                        ) : (
-                            <span style={{ color: '#f87171' }}>🔴 Sin turnos abiertos</span>
-                        )}
-                    </div>
-                </div>
 
-                {/* Datos del Administrador */}
-                <div style={{ padding: '1rem 1.25rem', background: '#0f172a', borderBottom: '1px solid #334155', fontSize: '0.85rem' }}>
-                    <div style={{ color: '#94a3b8' }}>Sesión activa:</div>
-                    <div style={{ fontWeight: 'bold', color: '#facc15', fontSize: '0.95rem', margin: '0.2rem 0' }}>
-                        {adminAutenticado.rol === 'developer' ? '💻 ' : adminAutenticado.rol === 'superadmin' ? '👑 ' : '🛡️ '}
-                        {adminAutenticado.nombre}
+                    {/* Perfil del Operador */}
+                    <div className="p-3.5 bg-slate-950/60 border-b border-slate-800 text-xs">
+                        <div className="text-slate-400 text-[11px]">Sesión activa:</div>
+                        <div className="font-bold text-amber-400 text-sm mt-0.5 flex items-center gap-1.5">
+                            <span>{adminAutenticado.rol === 'developer' ? '💻' : adminAutenticado.rol === 'superadmin' ? '👑' : '🛡️'}</span>
+                            <span className="truncate">{adminAutenticado.nombre}</span>
+                        </div>
+                        <div className="text-[10px] uppercase font-semibold text-slate-400 tracking-wider mt-0.5">
+                            Rango: {adminAutenticado.rol}
+                        </div>
+                        <button
+                            onClick={handleLogout}
+                            className="mt-2.5 w-full rounded bg-slate-800 hover:bg-slate-700 py-1 text-[11px] font-medium text-slate-200 transition-colors cursor-pointer"
+                        >
+                            Cerrar Sesión
+                        </button>
                     </div>
-                    <div style={{ fontSize: '0.75rem', color: '#cbd5e1', marginBottom: '0.5rem' }}>
-                        Rango: {adminAutenticado.rol.toUpperCase()}
-                    </div>
-                    <button
-                        onClick={handleLogout}
-                        style={{ width: '100%', padding: '0.35rem', background: '#475569', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8rem' }}
-                    >
-                        Cerrar Sesión Admin
-                    </button>
-                </div>
 
-                {/* Menú de Módulos */}
-                <nav style={{ display: 'flex', flexDirection: 'column', padding: '0.75rem', gap: '0.35rem', flex: 1 }}>
-                    <button
-                        onClick={() => { limpiarAlertas(); setSeccionActiva('arqueos'); }}
-                        style={navBtnStyle(!esPrimeraEjecucion && seccionActiva === 'arqueos')}
-                    >
-                        🏦 1. Arqueos y Cierres
-                    </button>
-                    <button
-                        onClick={() => { limpiarAlertas(); setSeccionActiva('ventas'); }}
-                        style={navBtnStyle(!esPrimeraEjecucion && seccionActiva === 'ventas')}
-                    >
-                        📊 2. Ventas y Movimientos
-                    </button>
-                    <button
-                        onClick={() => { limpiarAlertas(); setSeccionActiva('catalogo'); }}
-                        style={navBtnStyle(!esPrimeraEjecucion && seccionActiva === 'catalogo')}
-                    >
-                        📦 3. {usaRecetas ? 'Artículos y Ensamblaje' : 'Catálogo y Stock'}
-                    </button>
-                    {usaRecetas && (
-                        <button
-                            onClick={() => { limpiarAlertas(); setSeccionActiva('insumos'); }}
-                            style={navBtnStyle(!esPrimeraEjecucion && seccionActiva === 'insumos')}
-                        >
-                            🧱 4. Materiales / Insumos
-                        </button>
-                    )}
-                    <button
-                        onClick={() => { limpiarAlertas(); setSeccionActiva('usuarios'); }}
-                        style={navBtnStyle(!esPrimeraEjecucion && seccionActiva === 'usuarios')}
-                    >
-                        👥 {usaRecetas ? '5.' : '4.'} Usuarios y Roles
-                    </button>
-                    <button
-                        onClick={() => { limpiarAlertas(); setSeccionActiva('exportacion'); }}
-                        style={navBtnStyle(!esPrimeraEjecucion && seccionActiva === 'exportacion')}
-                    >
-                        📥 {usaRecetas ? '6.' : '5.'} Exportar Reportes (Excel / PDF / CSV)
-                    </button>
-                    {esDeveloper && (
-                        <button
-                            onClick={() => { limpiarAlertas(); setSeccionActiva('configuracion'); }}
-                            style={navBtnStyle(mostrarAsistenteConfig)}
-                        >
-                            ⚙️ Modalidad del Negocio
-                        </button>
-                    )}
-                </nav>
+                    {/* Menú de Módulos (Sidebar) */}
+                    <nav className="p-2 space-y-1" role="tablist" aria-label="Módulos administrativos">
+                        {pestanas.map((p) => {
+                            const activa = (!esPrimeraEjecucion && seccionActiva === p.id) || (p.id === 'configuracion' && mostrarAsistenteConfig);
+                            return (
+                                <button
+                                    key={p.id}
+                                    role="tab"
+                                    aria-selected={activa}
+                                    onClick={() => {
+                                        limpiarAlertas();
+                                        setSeccionActiva(p.id);
+                                    }}
+                                    className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-all text-left ${
+                                        activa
+                                            ? 'bg-sky-600 text-white font-semibold shadow-sm'
+                                            : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+                                    }`}
+                                >
+                                    <span>{p.icon}</span>
+                                    <span className="truncate">{p.label}</span>
+                                </button>
+                            );
+                        })}
+                    </nav>
+                </div>
 
                 {/* Accesos Rápidos Inferiores */}
-                <div style={{ padding: '1rem', borderTop: '1px solid #334155', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                    <a href="/caja" style={{ ...btnOscuro, background: '#334155', textAlign: 'center', fontSize: '0.84rem' }}>
-                        Ir a Punto de Venta
+                <div className="p-3 border-t border-slate-800 space-y-2">
+                    <a
+                        href="/caja"
+                        className="block w-full text-center py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-white text-xs font-semibold transition-colors"
+                    >
+                        Punto de Venta POS &rarr;
                     </a>
-                    <a href="/" style={{ ...btnSecundario, textAlign: 'center', fontSize: '0.84rem' }}>
+                    <a
+                        href="/"
+                        className="block w-full text-center py-1.5 rounded-lg bg-slate-950/40 hover:bg-slate-800 text-slate-400 hover:text-white text-xs transition-colors"
+                    >
                         Menú Principal
                     </a>
                 </div>
             </aside>
 
             {/* ÁREA PRINCIPAL DERECHA */}
-            <main style={{ flex: 1, padding: '1.5rem', overflowY: 'auto' }}>
-                {error && (
-                    <div style={{ background: '#fee2e2', color: '#991b1b', padding: '0.85rem 1rem', borderRadius: '6px', marginBottom: '1rem', border: '1px solid #f87171' }}>
-                        <strong>Error:</strong> {error}
+            <main className="flex-1 flex flex-col min-w-0 overflow-y-auto">
+                {/* BARRA SUPERIOR DE PESTAÑAS (SHADCN UI TABS COMPONENT) */}
+                <header className="bg-white border-b border-slate-200 px-4 sm:px-6 py-3 sticky top-0 z-10 shadow-xs">
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-2">
+                        <div>
+                            <h1 className="text-lg font-bold text-slate-900 tracking-tight">
+                                {seccionActiva === 'arqueos' && 'Control de Arqueos y Cierres de Turno'}
+                                {seccionActiva === 'ventas' && 'Resumen Financiero, KPIs y Auditoría'}
+                                {seccionActiva === 'catalogo' && (usaRecetas ? 'Artículos y Ensamblaje de Menú' : 'Catálogo y Control de Stock')}
+                                {seccionActiva === 'insumos' && 'Kardex de Materiales e Insumos'}
+                                {seccionActiva === 'usuarios' && 'Gestión de Cuentas y Permisos'}
+                                {seccionActiva === 'exportacion' && 'Exportación de Libros Contables (Excel/PDF/CSV)'}
+                                {seccionActiva === 'configuracion' && 'Configuración de Modalidad'}
+                            </h1>
+                            <p className="text-xs text-slate-500">
+                                {configActual.nombre_negocio || 'Panel Admin'} &bull; {configActual.modalidad_nombre}
+                            </p>
+                        </div>
+
+                        {turnoAuditadoId && (
+                            <div className="inline-flex items-center gap-2 rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-xs text-sky-800 font-medium self-start sm:self-auto">
+                                <span>🎯</span>
+                                <span>Turno Auditado: #{turnoAuditadoId}</span>
+                            </div>
+                        )}
                     </div>
-                )}
-                {mensaje && (
-                    <div style={{ background: '#dcfce7', color: '#166534', padding: '0.85rem 1rem', borderRadius: '6px', marginBottom: '1rem', border: '1px solid #4ade80' }}>
-                        {mensaje}
+
+                    {/* Barra de Tabs estilo Shadcn UI con scroll horizontal accesible */}
+                    <div className="w-full overflow-x-auto pb-1 pt-1">
+                        <div
+                            className="inline-flex h-10 items-center justify-start rounded-lg bg-slate-100 p-1 text-slate-600 gap-1 min-w-max border border-slate-200/80 shadow-inner"
+                            role="tablist"
+                            aria-label="Pestañas de navegación rápida"
+                        >
+                            {pestanas.map((p) => {
+                                const seleccionada = (!esPrimeraEjecucion && seccionActiva === p.id) || (p.id === 'configuracion' && mostrarAsistenteConfig);
+                                return (
+                                    <button
+                                        key={p.id}
+                                        role="tab"
+                                        aria-selected={seleccionada}
+                                        onClick={() => {
+                                            limpiarAlertas();
+                                            setSeccionActiva(p.id);
+                                        }}
+                                        className={`inline-flex items-center justify-center whitespace-nowrap rounded-md px-3 py-1.5 text-xs font-medium ring-offset-white transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-950 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 cursor-pointer ${
+                                            seleccionada
+                                                ? 'bg-white text-slate-950 shadow-xs font-semibold'
+                                                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+                                        }`}
+                                    >
+                                        <span className="mr-1.5">{p.icon}</span>
+                                        {p.label}
+                                    </button>
+                                );
+                            })}
+                        </div>
                     </div>
-                )}
+                </header>
 
-                {/* MODALIDAD / ASISTENTE INICIAL O CONFIGURACIÓN */}
-                {mostrarAsistenteConfig ? (
-                    <TabConfigFiscal
-                        datos={datos}
-                        esPrimeraEjecucion={esPrimeraEjecucion}
-                        onConfiguracionGuardada={() => {
-                            if (seccionActiva === 'configuracion') setSeccionActiva('catalogo');
-                        }}
-                        cargarTodo={cargarTodo}
-                        setMensaje={setMensaje}
-                        setError={setError}
-                        limpiarAlertas={limpiarAlertas}
-                    />
-                ) : (
-                    <>
-                        {/* MÓDULO 1: ARQUEOS Y CIERRES */}
-                        {seccionActiva === 'arqueos' && (
-                            <TabTurnosArqueos
-                                datos={datos}
-                                seleccionarTurnoParaAuditar={seleccionarTurnoParaAuditar}
-                                cargarTodo={cargarTodo}
-                                setMensaje={setMensaje}
-                                setError={setError}
-                                limpiarAlertas={limpiarAlertas}
-                            />
-                        )}
+                {/* CONTENIDO DEL MÓDULO */}
+                <div className="p-4 sm:p-6 flex-1">
+                    {error && (
+                        <div className="mb-4 rounded-xl border border-red-200 bg-red-50 p-4 text-xs sm:text-sm text-red-800 flex items-start gap-2 shadow-xs">
+                            <span className="text-base font-bold leading-none">⚠️</span>
+                            <div>
+                                <strong className="font-semibold">Error:</strong> {error}
+                            </div>
+                        </div>
+                    )}
+                    {mensaje && (
+                        <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-xs sm:text-sm text-emerald-800 flex items-start gap-2 shadow-xs">
+                            <span className="text-base font-bold leading-none">✅</span>
+                            <div>{mensaje}</div>
+                        </div>
+                    )}
 
-                        {/* MÓDULO 2: VENTAS, KPIs Y ANULACIONES */}
-                        {seccionActiva === 'ventas' && (
-                            <TabResumen
-                                datos={datos}
-                                tendencias={tendencias}
-                                cargarTodo={cargarTodo}
-                                setMensaje={setMensaje}
-                                setError={setError}
-                                limpiarAlertas={limpiarAlertas}
-                            />
-                        )}
+                    {/* MODALIDAD / ASISTENTE INICIAL O CONFIGURACIÓN */}
+                    {mostrarAsistenteConfig ? (
+                        <TabConfigFiscal
+                            datos={datos}
+                            esPrimeraEjecucion={esPrimeraEjecucion}
+                            onConfiguracionGuardada={() => {
+                                if (seccionActiva === 'configuracion') setSeccionActiva('catalogo');
+                            }}
+                            cargarTodo={cargarTodo}
+                            setMensaje={setMensaje}
+                            setError={setError}
+                            limpiarAlertas={limpiarAlertas}
+                        />
+                    ) : (
+                        <>
+                            {/* MÓDULO 1: ARQUEOS Y CIERRES */}
+                            {seccionActiva === 'arqueos' && (
+                                <TabTurnosArqueos
+                                    datos={datos}
+                                    seleccionarTurnoParaAuditar={seleccionarTurnoParaAuditar}
+                                    cargarTodo={cargarTodo}
+                                    setMensaje={setMensaje}
+                                    setError={setError}
+                                    limpiarAlertas={limpiarAlertas}
+                                />
+                            )}
 
-                        {/* MÓDULO 3: CATÁLOGO, STOCK Y ENSAMBLAJE */}
-                        {seccionActiva === 'catalogo' && (
-                            <TabCatalogo
-                                datos={datos}
-                                cargarTodo={cargarTodo}
-                                setMensaje={setMensaje}
-                                setError={setError}
-                                limpiarAlertas={limpiarAlertas}
-                                setSeccionActiva={setSeccionActiva}
-                            />
-                        )}
+                            {/* MÓDULO 2: VENTAS, KPIs Y ANULACIONES */}
+                            {seccionActiva === 'ventas' && (
+                                <TabResumen
+                                    datos={datos}
+                                    tendencias={tendencias}
+                                    cargarTodo={cargarTodo}
+                                    setMensaje={setMensaje}
+                                    setError={setError}
+                                    limpiarAlertas={limpiarAlertas}
+                                />
+                            )}
 
-                        {/* MÓDULO 4: MATERIALES / INSUMOS */}
-                        {seccionActiva === 'insumos' && usaRecetas && (
-                            <TabKardex
-                                datos={datos}
-                                cargarTodo={cargarTodo}
-                                setMensaje={setMensaje}
-                                setError={setError}
-                                limpiarAlertas={limpiarAlertas}
-                            />
-                        )}
+                            {/* MÓDULO 3: CATÁLOGO, STOCK Y ENSAMBLAJE */}
+                            {seccionActiva === 'catalogo' && (
+                                <TabCatalogo
+                                    datos={datos}
+                                    cargarTodo={cargarTodo}
+                                    setMensaje={setMensaje}
+                                    setError={setError}
+                                    limpiarAlertas={limpiarAlertas}
+                                    setSeccionActiva={setSeccionActiva}
+                                />
+                            )}
 
-                        {/* MÓDULO 5: USUARIOS, JERARQUÍA Y ROLES */}
-                        {seccionActiva === 'usuarios' && (
-                            <TabUsuariosCajas
-                                datos={datos}
-                                adminAutenticado={adminAutenticado}
-                                cargarTodo={cargarTodo}
-                                setMensaje={setMensaje}
-                                setError={setError}
-                                limpiarAlertas={limpiarAlertas}
-                            />
-                        )}
+                            {/* MÓDULO 4: MATERIALES / INSUMOS */}
+                            {seccionActiva === 'insumos' && usaRecetas && (
+                                <TabKardex
+                                    datos={datos}
+                                    cargarTodo={cargarTodo}
+                                    setMensaje={setMensaje}
+                                    setError={setError}
+                                    limpiarAlertas={limpiarAlertas}
+                                />
+                            )}
 
-                        {/* MÓDULO 6: EXPORTACIÓN DE REPORTES (EXCEL, PDF, CSV) */}
-                        {seccionActiva === 'exportacion' && (
-                            <TabExportacion
-                                datos={datos}
-                                adminAutenticado={adminAutenticado}
-                                turnoAuditadoId={turnoAuditadoId}
-                                setTurnoAuditadoId={setTurnoAuditadoId}
-                                cargarTodo={cargarTodo}
-                            />
-                        )}
+                            {/* MÓDULO 5: USUARIOS, JERARQUÍA Y ROLES */}
+                            {seccionActiva === 'usuarios' && (
+                                <TabUsuariosCajas
+                                    datos={datos}
+                                    adminAutenticado={adminAutenticado}
+                                    cargarTodo={cargarTodo}
+                                    setMensaje={setMensaje}
+                                    setError={setError}
+                                    limpiarAlertas={limpiarAlertas}
+                                />
+                            )}
 
-                        {/* MÓDULO 7: CONFIGURACIÓN FISCAL Y MODALIDAD */}
-                        {seccionActiva === 'configuracion' && (
-                            <TabConfigFiscal
-                                datos={datos}
-                                esPrimeraEjecucion={esPrimeraEjecucion}
-                                onConfiguracionGuardada={() => setSeccionActiva('catalogo')}
-                                cargarTodo={cargarTodo}
-                                setMensaje={setMensaje}
-                                setError={setError}
-                                limpiarAlertas={limpiarAlertas}
-                            />
-                        )}
-                    </>
-                )}
+                            {/* MÓDULO 6: EXPORTACIÓN DE REPORTES (EXCEL, PDF, CSV) */}
+                            {seccionActiva === 'exportacion' && (
+                                <TabExportacion
+                                    datos={datos}
+                                    adminAutenticado={adminAutenticado}
+                                    turnoAuditadoId={turnoAuditadoId}
+                                    setTurnoAuditadoId={setTurnoAuditadoId}
+                                    cargarTodo={cargarTodo}
+                                />
+                            )}
+
+                            {/* MÓDULO 7: CONFIGURACIÓN FISCAL Y MODALIDAD */}
+                            {seccionActiva === 'configuracion' && (
+                                <TabConfigFiscal
+                                    datos={datos}
+                                    esPrimeraEjecucion={esPrimeraEjecucion}
+                                    onConfiguracionGuardada={() => setSeccionActiva('catalogo')}
+                                    cargarTodo={cargarTodo}
+                                    setMensaje={setMensaje}
+                                    setError={setError}
+                                    limpiarAlertas={limpiarAlertas}
+                                />
+                            )}
+                        </>
+                    )}
+                </div>
             </main>
         </div>
     );

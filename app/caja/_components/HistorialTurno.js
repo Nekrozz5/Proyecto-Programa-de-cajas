@@ -1,7 +1,18 @@
 'use client';
 
 import { useState } from 'react';
-import { cardStyle, inputStyle, btnMini, btnSecundario } from './cajaStyles';
+import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import {
+    Table,
+    TableBody,
+    TableCell,
+    TableHead,
+    TableHeader,
+    TableRow
+} from '@/components/ui/table';
 import { anularVentaAction } from '../../../server/actions/ventas.actions';
 
 export default function HistorialTurno({
@@ -45,142 +56,190 @@ export default function HistorialTurno({
     }
 
     return (
-        <section style={cardStyle}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.5rem' }}>
-                <div>
-                    <h2 style={{ margin: 0 }}>📋 Historial de Movimientos del Turno #{cajaAbierta?.id}</h2>
-                    <p style={{ margin: '0.25rem 0 0', fontSize: '0.86rem', color: '#64748b' }}>
-                        Estación: <strong>{cajaAbierta?.caja_fisica_nombre || `Estación #${cajaAbierta?.caja_fisica_id || 1}`}</strong> | Operaciones registradas en este turno.
-                    </p>
+        <Card className="shadow-sm border-slate-200">
+            <CardHeader className="p-4 sm:p-5 pb-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div>
+                        <CardTitle className="text-xl font-bold text-slate-900 tracking-tight flex items-center gap-2">
+                            <span>📋</span>
+                            <span>Historial de Movimientos del Turno #{cajaAbierta?.id}</span>
+                        </CardTitle>
+                        <p className="text-xs text-slate-500 mt-1">
+                            Estación: <strong>{cajaAbierta?.caja_fisica_nombre || `Estación #${cajaAbierta?.caja_fisica_id || 1}`}</strong> | Operaciones registradas en este turno.
+                        </p>
+                    </div>
+                    <Button
+                        type="button"
+                        variant="outline"
+                        onClick={onActualizar}
+                        className="min-h-[44px] px-4 text-xs font-semibold border-slate-300 hover:bg-slate-50 self-start sm:self-auto"
+                    >
+                        🔄 Actualizar
+                    </Button>
                 </div>
-                <button type="button" onClick={onActualizar} style={btnSecundario}>
-                    🔄 Actualizar
-                </button>
-            </div>
+            </CardHeader>
 
-            {movimientos.length === 0 ? (
-                <p style={{ color: '#64748b' }}>Aún no hay movimientos registrados en este turno.</p>
-            ) : (
-                <div style={{ overflowX: 'auto' }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.86rem' }}>
-                        <thead>
-                            <tr style={{ background: '#f8fafc', borderBottom: '2px solid #cbd5e1', textAlign: 'left' }}>
-                                <th style={{ padding: '0.6rem' }}>ID</th>
-                                <th style={{ padding: '0.6rem' }}>Hora</th>
-                                <th style={{ padding: '0.6rem' }}>Tipo</th>
-                                <th style={{ padding: '0.6rem' }}>Método</th>
-                                <th style={{ padding: '0.6rem' }}>Comprobante</th>
-                                <th style={{ padding: '0.6rem' }}>Detalle / Motivo</th>
-                                <th style={{ padding: '0.6rem', textAlign: 'right' }}>Descuento</th>
-                                <th style={{ padding: '0.6rem', textAlign: 'right' }}>Monto Neto</th>
-                                <th style={{ padding: '0.6rem' }}>Operador</th>
-                                <th style={{ padding: '0.6rem' }}>Estado</th>
-                                {usuarioActual?.rol !== 'user' && <th style={{ padding: '0.6rem' }}>Acción Admin</th>}
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {movimientos.map((m) => {
-                                const esAnulado = m.estado === 'anulado';
-                                return (
-                                    <tr key={m.id} style={{ borderBottom: '1px solid #e2e8f0', opacity: esAnulado ? 0.55 : 1, background: esAnulado ? '#fef2f2' : '#fff' }}>
-                                        <td style={{ padding: '0.6rem', fontWeight: 'bold' }}>#{m.id}</td>
-                                        <td style={{ padding: '0.6rem', whiteSpace: 'nowrap' }}>{m.fecha_hora_local || m.fecha_hora}</td>
-                                        <td style={{ padding: '0.6rem', textTransform: 'uppercase', fontWeight: 600, color: m.tipo === 'venta' ? '#15803d' : m.tipo === 'egreso' ? '#b91c1c' : '#0369a1' }}>
-                                            {m.tipo}
-                                        </td>
-                                        <td style={{ padding: '0.6rem', textTransform: 'uppercase' }}>
-                                            {m.metodo_pago}
-                                            {m.metodo_pago === 'mixto' && (
-                                                <div style={{ fontSize: '0.74rem', color: '#475569' }}>
-                                                    Ef: Bs {Number(m.monto_efectivo || 0).toFixed(2)} | QR: Bs {Number(m.monto_qr || 0).toFixed(2)}
-                                                </div>
-                                            )}
-                                        </td>
-                                        <td style={{ padding: '0.6rem', fontSize: '0.8rem' }}>
-                                            {m.tipo_comprobante === 'factura' ? (
-                                                <span style={{ color: '#1d4ed8', fontWeight: 600 }}>
-                                                    🧾 Fact. #{m.nro_factura || '-'} ({m.cliente_nit || m.proveedor_nit || 'S/N'})
-                                                </span>
-                                            ) : (
-                                                <span style={{ color: '#64748b' }}>{m.tipo_comprobante || 'recibo'}</span>
-                                            )}
-                                        </td>
-                                        <td style={{ padding: '0.6rem' }}>
-                                            <div>{m.motivo}</div>
-                                            {esAnulado && m.motivo_anulacion && (
-                                                <div style={{ fontSize: '0.76rem', color: '#b91c1c', marginTop: '0.15rem' }}>
-                                                    <strong>Anulado:</strong> {m.motivo_anulacion}
-                                                </div>
-                                            )}
-                                        </td>
-                                        <td style={{ padding: '0.6rem', textAlign: 'right', color: Number(m.descuento_total || 0) > 0 ? '#dc2626' : '#94a3b8' }}>
-                                            {Number(m.descuento_total || 0) > 0 ? `-Bs ${Number(m.descuento_total).toFixed(2)}` : '-'}
-                                        </td>
-                                        <td style={{ padding: '0.6rem', textAlign: 'right', fontWeight: 'bold', textDecoration: esAnulado ? 'line-through' : 'none' }}>
-                                            Bs {Number(m.monto || 0).toFixed(2)}
-                                        </td>
-                                        <td style={{ padding: '0.6rem' }}>{m.usuario_nombre || m.operador || '-'}</td>
-                                        <td style={{ padding: '0.6rem' }}>
-                                            <span style={{
-                                                padding: '0.15rem 0.5rem',
-                                                borderRadius: '999px',
-                                                fontSize: '0.75rem',
-                                                fontWeight: 'bold',
-                                                background: esAnulado ? '#fee2e2' : '#dcfce7',
-                                                color: esAnulado ? '#991b1b' : '#166534'
-                                            }}>
-                                                {m.estado.toUpperCase()}
-                                            </span>
-                                        </td>
-                                        {usuarioActual?.rol !== 'user' && (
-                                            <td style={{ padding: '0.6rem' }}>
-                                                {!esAnulado && (
-                                                    movimientoAAnularId === m.id ? (
-                                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', minWidth: '190px' }}>
-                                                            <input
-                                                                type="text"
-                                                                placeholder="Motivo de anulación..."
-                                                                value={motivoAnulacionCaja}
-                                                                onChange={(e) => setMotivoAnulacionCaja(e.target.value)}
-                                                                style={{ ...inputStyle, marginTop: 0, padding: '0.3rem 0.45rem', fontSize: '0.8rem' }}
-                                                            />
-                                                            <div style={{ display: 'flex', gap: '0.3rem' }}>
-                                                                <button
-                                                                    type="button"
-                                                                    disabled={anulando}
-                                                                    onClick={() => confirmarAnularMovimiento(m.id)}
-                                                                    style={{ ...btnMini, background: '#dc2626', color: '#fff', border: 'none', fontWeight: 'bold', cursor: 'pointer' }}
-                                                                >
-                                                                    {anulando ? '...' : 'Confirmar'}
-                                                                </button>
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={() => { setMovimientoAAnularId(null); setMotivoAnulacionCaja(''); }}
-                                                                    style={{ ...btnMini, cursor: 'pointer' }}
-                                                                >
-                                                                    Cancelar
-                                                                </button>
-                                                            </div>
-                                                        </div>
-                                                    ) : (
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => { setMovimientoAAnularId(m.id); setMotivoAnulacionCaja(''); }}
-                                                            style={{ ...btnMini, color: '#b91c1c', borderColor: '#fca5a5', background: '#fef2f2', cursor: 'pointer', fontWeight: 600 }}
-                                                        >
-                                                            🚫 Anular
-                                                        </button>
-                                                    )
+            <CardContent className="p-4 sm:p-5 pt-2">
+                {movimientos.length === 0 ? (
+                    <div className="text-center py-10 px-4 rounded-xl border-2 border-dashed border-slate-200 bg-slate-50">
+                        <p className="text-slate-500 text-sm">Aún no hay movimientos registrados en este turno.</p>
+                    </div>
+                ) : (
+                    <div className="rounded-lg border border-slate-200 overflow-x-auto">
+                        <Table className="text-xs">
+                            <TableHeader className="bg-slate-50 border-b border-slate-200">
+                                <TableRow>
+                                    <TableHead className="font-bold text-slate-700 w-16">ID</TableHead>
+                                    <TableHead className="font-bold text-slate-700">Hora</TableHead>
+                                    <TableHead className="font-bold text-slate-700">Tipo</TableHead>
+                                    <TableHead className="font-bold text-slate-700">Método</TableHead>
+                                    <TableHead className="font-bold text-slate-700">Comprobante</TableHead>
+                                    <TableHead className="font-bold text-slate-700 min-w-[180px]">Detalle / Motivo</TableHead>
+                                    <TableHead className="font-bold text-slate-700 text-right">Descuento</TableHead>
+                                    <TableHead className="font-bold text-slate-700 text-right">Monto Neto</TableHead>
+                                    <TableHead className="font-bold text-slate-700">Operador</TableHead>
+                                    <TableHead className="font-bold text-slate-700">Estado</TableHead>
+                                    {usuarioActual?.rol !== 'user' && (
+                                        <TableHead className="font-bold text-slate-700">Acción Admin</TableHead>
+                                    )}
+                                </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                                {movimientos.map((m) => {
+                                    const esAnulado = m.estado === 'anulado';
+                                    return (
+                                        <TableRow
+                                            key={m.id}
+                                            className={`${
+                                                esAnulado
+                                                    ? 'bg-rose-50/50 opacity-60 text-slate-500'
+                                                    : 'hover:bg-slate-50/80'
+                                            }`}
+                                        >
+                                            <TableCell className="font-bold text-slate-900">#{m.id}</TableCell>
+                                            <TableCell className="whitespace-nowrap text-slate-600">
+                                                {m.fecha_hora_local || m.fecha_hora}
+                                            </TableCell>
+                                            <TableCell>
+                                                <Badge
+                                                    variant="secondary"
+                                                    className={`text-[10px] font-bold uppercase ${
+                                                        m.tipo === 'venta'
+                                                            ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
+                                                            : m.tipo === 'egreso'
+                                                                ? 'bg-rose-100 text-rose-800 border-rose-200'
+                                                                : 'bg-sky-100 text-sky-800 border-sky-200'
+                                                    }`}
+                                                >
+                                                    {m.tipo}
+                                                </Badge>
+                                            </TableCell>
+                                            <TableCell className="uppercase font-medium text-slate-700">
+                                                <div>{m.metodo_pago}</div>
+                                                {m.metodo_pago === 'mixto' && (
+                                                    <div className="text-[10px] text-slate-500 font-normal lowercase">
+                                                        ef: Bs {Number(m.monto_efectivo || 0).toFixed(2)} | qr: Bs {Number(m.monto_qr || 0).toFixed(2)}
+                                                    </div>
                                                 )}
-                                            </td>
-                                        )}
-                                    </tr>
-                                );
-                            })}
-                        </tbody>
-                    </table>
-                </div>
-            )}
-        </section>
+                                            </TableCell>
+                                            <TableCell>
+                                                {m.tipo_comprobante === 'factura' ? (
+                                                    <span className="text-blue-700 font-semibold">
+                                                        🧾 Fact. #{m.nro_factura || '-'} ({m.cliente_nit || m.proveedor_nit || 'S/N'})
+                                                    </span>
+                                                ) : (
+                                                    <span className="text-slate-500">{m.tipo_comprobante || 'recibo'}</span>
+                                                )}
+                                            </TableCell>
+                                            <TableCell>
+                                                <div className="text-slate-800">{m.motivo}</div>
+                                                {esAnulado && m.motivo_anulacion && (
+                                                    <div className="text-[11px] text-rose-700 mt-0.5">
+                                                        <strong>Anulado:</strong> {m.motivo_anulacion}
+                                                    </div>
+                                                )}
+                                            </TableCell>
+                                            <TableCell className={`text-right font-medium ${
+                                                Number(m.descuento_total || 0) > 0 ? 'text-rose-600' : 'text-slate-400'
+                                            }`}>
+                                                {Number(m.descuento_total || 0) > 0 ? `-Bs ${Number(m.descuento_total).toFixed(2)}` : '-'}
+                                            </TableCell>
+                                            <TableCell className={`text-right font-bold text-slate-900 ${
+                                                esAnulado ? 'line-through text-slate-400' : ''
+                                            }`}>
+                                                Bs {Number(m.monto || 0).toFixed(2)}
+                                            </TableCell>
+                                            <TableCell className="text-slate-600">
+                                                {m.usuario_nombre || m.operador || '-'}
+                                            </TableCell>
+                                            <TableCell>
+                                                <Badge
+                                                    variant="secondary"
+                                                    className={`text-[10px] font-bold ${
+                                                        esAnulado
+                                                            ? 'bg-rose-100 text-rose-800'
+                                                            : 'bg-emerald-100 text-emerald-800'
+                                                    }`}
+                                                >
+                                                    {m.estado.toUpperCase()}
+                                                </Badge>
+                                            </TableCell>
+                                            {usuarioActual?.rol !== 'user' && (
+                                                <TableCell>
+                                                    {!esAnulado && (
+                                                        movimientoAAnularId === m.id ? (
+                                                            <div className="flex flex-col gap-1.5 min-w-[200px]">
+                                                                <Input
+                                                                    type="text"
+                                                                    placeholder="Motivo de anulación..."
+                                                                    value={motivoAnulacionCaja}
+                                                                    onChange={(e) => setMotivoAnulacionCaja(e.target.value)}
+                                                                    className="h-8 text-xs bg-white"
+                                                                />
+                                                                <div className="flex gap-1.5">
+                                                                    <Button
+                                                                        type="button"
+                                                                        variant="destructive"
+                                                                        size="sm"
+                                                                        disabled={anulando}
+                                                                        onClick={() => confirmarAnularMovimiento(m.id)}
+                                                                        className="h-7 text-xs font-bold px-2.5"
+                                                                    >
+                                                                        {anulando ? '...' : 'Confirmar'}
+                                                                    </Button>
+                                                                    <Button
+                                                                        type="button"
+                                                                        variant="outline"
+                                                                        size="sm"
+                                                                        onClick={() => { setMovimientoAAnularId(null); setMotivoAnulacionCaja(''); }}
+                                                                        className="h-7 text-xs px-2.5"
+                                                                    >
+                                                                        Cancelar
+                                                                    </Button>
+                                                                </div>
+                                                            </div>
+                                                        ) : (
+                                                            <Button
+                                                                type="button"
+                                                                variant="outline"
+                                                                size="sm"
+                                                                onClick={() => { setMovimientoAAnularId(m.id); setMotivoAnulacionCaja(''); }}
+                                                                className="h-7 text-xs text-rose-700 border-rose-200 bg-rose-50 hover:bg-rose-100 font-semibold px-2.5"
+                                                            >
+                                                                🚫 Anular
+                                                            </Button>
+                                                        )
+                                                    )}
+                                                </TableCell>
+                                            )}
+                                        </TableRow>
+                                    );
+                                })}
+                            </TableBody>
+                        </Table>
+                    </div>
+                )}
+            </CardContent>
+        </Card>
     );
 }

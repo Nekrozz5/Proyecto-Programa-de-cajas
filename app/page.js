@@ -1,6 +1,11 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import Link from 'next/link';
+import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Badge } from '@/components/ui/badge';
 
 export default function HomePage() {
     const [cargando, setCargando] = useState(true);
@@ -98,8 +103,11 @@ export default function HomePage() {
 
     if (cargando) {
         return (
-            <main style={{ padding: '3rem', textAlign: 'center' }}>
-                <p>Verificando estado del sistema...</p>
+            <main className="min-h-screen flex items-center justify-center p-4">
+                <div className="flex flex-col items-center gap-3 text-slate-500 animate-pulse">
+                    <div className="w-10 h-10 border-4 border-primary border-t-transparent rounded-full animate-spin" />
+                    <p className="text-sm font-medium">Verificando estado del sistema...</p>
+                </div>
             </main>
         );
     }
@@ -109,312 +117,339 @@ export default function HomePage() {
     // ASISTENTE PASO A PASO EN LA PRIMERA EJECUCIÓN DEL PROGRAMA
     if (requierePrimeraEjecucion) {
         return (
-            <main style={{ maxWidth: '820px', margin: '2.5rem auto', padding: '1.5rem' }}>
-                <div style={{ background: '#fff', padding: '2rem', borderRadius: '12px', boxShadow: '0 4px 12px rgba(0,0,0,0.08)', border: '2px solid #0284c7' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', borderBottom: '1px solid #e2e8f0', paddingBottom: '1rem' }}>
-                        <div>
-                            <span style={{ background: '#e0f2fe', color: '#0369a1', padding: '0.25rem 0.65rem', borderRadius: '99px', fontSize: '0.8rem', fontWeight: 'bold' }}>
-                                Instalación Inicial • Paso {paso} de 3
-                            </span>
-                            <h1 style={{ margin: '0.5rem 0 0', fontSize: '1.5rem' }}>
-                                Configuración de Primera Ejecución
-                            </h1>
+            <main className="min-h-screen flex items-center justify-center p-4 py-8">
+                <Card className="w-full max-w-3xl shadow-xl border-slate-200">
+                    <CardHeader className="border-b border-slate-100 pb-5">
+                        <div className="flex items-center justify-between flex-wrap gap-4">
+                            <div>
+                                <Badge variant="secondary" className="bg-sky-50 text-sky-700 border-sky-200 mb-1">
+                                    Instalación Inicial • Paso {paso} de 3
+                                </Badge>
+                                <CardTitle className="text-2xl font-bold text-slate-900">
+                                    Configuración de Primera Ejecución
+                                </CardTitle>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                {[1, 2, 3].map((num) => (
+                                    <div
+                                        key={num}
+                                        className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs transition-colors ${
+                                            paso >= num
+                                                ? 'bg-primary text-primary-foreground shadow-sm'
+                                                : 'bg-slate-100 text-slate-400'
+                                        }`}
+                                    >
+                                        {num}
+                                    </div>
+                                ))}
+                            </div>
                         </div>
-                        <div style={{ display: 'flex', gap: '0.4rem' }}>
-                            {[1, 2, 3].map((num) => (
-                                <div
-                                    key={num}
-                                    style={{
-                                        width: '32px',
-                                        height: '32px',
-                                        borderRadius: '50%',
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        justifyContent: 'center',
-                                        fontWeight: 'bold',
-                                        background: paso >= num ? '#0284c7' : '#e2e8f0',
-                                        color: paso >= num ? '#fff' : '#64748b'
-                                    }}
-                                >
-                                    {num}
+                    </CardHeader>
+
+                    <CardContent className="pt-6">
+                        {error && (
+                            <div className="mb-6 p-4 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm font-medium flex items-center gap-2">
+                                <span>⚠️</span>
+                                <div><strong>Error:</strong> {error}</div>
+                            </div>
+                        )}
+
+                        {/* PASO 1: MODALIDAD DE FUNCIONAMIENTO */}
+                        {paso === 1 && (
+                            <div className="space-y-6">
+                                <div>
+                                    <h2 className="text-lg font-semibold text-slate-800">
+                                        Paso 1: ¿Cómo funciona el inventario de tu negocio?
+                                    </h2>
+                                    <p className="text-sm text-slate-500 mt-1">
+                                        Esto adaptará automáticamente la interfaz del programa para mostrar solo las funciones que necesitas:
+                                    </p>
                                 </div>
-                            ))}
-                        </div>
-                    </div>
 
-                    {error && (
-                        <div style={{ background: '#fee2e2', color: '#991b1b', padding: '0.85rem', borderRadius: '6px', marginBottom: '1rem' }}>
-                            <strong>Error:</strong> {error}
-                        </div>
-                    )}
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                                    <button
+                                        type="button"
+                                        onClick={() => seleccionarModalidad('no_perecedero')}
+                                        className={`flex flex-col text-left p-4 rounded-xl border transition-all ${
+                                            usaStockDirecto && !usaVencimiento && !usaRecetas
+                                                ? 'border-primary bg-sky-50/50 shadow-sm ring-1 ring-primary'
+                                                : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50/50'
+                                        }`}
+                                    >
+                                        <span className="font-semibold text-slate-900 text-sm">
+                                            🔧 Artículos No Perecederos
+                                        </span>
+                                        <span className="text-xs text-slate-600 mt-1">
+                                            Compra y venta directa por unidad, metro o kilo con Costo Promedio Ponderado.
+                                        </span>
+                                        <span className="text-[11px] text-sky-600 font-medium mt-2">
+                                            Ej: Repuestos de auto, piezas de PC, ferretería, maderera.
+                                        </span>
+                                    </button>
 
-                    {/* PASO 1: MODALIDAD DE FUNCIONAMIENTO (ADAPTACIÓN AUTOMÁTICA DE INTERFAZ) */}
-                    {paso === 1 && (
-                        <div>
-                            <h2 style={{ marginTop: 0, fontSize: '1.2rem' }}>
-                                Paso 1: ¿Cómo funciona el inventario de tu negocio?
-                            </h2>
-                            <p style={{ color: '#475569', fontSize: '0.92rem' }}>
-                                Esto adaptará automáticamente la interfaz del programa para mostrar solo las funciones que necesitas:
-                            </p>
+                                    <button
+                                        type="button"
+                                        onClick={() => seleccionarModalidad('perecedero')}
+                                        className={`flex flex-col text-left p-4 rounded-xl border transition-all ${
+                                            usaStockDirecto && usaVencimiento && !usaRecetas
+                                                ? 'border-primary bg-sky-50/50 shadow-sm ring-1 ring-primary'
+                                                : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50/50'
+                                        }`}
+                                    >
+                                        <span className="font-semibold text-slate-900 text-sm">
+                                            🛒 Productos Perecederos
+                                        </span>
+                                        <span className="text-xs text-slate-600 mt-1">
+                                            Compra y venta directa solicitando fecha de vencimiento y cantidad por lote.
+                                        </span>
+                                        <span className="text-[11px] text-sky-600 font-medium mt-2">
+                                            Ej: Supermercado, minimarket, farmacia.
+                                        </span>
+                                    </button>
 
-                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.85rem', marginBottom: '1.25rem' }}>
-                                <button
-                                    type="button"
-                                    onClick={() => seleccionarModalidad('no_perecedero')}
-                                    style={cardSelectStyle(usaStockDirecto && !usaVencimiento && !usaRecetas)}
-                                >
-                                    <strong>🔧 Artículos No Perecederos (Sin vencimiento ni receta)</strong>
-                                    <span style={{ fontSize: '0.82rem', color: '#475569' }}>
-                                        Compra y venta directa de artículos por unidad, metro o kilo con Costo Promedio Ponderado.
+                                    <button
+                                        type="button"
+                                        onClick={() => seleccionarModalidad('ensamblaje_no_perecedero')}
+                                        className={`flex flex-col text-left p-4 rounded-xl border transition-all ${
+                                            usaStockDirecto && !usaVencimiento && usaRecetas
+                                                ? 'border-primary bg-sky-50/50 shadow-sm ring-1 ring-primary'
+                                                : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50/50'
+                                        }`}
+                                    >
+                                        <span className="font-semibold text-slate-900 text-sm">
+                                            🪚 Ensamblaje / Fabricación
+                                        </span>
+                                        <span className="text-xs text-slate-600 mt-1">
+                                            Usa materiales o piezas no perecederas que se ensamblan para armar un producto final.
+                                        </span>
+                                        <span className="text-[11px] text-sky-600 font-medium mt-2">
+                                            Ej: Carpintería/muebles, ensamblaje de PCs, taller.
+                                        </span>
+                                    </button>
+
+                                    <button
+                                        type="button"
+                                        onClick={() => seleccionarModalidad('elaboracion_perecedera')}
+                                        className={`flex flex-col text-left p-4 rounded-xl border transition-all ${
+                                            usaStockDirecto && usaVencimiento && usaRecetas
+                                                ? 'border-primary bg-sky-50/50 shadow-sm ring-1 ring-primary'
+                                                : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50/50'
+                                        }`}
+                                    >
+                                        <span className="font-semibold text-slate-900 text-sm">
+                                            ☕ Elaboración con Recetas
+                                        </span>
+                                        <span className="text-xs text-slate-600 mt-1">
+                                            Recetas de preparación con insumos que tienen control de caducidad.
+                                        </span>
+                                        <span className="text-[11px] text-sky-600 font-medium mt-2">
+                                            Ej: Restaurante, cafetería, panadería, pastelería.
+                                        </span>
+                                    </button>
+                                </div>
+
+                                <div className="p-4 rounded-lg bg-slate-50 border border-slate-200 space-y-2.5">
+                                    <span className="text-xs font-semibold text-slate-700 uppercase tracking-wider block">
+                                        Ajuste fino de funciones activas
                                     </span>
-                                    <small style={{ color: '#0284c7' }}>Ej: Repuestos de auto, piezas de PC, ferretería, maderera.</small>
-                                </button>
+                                    <label className="flex items-center gap-2.5 text-sm text-slate-700 cursor-pointer">
+                                        <input
+                                            type="checkbox"
+                                            checked={usaStockDirecto}
+                                            onChange={(e) => setUsaStockDirecto(e.target.checked)}
+                                            className="h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary"
+                                        />
+                                        Control de Stock Directo y Cantidad por Artículo
+                                    </label>
+                                    <label className="flex items-center gap-2.5 text-sm text-slate-700 cursor-pointer">
+                                        <input
+                                            type="checkbox"
+                                            checked={usaVencimiento}
+                                            onChange={(e) => setUsaVencimiento(e.target.checked)}
+                                            className="h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary"
+                                        />
+                                        Solicitar Fecha de Vencimiento en Artículos / Lotes
+                                    </label>
+                                    <label className="flex items-center gap-2.5 text-sm text-slate-700 cursor-pointer">
+                                        <input
+                                            type="checkbox"
+                                            checked={usaRecetas}
+                                            onChange={(e) => setUsaRecetas(e.target.checked)}
+                                            className="h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary"
+                                        />
+                                        Habilitar Recetas / Ensamblaje de Materiales (BOM)
+                                    </label>
+                                </div>
 
-                                <button
-                                    type="button"
-                                    onClick={() => seleccionarModalidad('perecedero')}
-                                    style={cardSelectStyle(usaStockDirecto && usaVencimiento && !usaRecetas)}
-                                >
-                                    <strong>🛒 Productos Perecederos (Con fecha de vencimiento)</strong>
-                                    <span style={{ fontSize: '0.82rem', color: '#475569' }}>
-                                        Compra y venta directa solicitando fecha de vencimiento y cantidad por lote.
-                                    </span>
-                                    <small style={{ color: '#0284c7' }}>Ej: Supermercado, minimarket, farmacia.</small>
-                                </button>
-
-                                <button
-                                    type="button"
-                                    onClick={() => seleccionarModalidad('ensamblaje_no_perecedero')}
-                                    style={cardSelectStyle(usaStockDirecto && !usaVencimiento && usaRecetas)}
-                                >
-                                    <strong>🪚 Ensamblaje / Fabricación (Sin fecha de vencimiento)</strong>
-                                    <span style={{ fontSize: '0.82rem', color: '#475569' }}>
-                                        Usa materiales o piezas no perecederas que se unen para armar un producto final.
-                                    </span>
-                                    <small style={{ color: '#0284c7' }}>Ej: Carpintería/muebles, ensamblaje de PCs, taller.</small>
-                                </button>
-
-                                <button
-                                    type="button"
-                                    onClick={() => seleccionarModalidad('elaboracion_perecedera')}
-                                    style={cardSelectStyle(usaStockDirecto && usaVencimiento && usaRecetas)}
-                                >
-                                    <strong>☕ Elaboración con Recetas y Vencimiento</strong>
-                                    <span style={{ fontSize: '0.82rem', color: '#475569' }}>
-                                        Recetas de preparación con insumos que tienen control de caducidad.
-                                    </span>
-                                    <small style={{ color: '#0284c7' }}>Ej: Restaurante, cafetería, panadería, pastelería.</small>
-                                </button>
+                                <div className="flex justify-end pt-2">
+                                    <Button onClick={() => setPaso(2)}>
+                                        Siguiente: Nombre de la Empresa →
+                                    </Button>
+                                </div>
                             </div>
+                        )}
 
-                            <div style={{ background: '#f8fafc', padding: '1rem', borderRadius: '8px', border: '1px solid #cbd5e1', marginBottom: '1.25rem', display: 'flex', flexDirection: 'column', gap: '0.5rem', fontSize: '0.9rem' }}>
-                                <strong>Ajuste fino de funciones activas:</strong>
-                                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                    <input type="checkbox" checked={usaStockDirecto} onChange={(e) => setUsaStockDirecto(e.target.checked)} />
-                                    Control de Stock Directo y Cantidad por Artículo
-                                </label>
-                                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                    <input type="checkbox" checked={usaVencimiento} onChange={(e) => setUsaVencimiento(e.target.checked)} />
-                                    Solicitar Fecha de Vencimiento en Artículos / Lotes
-                                </label>
-                                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                    <input type="checkbox" checked={usaRecetas} onChange={(e) => setUsaRecetas(e.target.checked)} />
-                                    Habilitar Recetas / Ensamblaje de Materiales (BOM)
-                                </label>
-                            </div>
+                        {/* PASO 2: NOMBRE DE LA EMPRESA */}
+                        {paso === 2 && (
+                            <div className="space-y-6">
+                                <div>
+                                    <h2 className="text-lg font-semibold text-slate-800">
+                                        Paso 2: Nombre de tu Empresa o Negocio
+                                    </h2>
+                                    <p className="text-sm text-slate-500 mt-1">
+                                        Este nombre aparecerá en el encabezado del sistema y en los reportes de control.
+                                    </p>
+                                </div>
 
-                            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                                <button type="button" onClick={() => setPaso(2)} style={btnPrimario}>
-                                    Siguiente: Nombre de la Empresa →
-                                </button>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* PASO 2: NOMBRE DE LA EMPRESA */}
-                    {paso === 2 && (
-                        <div>
-                            <h2 style={{ marginTop: 0, fontSize: '1.2rem' }}>
-                                Paso 2: Nombre de tu Empresa o Negocio
-                            </h2>
-                            <p style={{ color: '#475569', fontSize: '0.92rem' }}>
-                                Este nombre aparecerá en el encabezado del sistema y en el panel de control.
-                            </p>
-
-                            <div style={{ marginBottom: '1.5rem' }}>
-                                <label style={{ fontWeight: 'bold', display: 'block', marginBottom: '0.4rem' }}>
-                                    Nombre de la Empresa:
-                                </label>
-                                <input
-                                    type="text"
-                                    placeholder="Ej. Ferretería Central, Autopartes Norte, Minimarket El Sol..."
-                                    value={nombreNegocio}
-                                    onChange={(e) => setNombreNegocio(e.target.value)}
-                                    style={inputStyle}
-                                />
-                            </div>
-
-                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                                <button type="button" onClick={() => setPaso(1)} style={btnSecundario}>
-                                    ← Volver al Paso 1
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        if (!nombreNegocio.trim()) {
-                                            setError('Por favor ingresa el nombre de tu empresa.');
-                                            return;
-                                        }
-                                        setError(null);
-                                        setPaso(3);
-                                    }}
-                                    style={btnPrimario}
-                                >
-                                    Siguiente: Crear Super Admin →
-                                </button>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* PASO 3: CREAR EL PRIMER SUPER ADMIN */}
-                    {paso === 3 && (
-                        <form onSubmit={finalizarInstalacion}>
-                            <h2 style={{ marginTop: 0, fontSize: '1.2rem' }}>
-                                Paso 3: Crear la Cuenta del Primer Super Admin
-                            </h2>
-                            <p style={{ color: '#475569', fontSize: '0.92rem' }}>
-                                El <strong>Super Admin</strong> tiene el rango máximo del sistema: puede crear Administradores y Cajeros, auditar arqueos ciegos y cambiar contraseñas de cualquier usuario inferior.
-                            </p>
-
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginBottom: '1.5rem' }}>
-                                <label style={{ fontWeight: 'bold' }}>
-                                    Nombre del Propietario / Super Admin:
-                                    <input
+                                <div className="space-y-2">
+                                    <label className="text-sm font-semibold text-slate-700">
+                                        Nombre de la Empresa o Establecimiento:
+                                    </label>
+                                    <Input
                                         type="text"
-                                        required
-                                        placeholder="Ej. Carlos (Dueño)"
-                                        value={adminNombre}
-                                        onChange={(e) => setAdminNombre(e.target.value)}
-                                        style={inputStyle}
+                                        placeholder="Ej. Ferretería Central, Autopartes Norte, Minimarket El Sol..."
+                                        value={nombreNegocio}
+                                        onChange={(e) => setNombreNegocio(e.target.value)}
+                                        className="h-11"
                                     />
-                                </label>
+                                </div>
 
-                                <label style={{ fontWeight: 'bold' }}>
-                                    PIN o Contraseña de Acceso:
-                                    <input
-                                        type="password"
-                                        required
-                                        placeholder="Crea tu PIN o contraseña secreta"
-                                        value={adminPin}
-                                        onChange={(e) => setAdminPin(e.target.value)}
-                                        style={inputStyle}
-                                    />
-                                </label>
-
-                                <label style={{ fontWeight: 'bold' }}>
-                                    Token de instalación:
-                                    <input
-                                        type="password"
-                                        autoComplete="off"
-                                        placeholder="Valor de SETUP_TOKEN configurado en el servidor"
-                                        value={setupToken}
-                                        onChange={(e) => setSetupToken(e.target.value)}
-                                        style={inputStyle}
-                                    />
-                                    <small style={{ display: 'block', fontWeight: 'normal', color: '#64748b', marginTop: '0.3rem' }}>
-                                        Lo entrega el responsable técnico del despliegue. Es obligatorio en producción.
-                                    </small>
-                                </label>
+                                <div className="flex items-center justify-between pt-4 border-t border-slate-100">
+                                    <Button variant="outline" onClick={() => setPaso(1)}>
+                                        ← Volver al Paso 1
+                                    </Button>
+                                    <Button
+                                        onClick={() => {
+                                            if (!nombreNegocio.trim()) {
+                                                setError('Por favor ingresa el nombre de tu empresa.');
+                                                return;
+                                            }
+                                            setError(null);
+                                            setPaso(3);
+                                        }}
+                                    >
+                                        Siguiente: Crear Super Admin →
+                                    </Button>
+                                </div>
                             </div>
+                        )}
 
-                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                                <button type="button" onClick={() => setPaso(2)} style={btnSecundario}>
-                                    ← Volver al Paso 2
-                                </button>
-                                <button type="submit" disabled={guardando} style={{ ...btnPrimario, background: '#16a34a' }}>
-                                    {guardando ? 'Guardando configuración...' : '✅ Finalizar Configuración e Iniciar Sistema'}
-                                </button>
-                            </div>
-                        </form>
-                    )}
-                </div>
+                        {/* PASO 3: CREAR EL PRIMER SUPER ADMIN */}
+                        {paso === 3 && (
+                            <form onSubmit={finalizarInstalacion} className="space-y-6">
+                                <div>
+                                    <h2 className="text-lg font-semibold text-slate-800">
+                                        Paso 3: Crear la Cuenta del Primer Super Admin
+                                    </h2>
+                                    <p className="text-sm text-slate-500 mt-1">
+                                        El <strong>Super Admin</strong> tiene el rango máximo: puede crear Administradores y Cajeros, auditar arqueos ciegos y cambiar contraseñas.
+                                    </p>
+                                </div>
+
+                                <div className="space-y-4">
+                                    <div className="space-y-1.5">
+                                        <label className="text-sm font-semibold text-slate-700">
+                                            Nombre del Propietario / Super Admin:
+                                        </label>
+                                        <Input
+                                            type="text"
+                                            required
+                                            placeholder="Ej. Carlos (Dueño)"
+                                            value={adminNombre}
+                                            onChange={(e) => setAdminNombre(e.target.value)}
+                                            className="h-11"
+                                        />
+                                    </div>
+
+                                    <div className="space-y-1.5">
+                                        <label className="text-sm font-semibold text-slate-700">
+                                            PIN o Contraseña de Acceso:
+                                        </label>
+                                        <Input
+                                            type="password"
+                                            required
+                                            placeholder="Crea tu PIN o contraseña secreta"
+                                            value={adminPin}
+                                            onChange={(e) => setAdminPin(e.target.value)}
+                                            className="h-11"
+                                        />
+                                    </div>
+
+                                    <div className="space-y-1.5">
+                                        <label className="text-sm font-semibold text-slate-700">
+                                            Token de Instalación (SETUP_TOKEN):
+                                        </label>
+                                        <Input
+                                            type="password"
+                                            autoComplete="off"
+                                            placeholder="Valor de SETUP_TOKEN configurado en el servidor"
+                                            value={setupToken}
+                                            onChange={(e) => setSetupToken(e.target.value)}
+                                            className="h-11"
+                                        />
+                                        <p className="text-xs text-slate-500">
+                                            Lo entrega el responsable técnico del despliegue. Obligatorio en entornos productivos.
+                                        </p>
+                                    </div>
+                                </div>
+
+                                <div className="flex items-center justify-between pt-4 border-t border-slate-100">
+                                    <Button type="button" variant="outline" onClick={() => setPaso(2)}>
+                                        ← Volver al Paso 2
+                                    </Button>
+                                    <Button
+                                        type="submit"
+                                        disabled={guardando}
+                                        className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold"
+                                    >
+                                        {guardando ? 'Guardando configuración...' : '✅ Finalizar Configuración e Iniciar'}
+                                    </Button>
+                                </div>
+                            </form>
+                        )}
+                    </CardContent>
+                </Card>
             </main>
         );
     }
 
     // PANTALLA NORMAL DE INICIO UNA VEZ CONFIGURADO EL SISTEMA
     return (
-        <main style={{ maxWidth: '680px', margin: '4rem auto', padding: '2rem', textAlign: 'center', background: '#fff', borderRadius: '12px', boxShadow: '0 2px 10px rgba(0,0,0,0.06)' }}>
-            <span style={{ background: '#e0f2fe', color: '#0369a1', padding: '0.3rem 0.75rem', borderRadius: '99px', fontSize: '0.82rem', fontWeight: 'bold' }}>
-                {config.modalidad_nombre}
-            </span>
-            <h1 style={{ margin: '0.75rem 0 0.25rem', fontSize: '2rem' }}>
-                {config.nombre_negocio}
-            </h1>
-            <p style={{ color: '#64748b', marginBottom: '2rem' }}>
-                Sistema de Punto de Venta, Arqueo Ciego e Inventario Adaptativo
-            </p>
-            <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center' }}>
-                <a
-                    href="/caja"
-                    style={{ padding: '0.85rem 1.75rem', background: '#0070f3', color: '#fff', borderRadius: '8px', textDecoration: 'none', fontWeight: 'bold' }}
-                >
-                    🛒 Ir a Caja (Ventas)
-                </a>
-                <a
-                    href="/admin"
-                    style={{ padding: '0.85rem 1.75rem', background: '#1e293b', color: '#fff', borderRadius: '8px', textDecoration: 'none', fontWeight: 'bold' }}
-                >
-                    🛡️ Panel de Administración
-                </a>
-            </div>
+        <main className="min-h-screen flex items-center justify-center p-4">
+            <Card className="w-full max-w-xl shadow-xl border-slate-200 text-center">
+                <CardHeader className="space-y-3 pb-4">
+                    <div className="flex justify-center">
+                        <Badge variant="secondary" className="bg-sky-50 text-sky-700 border-sky-200 font-semibold px-3 py-1">
+                            {config.modalidad_nombre}
+                        </Badge>
+                    </div>
+                    <CardTitle className="text-3xl font-extrabold text-slate-900 tracking-tight">
+                        {config.nombre_negocio}
+                    </CardTitle>
+                    <CardDescription className="text-slate-500 text-sm max-w-md mx-auto">
+                        Sistema integral de Punto de Venta, Arqueo Ciego y Control de Inventario Adaptativo
+                    </CardDescription>
+                </CardHeader>
+
+                <CardContent className="pt-4 pb-6">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <Button asChild size="lg" className="h-14 text-base font-semibold shadow-md">
+                            <Link href="/caja">
+                                🛒 Ir a Caja (Ventas)
+                            </Link>
+                        </Button>
+                        <Button asChild size="lg" variant="secondary" className="h-14 text-base font-semibold shadow-sm bg-slate-800 text-white hover:bg-slate-900">
+                            <Link href="/admin">
+                                🛡️ Panel de Administración
+                            </Link>
+                        </Button>
+                    </div>
+                </CardContent>
+
+                <CardFooter className="justify-center border-t border-slate-100 bg-slate-50/50 py-3 text-xs text-slate-400">
+                    Control de Cajas • Modernizado con Shadcn & Tailwind CSS
+                </CardFooter>
+            </Card>
         </main>
     );
 }
-
-function cardSelectStyle(activo) {
-    return {
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '0.35rem',
-        textAlign: 'left',
-        padding: '0.9rem',
-        borderRadius: '8px',
-        border: activo ? '2px solid #0284c7' : '1px solid #cbd5e1',
-        background: activo ? '#f0f9ff' : '#fff',
-        cursor: 'pointer'
-    };
-}
-
-const inputStyle = {
-    width: '100%',
-    padding: '0.65rem',
-    marginTop: '0.35rem',
-    borderRadius: '6px',
-    border: '1px solid #cbd5e1',
-    fontSize: '0.95rem',
-    boxSizing: 'border-box'
-};
-
-const btnPrimario = {
-    padding: '0.7rem 1.35rem',
-    background: '#0070f3',
-    color: '#fff',
-    border: 'none',
-    borderRadius: '6px',
-    fontWeight: 'bold',
-    cursor: 'pointer',
-    fontSize: '0.95rem'
-};
-
-const btnSecundario = {
-    padding: '0.7rem 1.35rem',
-    background: '#e2e8f0',
-    color: '#1e293b',
-    border: 'none',
-    borderRadius: '6px',
-    fontWeight: 'bold',
-    cursor: 'pointer',
-    fontSize: '0.95rem'
-};
