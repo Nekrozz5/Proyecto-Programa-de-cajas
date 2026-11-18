@@ -1,3 +1,4 @@
+
 /**
  * server/repositories/ventas.repo.js
  * Repositorio para la gestión de ventas, cobros mixtos (efectivo + QR),
@@ -57,10 +58,15 @@ async function registrarVentaCompleta(cajaId, items, metodoPago, montoRecibido =
                 .sort((a, b) => a - b)
             : [];
 
-        const claveAgrupacion = `${prodId}__${modsNormalizados.join('_')}`;
+        const loteId = (item.loteId && Number(item.loteId) > 0)
+            ? Number(item.loteId)
+            : ((item.lote_id && Number(item.lote_id) > 0) ? Number(item.lote_id) : null);
+
+        const claveAgrupacion = `${prodId}_${loteId || 'auto'}__${modsNormalizados.join('_')}`;
         if (!mapaItemsAgrupados.has(claveAgrupacion)) {
             mapaItemsAgrupados.set(claveAgrupacion, {
                 productoId: prodId,
+                loteId,
                 modificadoresIds: modsNormalizados,
                 cantidadTotal: 0
             });
@@ -101,7 +107,7 @@ async function registrarVentaCompleta(cajaId, items, metodoPago, montoRecibido =
         const consumoAcumuladoDirecto = {};
 
         for (const itemAgrupado of mapaItemsAgrupados.values()) {
-            const { productoId: prodId, modificadoresIds, cantidadTotal } = itemAgrupado;
+            const { productoId: prodId, loteId, modificadoresIds, cantidadTotal } = itemAgrupado;
             const prod = await getQuery(`SELECT * FROM productos WHERE id = ? AND activo = 1`, [prodId]);
             if (!prod) throw new Error(`Producto con ID ${prodId} no existe.`);
 
@@ -264,11 +270,16 @@ async function registrarVentaCompleta(cajaId, items, metodoPago, montoRecibido =
                                 productoId: comp.componente_producto_id,
                                 nombre: comp.componente_nombre,
                                 costoUnitario: Number(comp.componente_costo || 0),
-                                cantidadTotalRequerida: 0
+                                cantidadTotalRequerida: 0,
+                                lotesEspecificos: {},
+                                cantidadPeps: 0
                             };
                         }
                         consumoAcumuladoDirecto[comp.componente_producto_id].cantidadTotalRequerida = Number(
                             (consumoAcumuladoDirecto[comp.componente_producto_id].cantidadTotalRequerida + cantTotalComp).toFixed(4)
+                        );
+                        consumoAcumuladoDirecto[comp.componente_producto_id].cantidadPeps = Number(
+                            ((consumoAcumuladoDirecto[comp.componente_producto_id].cantidadPeps || 0) + cantTotalComp).toFixed(4)
                         );
                     } else if (comp.componente_tipo === 'receta') {
                         // Descomponer en sus insumos
@@ -325,19 +336,30 @@ async function registrarVentaCompleta(cajaId, items, metodoPago, montoRecibido =
                 );
             }
 
-            // Si es directo, acumular consumo
+            // Si es directo, acumular consumo y rastrear lote
             if (prod.tipo_inventario === 'directo') {
                 if (!consumoAcumuladoDirecto[prod.id]) {
                     consumoAcumuladoDirecto[prod.id] = {
                         productoId: prod.id,
                         nombre: prod.nombre,
                         costoUnitario: Number(prod.costo || 0),
-                        cantidadTotalRequerida: 0
+                        cantidadTotalRequerida: 0,
+                        lotesEspecificos: {},
+                        cantidadPeps: 0
                     };
                 }
                 consumoAcumuladoDirecto[prod.id].cantidadTotalRequerida = Number(
                     (consumoAcumuladoDirecto[prod.id].cantidadTotalRequerida + cantidadTotal).toFixed(4)
                 );
+                if (loteId) {
+                    consumoAcumuladoDirecto[prod.id].lotesEspecificos[loteId] = Number(
+                        ((consumoAcumuladoDirecto[prod.id].lotesEspecificos[loteId] || 0) + cantidadTotal).toFixed(4)
+                    );
+                } else {
+                    consumoAcumuladoDirecto[prod.id].cantidadPeps = Number(
+                        ((consumoAcumuladoDirecto[prod.id].cantidadPeps || 0) + cantidadTotal).toFixed(4)
+                    );
+                }
             }
 
             const subtotalLinea = redondear2(cantidadTotal * precioUnitario);
@@ -380,6 +402,21 @@ async function registrarVentaCompleta(cajaId, items, metodoPago, montoRecibido =
                 throw new Error(
                     `Stock insuficiente del producto "${reqDir.nombre}": se requieren ${reqDir.cantidadTotalRequerida} ${unidad} pero solo hay ${disponible} ${unidad} en stock.`
                 );
+            }
+
+            // Validar stock de cada lote específico solicitado
+            for (const lId in reqDir.lotesEspecificos) {
+                const cantReqLote = reqDir.lotesEspecificos[lId];
+                const loteActual = await getQuery(
+                    `SELECT id, stock, fecha_vencimiento FROM producto_lotes WHERE id = ? AND producto_id = ? AND activo = 1`,
+                    [lId, reqDir.productoId]
+                );
+                if (!loteActual || Number(loteActual.stock) < cantReqLote) {
+                    const dispLote = loteActual ? loteActual.stock : 0;
+                    throw new Error(
+                        `Stock insuficiente en el lote #${lId} (vence ${loteActual?.fecha_vencimiento || 'N/A'}) del producto "${reqDir.nombre}": se requieren ${cantReqLote} unidades pero solo quedan ${dispLote} disponibles.`
+                    );
+                }
             }
         }
 
@@ -671,6 +708,38 @@ async function registrarVentaCompleta(cajaId, items, metodoPago, montoRecibido =
             );
             if (r.changes === 0) {
                 throw new Error(`Error de concurrencia: Stock insuficiente de ${reqDir.nombre} durante la venta.`);
+            }
+
+            // Descontar stock de lotes específicos
+            for (const lId in reqDir.lotesEspecificos) {
+                const cantLote = reqDir.lotesEspecificos[lId];
+                const rLote = await runQuery(
+                    `UPDATE producto_lotes SET stock = ROUND(stock - ?, 4) WHERE id = ? AND producto_id = ? AND stock >= ?`,
+                    [cantLote, lId, reqDir.productoId, cantLote]
+                );
+                if (rLote.changes === 0) {
+                    throw new Error(`Error de concurrencia: Stock insuficiente en el lote #${lId} del producto ${reqDir.nombre}.`);
+                }
+            }
+
+            // Descontar stock por política PEPS automática para cantidades sin lote específico
+            if (reqDir.cantidadPeps > 0) {
+                const lotesPeps = await allQuery(
+                    `SELECT id, stock FROM producto_lotes WHERE producto_id = ? AND activo = 1 AND stock > 0 ORDER BY fecha_vencimiento ASC, id ASC`,
+                    [reqDir.productoId]
+                );
+                let remPeps = reqDir.cantidadPeps;
+                for (const lot of lotesPeps) {
+                    if (remPeps <= 0) break;
+                    const desc = Math.min(Number(lot.stock), remPeps);
+                    const rLote = await runQuery(
+                        `UPDATE producto_lotes SET stock = ROUND(stock - ?, 4) WHERE id = ? AND stock >= ?`,
+                        [desc, lot.id, desc]
+                    );
+                    if (rLote.changes > 0) {
+                        remPeps = Number((remPeps - desc).toFixed(4));
+                    }
+                }
             }
 
             const prodActualizado = await getQuery(`SELECT stock, costo FROM productos WHERE id = ?`, [reqDir.productoId]);

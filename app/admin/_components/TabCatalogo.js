@@ -5,18 +5,45 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { 
+    Package, 
+    Sparkles, 
+    FileText, 
+    Plus, 
+    Trash2, 
+    Tag, 
+    Layers, 
+    Search, 
+    X, 
+    Edit2, 
+    Save, 
+    Check, 
+    Clock, 
+    Truck,
+    ChevronLeft,
+    ChevronRight 
+} from 'lucide-react';
 import TabKardex from './TabKardex';
 import {
     crearCategoriaAction,
     crearProductoAction,
+    actualizarProductoAction,
+    eliminarProductoAction,
     crearGrupoModificadorAction,
     eliminarGrupoModificadorAction,
     asignarModificadoresProductoAction
 } from '../../../server/actions/catalogo.actions';
-import {
-    comprarProductoDirectoAction,
-    mermaProductoDirectoAction
-} from '../../../server/actions/inventario.actions';
+
+export const OPCIONES_UNIDADES_MEDIDA = [
+    { valor: 'unidades', etiqueta: 'Unidades (u. / piezas / paquetes)' },
+    { valor: 'kilos', etiqueta: 'Kilos (kg)' },
+    { valor: 'gramos', etiqueta: 'Gramos (g)' },
+    { valor: 'miligramos', etiqueta: 'Miligramos (mg)' },
+    { valor: 'litros', etiqueta: 'Litros (L)' },
+    { valor: 'mililitros', etiqueta: 'Mililitros (ml)' },
+    { valor: 'metros', etiqueta: 'Metros (m)' },
+    { valor: 'centimetros', etiqueta: 'Centímetros (cm)' }
+];
 
 export function obtenerUnidadesCompatibles(unidadBase) {
     const u = String(unidadBase || 'unidades').trim().toLowerCase();
@@ -69,6 +96,7 @@ export default function TabCatalogo({
     const configActual = datos?.configuracionNegocio || {};
     const usaStockDirecto = Boolean(configActual.usa_stock_directo ?? true);
     const usaVencimiento = Boolean(configActual.usa_vencimiento ?? false);
+    const usaRecetas = Boolean(configActual.usa_recetas_ensamblaje ?? false);
 
     // Sub-sección interna de Catálogo
     const [subSeccionCatalogo, setSubSeccionCatalogo] = useState('articulos'); // 'articulos' | 'modificadores' | 'kardex'
@@ -101,22 +129,6 @@ export default function TabCatalogo({
     const [comboUsaVigencia, setComboUsaVigencia] = useState(false);
     const [comboFechaInicio, setComboFechaInicio] = useState('');
     const [comboFechaFin, setComboFechaFin] = useState('');
-
-    // Reabastecimiento de Artículo Directo (CPP)
-    const [compraProdId, setCompraProdId] = useState('');
-    const [compraProdCantidad, setCompraProdCantidad] = useState('');
-    const [compraProdCostoTotal, setCompraProdCostoTotal] = useState('');
-    const [compraProdProveedor, setCompraProdProveedor] = useState('');
-    const [compraProdNit, setCompraProdNit] = useState('');
-    const [compraProdNroFactura, setCompraProdNroFactura] = useState('');
-    const [compraProdConFactura, setCompraProdConFactura] = useState(false);
-
-    // Mermas de Productos Directos
-    const [mermaProdId, setMermaProdId] = useState('');
-    const [mermaProdCantidad, setMermaProdCantidad] = useState('');
-    const [mermaProdMotivo, setMermaProdMotivo] = useState('');
-    const [mermaProdConfirmando, setMermaProdConfirmando] = useState(false);
-    const [mermaProdResultado, setMermaProdResultado] = useState(null);
 
     // Grupos de Modificadores
     const [nombreGrupoMod, setNombreGrupoMod] = useState('');
@@ -159,6 +171,38 @@ export default function TabCatalogo({
     }
     const gananciaEstimada = Number(prodPrecio || 0) - costoEstimado;
     const margenPorcentaje = Number(prodPrecio) > 0 ? (gananciaEstimada / Number(prodPrecio)) * 100 : 0;
+
+    // Estado y Modal de Edición de Producto / Receta
+    const [modalEditarAbierto, setModalEditarAbierto] = useState(false);
+    const [productoAEditar, setProductoAEditar] = useState(null);
+    const [editNombre, setEditNombre] = useState('');
+    const [editPrecio, setEditPrecio] = useState('');
+    const [editCategorias, setEditCategorias] = useState([]);
+    const [editStockMinimo, setEditStockMinimo] = useState('0');
+    const [editFechaVencimiento, setEditFechaVencimiento] = useState('');
+    const [editFilasReceta, setEditFilasReceta] = useState([]);
+    const [guardandoEdicion, setGuardandoEdicion] = useState(false);
+
+    // Cálculo dinámico de costo y margen para el modal de edición
+    let costoEstimadoEdit = 0;
+    if (productoAEditar?.tipo_inventario === 'receta') {
+        for (const f of editFilasReceta) {
+            if (!f.insumoId || !f.cantidad) continue;
+            const ins = (datos?.insumos || []).find((i) => String(i.id) === String(f.insumoId));
+            if (!ins) continue;
+            const cant = Number(f.cantidad) || 0;
+            const convertida = f.unidadReceta
+                ? convertirMedidaReceta(cant, f.unidadReceta, ins.unidad_medida)
+                : cant;
+            if (convertida !== null) {
+                costoEstimadoEdit += convertida * Number(ins.costo_por_unidad || 0);
+            }
+        }
+    } else {
+        costoEstimadoEdit = Number(productoAEditar?.costo || 0);
+    }
+    const gananciaEstimadaEdit = Number(editPrecio || 0) - costoEstimadoEdit;
+    const margenPorcentajeEdit = Number(editPrecio) > 0 ? (gananciaEstimadaEdit / Number(editPrecio)) * 100 : 0;
 
     // Filtros de Productos
     const productosFiltrados = (datos?.productos || []).filter((p) => {
@@ -248,6 +292,150 @@ export default function TabCatalogo({
             }
         }
         setFilasReceta(copia);
+    }
+
+    // Helpers y Handlers de Edición de Producto / Receta
+    function abrirModalEditarProducto(p) {
+        limpiarAlertas?.();
+        setProductoAEditar(p);
+        setEditNombre(p.nombre || '');
+        setEditPrecio(p.precio !== undefined && p.precio !== null ? String(p.precio) : '0');
+
+        let cats = [];
+        if (p.categoria && typeof p.categoria === 'string') {
+            cats = p.categoria.split(',').map((c) => c.trim()).filter(Boolean);
+        }
+        setEditCategorias(cats);
+        setEditStockMinimo(p.stock_minimo !== undefined && p.stock_minimo !== null ? String(p.stock_minimo) : '0');
+        setEditFechaVencimiento(p.fecha_vencimiento || '');
+
+        if (p.tipo_inventario === 'receta') {
+            const filas = (p.receta || []).map((r) => {
+                const ins = (datos?.insumos || []).find((i) => Number(i.id) === Number(r.insumo_id));
+                return {
+                    insumoId: String(r.insumo_id),
+                    cantidad: String(r.cantidad_requerida || ''),
+                    unidadReceta: r.insumo_unidad || ins?.unidad_medida || 'unidades'
+                };
+            });
+            if (filas.length > 0) {
+                setEditFilasReceta(filas);
+            } else {
+                const primerInsumo = (datos?.insumos || [])[0];
+                setEditFilasReceta([
+                    {
+                        insumoId: primerInsumo ? String(primerInsumo.id) : '',
+                        cantidad: '',
+                        unidadReceta: primerInsumo ? primerInsumo.unidad_medida : 'unidades'
+                    }
+                ]);
+            }
+        } else {
+            setEditFilasReceta([]);
+        }
+
+        setModalEditarAbierto(true);
+    }
+
+    function toggleCategoriaEdit(nomCat) {
+        if (!nomCat) return;
+        setEditCategorias((prev) => {
+            const existe = prev.some((c) => c.toLowerCase() === nomCat.toLowerCase());
+            return existe ? prev.filter((c) => c.toLowerCase() !== nomCat.toLowerCase()) : [...prev, nomCat];
+        });
+    }
+
+    function agregarFilaRecetaEdit() {
+        if (editFilasReceta.length >= 30) {
+            setError?.('Límite alcanzado: una receta no puede tener más de 30 insumos.');
+            return;
+        }
+        const primerInsumo = (datos?.insumos || [])[0];
+        setEditFilasReceta([
+            ...editFilasReceta,
+            {
+                insumoId: primerInsumo ? String(primerInsumo.id) : '',
+                cantidad: '',
+                unidadReceta: primerInsumo ? primerInsumo.unidad_medida : 'unidades'
+            }
+        ]);
+    }
+
+    function quitarFilaRecetaEdit(index) {
+        if (editFilasReceta.length <= 1) return;
+        setEditFilasReceta(editFilasReceta.filter((_, i) => i !== index));
+    }
+
+    function cambiarFilaRecetaEdit(index, campo, valor) {
+        const copia = [...editFilasReceta];
+        copia[index] = { ...copia[index], [campo]: valor };
+        if (campo === 'insumoId') {
+            const ins = (datos?.insumos || []).find((i) => String(i.id) === String(valor));
+            if (ins) {
+                copia[index].unidadReceta = ins.unidad_medida;
+            }
+        }
+        setEditFilasReceta(copia);
+    }
+
+    async function handleGuardarEdicionProducto(e) {
+        e.preventDefault();
+        if (!productoAEditar) return;
+        limpiarAlertas?.();
+
+        const nom = editNombre.trim();
+        if (!nom) {
+            setError?.('El nombre del producto no puede estar vacío.');
+            return;
+        }
+        const precioNum = Number(editPrecio);
+        if (!Number.isFinite(precioNum) || precioNum < 0) {
+            setError?.('El precio debe ser un número mayor o igual a 0.');
+            return;
+        }
+
+        const payload = {
+            productoId: productoAEditar.id,
+            nombre: nom,
+            precio: precioNum,
+            categorias: editCategorias,
+            stock_minimo: Number(editStockMinimo || 0),
+            fecha_vencimiento: editFechaVencimiento ? editFechaVencimiento : null
+        };
+
+        if (productoAEditar.tipo_inventario === 'receta') {
+            const insumosLimpio = editFilasReceta
+                .filter((f) => f.insumoId && Number(f.cantidad) > 0)
+                .map((f) => ({
+                    insumoId: Number(f.insumoId),
+                    cantidad: Number(f.cantidad),
+                    unidadReceta: f.unidadReceta || null
+                }));
+
+            if (insumosLimpio.length === 0) {
+                setError?.('Debes incluir al menos un insumo con cantidad mayor a 0 para la receta.');
+                return;
+            }
+            if (insumosLimpio.length > 30) {
+                setError?.('Límite excedido: No se pueden agregar más de 30 insumos en una receta.');
+                return;
+            }
+            payload.insumosReceta = insumosLimpio;
+        }
+
+        try {
+            setGuardandoEdicion(true);
+            const res = await actualizarProductoAction(payload);
+            if (!res.ok) throw new Error(res.error || 'Error al actualizar el producto.');
+            setMensaje?.(`Producto "${nom}" actualizado con éxito.`);
+            setModalEditarAbierto(false);
+            setProductoAEditar(null);
+            await cargarTodo?.();
+        } catch (err) {
+            setError?.(err.message);
+        } finally {
+            setGuardandoEdicion(false);
+        }
     }
 
     // Helpers de Modificadores
@@ -344,6 +532,22 @@ export default function TabCatalogo({
             const res = await eliminarGrupoModificadorAction({ grupoId });
             if (!res.ok) throw new Error(res.error || 'Error al eliminar grupo de modificadores.');
             setMensaje?.(`Grupo de complementos "${nombre}" eliminado.`);
+            await cargarTodo?.();
+        } catch (err) {
+            setError?.(err.message);
+        }
+    }
+
+    async function handleEliminarProducto(p) {
+        if (!p || !p.id) return;
+        const confirmado = window.confirm(`¿Está seguro de borrar el artículo "${p.nombre}" del catálogo?`);
+        if (!confirmado) return;
+
+        limpiarAlertas?.();
+        try {
+            const res = await eliminarProductoAction({ productoId: p.id });
+            if (!res.ok) throw new Error(res.error || 'Error al eliminar el artículo.');
+            setMensaje?.(`Artículo "${p.nombre}" eliminado del catálogo.`);
             await cargarTodo?.();
         } catch (err) {
             setError?.(err.message);
@@ -461,81 +665,6 @@ export default function TabCatalogo({
         }
     }
 
-    // Compra Directa
-    async function handleComprarProductoDirecto(e) {
-        e.preventDefault();
-        limpiarAlertas?.();
-        try {
-            const res = await comprarProductoDirectoAction({
-                productoId: Number(compraProdId),
-                cantidadComprada: Number(compraProdCantidad),
-                costoTotalCompra: Number(compraProdCostoTotal),
-                fechaVencimiento: usaVencimiento ? compraProdVencimiento : null,
-                proveedorNombre: compraProdProveedor.trim() || null,
-                proveedorNit: compraProdNit.trim() || null,
-                nroFacturaCompra: compraProdNroFactura.trim() || null,
-                conFactura: compraProdConFactura
-            });
-            if (!res.ok) throw new Error(res.error || 'Error al registrar compra directa.');
-            setMensaje?.('Entrada de stock registrada con Costo Promedio Ponderado (NIC 2) sobre el artículo.');
-            setCompraProdCantidad('');
-            setCompraProdCostoTotal('');
-            setCompraProdProveedor('');
-            setCompraProdNit('');
-            setCompraProdNroFactura('');
-            setCompraProdConFactura(false);
-            await cargarTodo?.();
-        } catch (err) {
-            setError?.(err.message);
-        }
-    }
-
-    // Merma Directa
-    async function handleConfirmarMermaProductoDirecto() {
-        limpiarAlertas?.();
-        try {
-            const prodSel = (datos?.productos || []).find((p) => String(p.id) === String(mermaProdId));
-            if (!prodSel) throw new Error('Selecciona un producto directo válido.');
-            const cant = Number(mermaProdCantidad);
-            if (!Number.isFinite(cant) || cant <= 0) {
-                throw new Error('La cantidad de merma debe ser mayor a 0.');
-            }
-            if (cant > Number(prodSel.stock || 0)) {
-                throw new Error(`No puedes dar de baja ${cant} unidades porque el stock disponible es ${prodSel.stock}.`);
-            }
-            if (!mermaProdMotivo || mermaProdMotivo.trim().length < 3) {
-                throw new Error('Ingresa un motivo descriptivo para la merma (mínimo 3 caracteres).');
-            }
-
-            const res = await mermaProductoDirectoAction({
-                productoId: Number(mermaProdId),
-                cantidadPerdida: cant,
-                motivo: mermaProdMotivo.trim()
-            });
-
-            if (!res.ok) throw new Error(res.error || 'Error al registrar la merma.');
-
-            const data = res.data?.mermaProducto || {};
-            setMermaProdResultado({
-                productoNombre: prodSel.nombre,
-                cantidadPerdida: cant,
-                unidadMedida: prodSel.unidad_medida || 'unidades',
-                stockRestante: data.stockRestante ?? (Number(prodSel.stock) - cant),
-                costoUnitario: data.costoUnitario ?? Number(prodSel.costo),
-                costoPerdida: data.costoPerdida ?? (cant * Number(prodSel.costo)),
-                motivo: mermaProdMotivo.trim()
-            });
-            setMermaProdCantidad('');
-            setMermaProdMotivo('');
-            setMermaProdConfirmando(false);
-            setMensaje?.(`✅ Merma registrada: -${cant} ${prodSel.unidad_medida || 'u.'} de "${prodSel.nombre}".`);
-            await cargarTodo?.();
-        } catch (err) {
-            setError?.(err.message);
-            setMermaProdConfirmando(false);
-        }
-    }
-
     return (
         <div className="flex flex-col gap-5">
             {/* SELECTOR DE SUB-SECCIÓN: ARTÍCULOS, MODIFICADORES O KARDEX */}
@@ -545,39 +674,42 @@ export default function TabCatalogo({
                     variant={subSeccionCatalogo === 'articulos' ? 'default' : 'ghost'}
                     size="sm"
                     onClick={() => setSubSeccionCatalogo('articulos')}
-                    className={`text-xs font-bold ${
+                    className={`text-xs font-bold gap-1.5 ${
                         subSeccionCatalogo === 'articulos'
                             ? 'bg-white text-slate-900 shadow-sm hover:bg-white'
                             : 'text-slate-600 hover:text-slate-900'
                     }`}
                 >
-                    📦 Artículos y Catálogo ({(datos?.productos || []).length})
+                    <Package className="w-4 h-4" />
+                    <span>Artículos y Catálogo ({(datos?.productos || []).length})</span>
                 </Button>
                 <Button
                     type="button"
                     variant={subSeccionCatalogo === 'modificadores' ? 'default' : 'ghost'}
                     size="sm"
                     onClick={() => setSubSeccionCatalogo('modificadores')}
-                    className={`text-xs font-bold ${
+                    className={`text-xs font-bold gap-1.5 ${
                         subSeccionCatalogo === 'modificadores'
                             ? 'bg-white text-sky-700 shadow-sm hover:bg-white'
                             : 'text-slate-600 hover:text-sky-700'
                     }`}
                 >
-                    ✨ Complementos y Modificadores ({(datos?.gruposModificadores || []).length})
+                    <Sparkles className="w-4 h-4" />
+                    <span>Complementos y Modificadores ({(datos?.gruposModificadores || []).length})</span>
                 </Button>
                 <Button
                     type="button"
                     variant={subSeccionCatalogo === 'kardex' ? 'default' : 'ghost'}
                     size="sm"
                     onClick={() => setSubSeccionCatalogo('kardex')}
-                    className={`text-xs font-bold ${
+                    className={`text-xs font-bold gap-1.5 ${
                         subSeccionCatalogo === 'kardex'
                             ? 'bg-white text-emerald-700 shadow-sm hover:bg-white'
                             : 'text-slate-600 hover:text-emerald-700'
                     }`}
                 >
-                    📜 Kardex Cronológico e Integridad
+                    <FileText className="w-4 h-4" />
+                    <span>Kardex Cronológico e Integridad</span>
                 </Button>
             </div>
 
@@ -596,7 +728,10 @@ export default function TabCatalogo({
                     {/* CREAR NUEVO GRUPO */}
                     <section className="bg-white p-5 rounded-lg border border-slate-200 shadow-sm flex flex-col gap-3">
                         <div>
-                            <h3 className="text-lg font-bold text-slate-900 m-0">✨ Crear Grupo de Complementos / Modificadores</h3>
+                            <h3 className="text-lg font-bold text-slate-900 m-0 flex items-center gap-2">
+                                <Sparkles className="w-5 h-5 text-sky-600" />
+                                <span>Crear Grupo de Complementos / Modificadores</span>
+                            </h3>
                             <p className="text-xs text-slate-500 m-0 mt-0.5">
                                 Configura grupos como <em>&ldquo;Tipo de Leche&rdquo;</em> (reemplazo) o <em>&ldquo;Extras / Jarabes&rdquo;</em> (adiciones) con sus precios e insumos.
                             </p>
@@ -623,8 +758,8 @@ export default function TabCatalogo({
                                         onChange={(e) => setTipoSeleccionGrupoMod(e.target.value)}
                                         className="w-full h-9 rounded-md border border-slate-300 bg-white px-2.5 text-xs shadow-sm focus:outline-none"
                                     >
-                                        <option value="unica">🔘 Selección Única (Excluyente / Reemplazo)</option>
-                                        <option value="multiple">☑️ Múltiples Opciones (Extras / Agregados)</option>
+                                        <option value="unica">Selección Única (Excluyente / Reemplazo)</option>
+                                        <option value="multiple">Múltiples Opciones (Extras / Agregados)</option>
                                     </select>
                                 </div>
 
@@ -688,7 +823,7 @@ export default function TabCatalogo({
                                                         className="h-8 px-2 text-red-600 hover:bg-red-50 hover:text-red-700 disabled:opacity-40"
                                                         title="Quitar opción"
                                                     >
-                                                        ✕
+                                                        <X className="w-3.5 h-3.5" />
                                                     </Button>
                                                 </div>
 
@@ -756,15 +891,17 @@ export default function TabCatalogo({
                                         type="button"
                                         variant="outline"
                                         onClick={agregarOpcionGrupoMod}
-                                        className="w-full h-8 border-dashed text-xs text-sky-700 hover:bg-sky-50 font-bold"
+                                        className="w-full h-8 border-dashed text-xs text-sky-700 hover:bg-sky-50 font-bold gap-1"
                                     >
-                                        ➕ Agregar otra opción al grupo
+                                        <Plus className="w-3.5 h-3.5" />
+                                        <span>Agregar otra opción al grupo</span>
                                     </Button>
                                 </div>
                             </div>
 
-                            <Button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2">
-                                ✅ Guardar Grupo de Modificadores
+                            <Button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 gap-1.5">
+                                <Save className="w-4 h-4" />
+                                <span>Guardar Grupo de Modificadores</span>
                             </Button>
                         </form>
                     </section>
@@ -772,7 +909,7 @@ export default function TabCatalogo({
                     {/* ASIGNACIÓN A PRODUCTOS Y LISTADO EXISTENTE */}
                     <div className="flex flex-col gap-5">
                         <section className="bg-white p-5 rounded-lg border border-slate-200 shadow-sm flex flex-col gap-3">
-                            <h3 className="text-base font-bold text-slate-900 m-0">🔗 Asignar a Productos con Receta</h3>
+                            <h3 className="text-base font-bold text-slate-900 m-0">Asignar a Productos con Receta</h3>
                             <p className="text-xs text-slate-500 m-0">
                                 Indica qué productos con receta ofrecerán estos modificadores en la pantalla de cobro.
                             </p>
@@ -842,7 +979,7 @@ export default function TabCatalogo({
 
                         <section className="bg-white p-5 rounded-lg border border-slate-200 shadow-sm flex flex-col gap-3">
                             <h3 className="text-base font-bold text-slate-900 m-0">
-                                📋 Grupos Registrados ({(datos?.gruposModificadores || []).length})
+                                Grupos Registrados ({(datos?.gruposModificadores || []).length})
                             </h3>
                             {(datos?.gruposModificadores || []).length === 0 ? (
                                 <p className="text-slate-400 text-xs m-0">No hay grupos registrados.</p>
@@ -859,14 +996,15 @@ export default function TabCatalogo({
                                                     variant="ghost"
                                                     size="sm"
                                                     onClick={() => handleEliminarGrupoModificador(g.id, g.nombre)}
-                                                    className="h-6 text-xs text-red-600 hover:text-red-700 hover:bg-red-50 p-1"
+                                                    className="h-6 text-xs text-red-600 hover:text-red-700 hover:bg-red-50 p-1 gap-1"
                                                     title="Eliminar grupo"
                                                 >
-                                                    🗑️ Eliminar
+                                                    <Trash2 className="w-3 h-3" />
+                                                    <span>Eliminar</span>
                                                 </Button>
                                             </div>
                                             <div className="text-[11px] text-slate-500 mt-0.5">
-                                                {g.tipo_seleccion === 'unica' ? '🔘 Selección única' : '☑️ Selección múltiple'}
+                                                {g.tipo_seleccion === 'unica' ? 'Selección única' : 'Selección múltiple'}
                                                 {g.es_obligatorio ? ' • Obligatorio' : ' • Opcional'}
                                             </div>
                                             <div className="mt-2 flex flex-wrap gap-1.5">
@@ -906,7 +1044,7 @@ export default function TabCatalogo({
                                 }}
                                 className="rounded-full h-8 text-xs font-bold"
                             >
-                                🌐 Todas ({(datos?.productos || []).length})
+                                Todas ({(datos?.productos || []).length})
                             </Button>
                             {(datos?.categorias || []).map((cat) => {
                                 const cant = (datos?.productos || []).filter((p) => {
@@ -927,7 +1065,7 @@ export default function TabCatalogo({
                                         }}
                                         className="rounded-full h-8 text-xs font-bold"
                                     >
-                                        🏷️ {cat.nombre} ({cant})
+                                        {cat.nombre} ({cant})
                                     </Button>
                                 );
                             })}
@@ -938,7 +1076,7 @@ export default function TabCatalogo({
                                 onClick={() => setMostrarModalNuevaCat(!mostrarModalNuevaCat)}
                                 className="rounded-full h-8 text-xs font-bold border-dashed border-sky-600 text-sky-700 bg-sky-50 hover:bg-sky-100"
                             >
-                                ➕ {mostrarModalNuevaCat ? 'Cancelar' : 'Nueva Categoría'}
+                                {mostrarModalNuevaCat ? 'Cancelar' : '+ Nueva Categoría'}
                             </Button>
                         </div>
 
@@ -964,7 +1102,10 @@ export default function TabCatalogo({
                         {/* FORMULARIO DE REGISTRO */}
                         <section className="bg-white p-5 rounded-lg border border-slate-200 shadow-sm flex flex-col gap-3">
                             <div>
-                                <h3 className="text-lg font-bold text-slate-900 m-0">📦 Registrar Artículo / Producto</h3>
+                                <h3 className="text-lg font-bold text-slate-900 m-0 flex items-center gap-2">
+                                    <Package className="w-5 h-5 text-slate-700" />
+                                    <span>Registrar Artículo / Producto</span>
+                                </h3>
                                 <p className="text-xs text-slate-500 m-0 mt-0.5">
                                     El costo y la disponibilidad se calculan matemáticamente de forma automática a partir de los insumos seleccionados.
                                 </p>
@@ -987,8 +1128,8 @@ export default function TabCatalogo({
                                     <Input
                                         type="number"
                                         step="0.01"
-                                        min="0.01"
-                                        placeholder="Ej. 25.00"
+                                        min="0"
+                                        placeholder="Ej. 0.00 o 25.00"
                                         required
                                         value={prodPrecio}
                                         onChange={(e) => setProdPrecio(e.target.value)}
@@ -1016,13 +1157,13 @@ export default function TabCatalogo({
                                                         key={cat.id || cat.nombre}
                                                         type="button"
                                                         onClick={() => toggleCategoriaProducto(cat.nombre)}
-                                                        className={`px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1 transition-all ${
+                                                        className={`px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1.5 transition-all ${
                                                             seleccionada
                                                                 ? 'bg-sky-600 text-white shadow-sm'
                                                                 : 'bg-white text-slate-700 border border-slate-300 hover:border-slate-400'
                                                         }`}
                                                     >
-                                                        <span>{seleccionada ? '✓' : '🏷️'}</span>
+                                                        {seleccionada ? <Check className="w-3.5 h-3.5" /> : <Tag className="w-3.5 h-3.5 text-slate-400" />}
                                                         <span>{cat.nombre}</span>
                                                     </button>
                                                 );
@@ -1052,11 +1193,11 @@ export default function TabCatalogo({
                                     </span>
                                     <div className="grid grid-cols-5 gap-1.5">
                                         {[
-                                            { id: 'directo', label: '📦 Directo', sub: 'Stock propio' },
-                                            { id: 'unitario', label: '🔗 Unitario', sub: '1 a 1 Insumo' },
-                                            { id: 'receta', label: '🧪 Receta', sub: 'Insumos' },
-                                            { id: 'combo', label: '🎁 Combo', sub: 'Agrupa' },
-                                            { id: 'libre', label: '✨ Libre', sub: 'Servicio' }
+                                            { id: 'directo', label: 'Directo', sub: 'Stock propio' },
+                                            { id: 'unitario', label: 'Unitario', sub: '1 a 1 Insumo' },
+                                            { id: 'receta', label: 'Receta', sub: 'Insumos' },
+                                            { id: 'combo', label: 'Combo', sub: 'Agrupa' },
+                                            { id: 'libre', label: 'Libre', sub: 'Servicio' }
                                         ].map((m) => (
                                             <button
                                                 key={m.id}
@@ -1116,17 +1257,25 @@ export default function TabCatalogo({
                                             </label>
                                             <label className="text-xs text-slate-700 flex flex-col gap-1">
                                                 Unidad de Medida:
-                                                <Input
-                                                    type="text"
+                                                <select
                                                     value={prodDirectoUnidad}
                                                     onChange={(e) => setProdDirectoUnidad(e.target.value)}
-                                                    className="bg-white h-8 text-xs"
-                                                />
+                                                    className="w-full h-8 rounded-md border border-slate-300 bg-white px-2.5 text-xs shadow-sm focus:outline-none"
+                                                >
+                                                    {OPCIONES_UNIDADES_MEDIDA.map((u) => (
+                                                        <option key={u.valor} value={u.valor}>
+                                                            {u.etiqueta}
+                                                        </option>
+                                                    ))}
+                                                </select>
                                             </label>
                                         </div>
                                         {usaVencimiento && (
                                             <label className="text-xs text-slate-700 flex flex-col gap-1">
-                                                Fecha de Vencimiento (Opcional):
+                                                <span>
+                                                    Fecha de Vencimiento Inicial:
+                                                    <span className="text-slate-500 font-normal ml-1">(Opcional. Dejar vacío si el artículo NO vence, ej. café al vacío, vajilla)</span>
+                                                </span>
                                                 <Input
                                                     type="date"
                                                     value={prodDirectoVencimiento}
@@ -1215,10 +1364,10 @@ export default function TabCatalogo({
                                                         type="button"
                                                         disabled={filasReceta.length <= 1}
                                                         onClick={() => quitarFilaReceta(index)}
-                                                        className="h-8 w-8 rounded bg-red-100 text-red-700 hover:bg-red-200 font-bold text-xs disabled:opacity-40"
+                                                        className="h-8 w-8 rounded bg-red-100 text-red-700 hover:bg-red-200 font-bold text-xs disabled:opacity-40 flex items-center justify-center"
                                                         title="Quitar este insumo"
                                                     >
-                                                        ✕
+                                                        <X className="w-3.5 h-3.5" />
                                                     </button>
                                                 </div>
                                             );
@@ -1229,9 +1378,10 @@ export default function TabCatalogo({
                                             variant="outline"
                                             disabled={filasReceta.length >= 30}
                                             onClick={agregarFilaReceta}
-                                            className="w-full h-8 border-dashed text-xs text-sky-700 hover:bg-sky-50 font-bold mt-1"
+                                            className="w-full h-8 border-dashed text-xs text-sky-700 hover:bg-sky-50 font-bold mt-1 gap-1"
                                         >
-                                            ➕ Agregar otro insumo ({filasReceta.length}/30)
+                                            <Plus className="w-3.5 h-3.5" />
+                                            <span>Agregar otro insumo ({filasReceta.length}/30)</span>
                                         </Button>
                                     </div>
                                 )}
@@ -1263,7 +1413,7 @@ export default function TabCatalogo({
                                                     {(datos?.productos || [])
                                                         .filter((p) => p.tipo_inventario !== 'combo')
                                                         .map((p) => (
-                                                            <option key={p.id} value={p.id}>
+                                                             <option key={p.id} value={p.id}>
                                                                 {p.nombre} (Costo: Bs {Number(p.costo).toFixed(2)})
                                                             </option>
                                                         ))}
@@ -1288,9 +1438,9 @@ export default function TabCatalogo({
                                                     type="button"
                                                     disabled={filasCombo.length <= 1}
                                                     onClick={() => setFilasCombo(filasCombo.filter((_, i) => i !== index))}
-                                                    className="h-8 w-8 rounded bg-red-100 text-red-700 hover:bg-red-200 font-bold text-xs disabled:opacity-40"
+                                                    className="h-8 w-8 rounded bg-red-100 text-red-700 hover:bg-red-200 font-bold text-xs disabled:opacity-40 flex items-center justify-center"
                                                 >
-                                                    ✕
+                                                    <X className="w-3.5 h-3.5" />
                                                 </button>
                                             </div>
                                         ))}
@@ -1300,9 +1450,10 @@ export default function TabCatalogo({
                                             variant="outline"
                                             disabled={filasCombo.length >= 20}
                                             onClick={() => setFilasCombo((prev) => [...prev, { productoId: '', cantidad: '1' }])}
-                                            className="w-full h-8 border-dashed text-xs text-sky-700 hover:bg-sky-50 font-bold"
+                                            className="w-full h-8 border-dashed text-xs text-sky-700 hover:bg-sky-50 font-bold gap-1"
                                         >
-                                            ➕ Agregar otro producto al combo ({filasCombo.length}/20)
+                                            <Plus className="w-3.5 h-3.5" />
+                                            <span>Agregar otro producto al combo ({filasCombo.length}/20)</span>
                                         </Button>
 
                                         {/* Modo de Límite */}
@@ -1387,7 +1538,7 @@ export default function TabCatalogo({
 
                                 {tipoComposicion === 'libre' && (
                                     <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 text-xs text-slate-600">
-                                        ✨ <em>Este producto se registrará como servicio o venta libre sin descontar stock físico del inventario.</em>
+                                        <em>Este producto se registrará como servicio o venta libre sin descontar stock físico del inventario.</em>
                                     </div>
                                 )}
 
@@ -1415,8 +1566,9 @@ export default function TabCatalogo({
                                     </div>
                                 </div>
 
-                                <Button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 mt-1">
-                                    ✅ Guardar Producto en Catálogo
+                                <Button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 mt-1 gap-1.5">
+                                    <Save className="w-4 h-4" />
+                                    <span>Guardar Producto en Catálogo</span>
                                 </Button>
                             </form>
                         </section>
@@ -1424,7 +1576,10 @@ export default function TabCatalogo({
                         {/* COLUMNA DERECHA: REABASTECIMIENTO Y MERMAS */}
                         <div className="flex flex-col gap-5">
                             <section className="bg-white p-5 rounded-lg border border-slate-200 shadow-sm flex flex-col gap-3">
-                                <h3 className="text-base font-bold text-slate-900 m-0">🧱 Materiales e Insumos en Almacén</h3>
+                                <h3 className="text-base font-bold text-slate-900 m-0 flex items-center gap-2">
+                                    <Layers className="w-4 h-4 text-slate-700" />
+                                    <span>Materiales e Insumos en Almacén</span>
+                                </h3>
                                 <div className="max-h-52 overflow-y-auto border border-slate-200 rounded-lg">
                                     <Table className="text-xs">
                                         <TableHeader className="sticky top-0 bg-slate-50">
@@ -1432,12 +1587,13 @@ export default function TabCatalogo({
                                                 <TableHead className="font-bold text-slate-900">Insumo</TableHead>
                                                 <TableHead className="font-bold text-slate-900">Stock</TableHead>
                                                 <TableHead className="font-bold text-slate-900">Costo Unit.</TableHead>
+                                                <TableHead className="font-bold text-slate-900">Vencimiento</TableHead>
                                             </TableRow>
                                         </TableHeader>
                                         <TableBody>
                                             {(datos?.insumos || []).length === 0 ? (
                                                 <TableRow>
-                                                    <TableCell colSpan="3" className="text-center text-slate-400 py-4">
+                                                    <TableCell colSpan="4" className="text-center text-slate-400 py-4">
                                                         Aún no tienes insumos registrados.
                                                     </TableCell>
                                                 </TableRow>
@@ -1447,6 +1603,15 @@ export default function TabCatalogo({
                                                         <TableCell className="font-bold">{ins.nombre}</TableCell>
                                                         <TableCell>{ins.stock_actual} {ins.unidad_medida}</TableCell>
                                                         <TableCell>Bs {Number(ins.costo_por_unidad).toFixed(2)}</TableCell>
+                                                        <TableCell>
+                                                            {ins.fecha_vencimiento ? (
+                                                                <Badge variant="outline" className="bg-amber-50 text-amber-800 border-amber-300 font-medium text-[10px] whitespace-nowrap">
+                                                                    {ins.fecha_vencimiento}
+                                                                </Badge>
+                                                            ) : (
+                                                                <span className="text-slate-400 text-xs italic">-</span>
+                                                            )}
+                                                        </TableCell>
                                                     </TableRow>
                                                 ))
                                             )}
@@ -1458,215 +1623,12 @@ export default function TabCatalogo({
                                     variant="secondary"
                                     size="sm"
                                     onClick={() => { limpiarAlertas?.(); setSeccionActiva?.('insumos'); }}
-                                    className="w-full text-xs font-semibold"
+                                    className="w-full text-xs font-semibold gap-1.5"
                                 >
-                                    🚚 Ir a Reabastecer Insumos
+                                    <Truck className="w-4 h-4" />
+                                    <span>Ir a Reabastecer Insumos</span>
                                 </Button>
                             </section>
-
-                            {usaStockDirecto && (
-                                <>
-                                    {/* REABASTECER ARTÍCULO DIRECTO */}
-                                    <section className="bg-white p-5 rounded-lg border border-slate-200 shadow-sm flex flex-col gap-3">
-                                        <h3 className="text-base font-bold text-slate-900 m-0">🚚 Reabastecer Artículo Directo (NIC 2)</h3>
-                                        {(() => {
-                                            const productosDirectos = (datos?.productos || []).filter((p) => p.tipo_inventario === 'directo');
-                                            if (productosDirectos.length === 0) {
-                                                return (
-                                                    <p className="m-0 text-xs text-slate-500">
-                                                        No hay artículos de reventa directa registrados.
-                                                    </p>
-                                                );
-                                            }
-                                            return (
-                                                <form onSubmit={handleComprarProductoDirecto} className="flex flex-col gap-2.5">
-                                                    <select value={compraProdId} onChange={(e) => setCompraProdId(e.target.value)} className="w-full h-8 rounded border border-slate-300 bg-white px-2 text-xs">
-                                                        <option value="">-- Selecciona el artículo directo --</option>
-                                                        {productosDirectos.map((p) => (
-                                                            <option key={p.id} value={p.id}>
-                                                                {p.nombre} (Stock: {p.stock ?? 0} {p.unidad_medida || 'u.'} | Costo: Bs {Number(p.costo).toFixed(2)})
-                                                            </option>
-                                                        ))}
-                                                    </select>
-                                                    <div className="grid grid-cols-2 gap-2">
-                                                        <Input type="number" step="0.01" min="0.01" placeholder="Cantidad" required value={compraProdCantidad} onChange={(e) => setCompraProdCantidad(e.target.value)} className="h-8 text-xs bg-white" />
-                                                        <Input type="number" step="0.01" min="0" placeholder="Costo Total (Bs)" required value={compraProdCostoTotal} onChange={(e) => setCompraProdCostoTotal(e.target.value)} className="h-8 text-xs bg-white" />
-                                                    </div>
-                                                    <Input
-                                                        type="text"
-                                                        placeholder="Proveedor / Distribuidora (Opcional)"
-                                                        value={compraProdProveedor}
-                                                        onChange={(e) => setCompraProdProveedor(e.target.value)}
-                                                        className="h-8 text-xs bg-white"
-                                                    />
-                                                    <div className="grid grid-cols-2 gap-2">
-                                                        <Input
-                                                            type="text"
-                                                            placeholder="NIT Proveedor (Opc.)"
-                                                            value={compraProdNit}
-                                                            onChange={(e) => setCompraProdNit(e.target.value)}
-                                                            className="h-8 text-xs bg-white"
-                                                        />
-                                                        <Input
-                                                            type="text"
-                                                            placeholder="N° Factura (Opc.)"
-                                                            value={compraProdNroFactura}
-                                                            onChange={(e) => {
-                                                                setCompraProdNroFactura(e.target.value);
-                                                                if (e.target.value.trim() !== '') setCompraProdConFactura(true);
-                                                            }}
-                                                            className="h-8 text-xs bg-white"
-                                                        />
-                                                    </div>
-                                                    <label className="flex items-center gap-1.5 text-xs text-slate-800 cursor-pointer">
-                                                        <input
-                                                            type="checkbox"
-                                                            checked={compraProdConFactura}
-                                                            onChange={(e) => setCompraProdConFactura(e.target.checked)}
-                                                            className="rounded border-slate-300 text-sky-600 focus:ring-sky-500"
-                                                        />
-                                                        <span>🧾 Compra con Factura Fiscal (Crédito Fiscal IVA)</span>
-                                                    </label>
-                                                    <Button type="submit" size="sm" className="bg-slate-900 hover:bg-slate-800 text-white font-bold h-8 text-xs">
-                                                        Registrar Entrada CPP
-                                                    </Button>
-                                                </form>
-                                            );
-                                        })()}
-                                    </section>
-
-                                    {/* REGISTRAR MERMA PRODUCTO DIRECTO */}
-                                    <section className="bg-red-50/40 p-5 rounded-lg border border-red-200 shadow-sm flex flex-col gap-3">
-                                        <h3 className="text-base font-bold text-red-800 m-0">
-                                            ⚠️ Registrar Merma / Baja de Producto Directo
-                                        </h3>
-                                        {(() => {
-                                            const productosDirectos = (datos?.productos || []).filter((p) => p.tipo_inventario === 'directo');
-                                            if (productosDirectos.length === 0) {
-                                                return (
-                                                    <p className="m-0 text-xs text-slate-500">
-                                                        No hay productos directos registrados para dar de baja por merma.
-                                                    </p>
-                                                );
-                                            }
-                                            const prodMermaSel = productosDirectos.find((p) => String(p.id) === String(mermaProdId)) || productosDirectos[0];
-                                            const stockActualProd = Number(prodMermaSel?.stock ?? 0);
-                                            const costoUnitProd = Number(prodMermaSel?.costo ?? 0);
-                                            const cantBajaNum = Number(mermaProdCantidad) || 0;
-                                            const costoEstimadoPerdida = Number((Math.max(0, cantBajaNum) * costoUnitProd).toFixed(2));
-                                            const superaStock = cantBajaNum > stockActualProd;
-                                            const cantidadInvalidaMerma = mermaProdCantidad !== '' && (cantBajaNum <= 0 || superaStock);
-
-                                            return (
-                                                <div className="flex flex-col gap-2.5">
-                                                    <label className="text-xs font-semibold text-slate-700 flex flex-col gap-1">
-                                                        1. Seleccionar Producto Directo:
-                                                        <select
-                                                            value={mermaProdId || prodMermaSel?.id}
-                                                            onChange={(e) => {
-                                                                setMermaProdId(e.target.value);
-                                                                setMermaProdConfirmando(false);
-                                                                setMermaProdResultado(null);
-                                                            }}
-                                                            className="w-full h-8 rounded border border-slate-300 bg-white px-2 text-xs"
-                                                        >
-                                                            {productosDirectos.map((p) => (
-                                                                <option key={p.id} value={p.id}>
-                                                                    {p.nombre} (Stock: {p.stock ?? 0} {p.unidad_medida || 'u.'} | CPP: Bs {Number(p.costo).toFixed(2)})
-                                                                </option>
-                                                            ))}
-                                                        </select>
-                                                    </label>
-
-                                                    <div className="grid grid-cols-2 gap-2 items-end">
-                                                        <label className="text-xs font-semibold text-slate-700 flex flex-col gap-1">
-                                                            2. Cantidad a Dar de Baja:
-                                                            <Input
-                                                                type="number"
-                                                                step="1"
-                                                                min="1"
-                                                                max={stockActualProd}
-                                                                placeholder={`Máx: ${stockActualProd}`}
-                                                                value={mermaProdCantidad}
-                                                                onChange={(e) => {
-                                                                    setMermaProdCantidad(e.target.value);
-                                                                    setMermaProdConfirmando(false);
-                                                                }}
-                                                                className={`h-8 text-xs bg-white ${cantidadInvalidaMerma ? 'border-red-500 bg-red-50' : ''}`}
-                                                            />
-                                                        </label>
-                                                        <div className="bg-red-50 border border-red-200 rounded-md p-1.5 text-right h-8 flex flex-col justify-center">
-                                                            <div className="text-[10px] text-red-800 uppercase font-bold">
-                                                                Costo Estimado
-                                                            </div>
-                                                            <div className="text-xs font-bold text-red-700">
-                                                                Bs {costoEstimadoPerdida.toFixed(2)}
-                                                            </div>
-                                                        </div>
-                                                    </div>
-
-                                                    <label className="text-xs font-semibold text-slate-700 flex flex-col gap-1">
-                                                        3. Motivo de la Merma:
-                                                        <Input
-                                                            type="text"
-                                                            placeholder="Ej. Vencido, roto, merma..."
-                                                            value={mermaProdMotivo}
-                                                            onChange={(e) => {
-                                                                setMermaProdMotivo(e.target.value);
-                                                                setMermaProdConfirmando(false);
-                                                            }}
-                                                            className="h-8 text-xs bg-white"
-                                                        />
-                                                    </label>
-
-                                                    {!mermaProdConfirmando ? (
-                                                        <Button
-                                                            type="button"
-                                                            size="sm"
-                                                            disabled={!prodMermaSel || stockActualProd <= 0 || cantBajaNum <= 0 || superaStock || !mermaProdMotivo || mermaProdMotivo.trim().length < 3}
-                                                            onClick={() => setMermaProdConfirmando(true)}
-                                                            className="w-full bg-red-600 hover:bg-red-700 text-white font-bold h-8 text-xs disabled:opacity-50"
-                                                        >
-                                                            Registrar Baja por Merma
-                                                        </Button>
-                                                    ) : (
-                                                        <div className="bg-amber-50 border-2 border-amber-400 rounded-lg p-3 flex flex-col gap-2">
-                                                            <div className="text-xs text-amber-900 font-bold">
-                                                                ⚠️ ¿Confirmar baja de {cantBajaNum} {prodMermaSel?.unidad_medida || 'u.'}?
-                                                            </div>
-                                                            <div className="flex gap-2">
-                                                                <Button
-                                                                    type="button"
-                                                                    size="sm"
-                                                                    onClick={handleConfirmarMermaProductoDirecto}
-                                                                    className="flex-1 bg-red-600 hover:bg-red-700 text-white font-bold h-8 text-xs"
-                                                                >
-                                                                    ✅ Confirmar Merma
-                                                                </Button>
-                                                                <Button
-                                                                    type="button"
-                                                                    size="sm"
-                                                                    variant="secondary"
-                                                                    onClick={() => setMermaProdConfirmando(false)}
-                                                                    className="h-8 text-xs"
-                                                                >
-                                                                    Cancelar
-                                                                </Button>
-                                                            </div>
-                                                        </div>
-                                                    )}
-
-                                                    {mermaProdResultado && (
-                                                        <div className="bg-emerald-50 border border-emerald-200 rounded-md p-2 text-xs text-emerald-800">
-                                                            <div><strong>✅ Merma registrada:</strong> {mermaProdResultado.productoNombre} (-{mermaProdResultado.cantidadPerdida} {mermaProdResultado.unidadMedida}) | Stock restante: <strong>{mermaProdResultado.stockRestante}</strong></div>
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            );
-                                        })()}
-                                    </section>
-                                </>
-                            )}
                         </div>
                     </div>
 
@@ -1685,15 +1647,16 @@ export default function TabCatalogo({
                             {/* Buscador Rápido y Selector de Límite de Productos */}
                             <div className="flex items-center gap-2 flex-wrap">
                                 <div className="relative min-w-[240px]">
+                                    <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
                                     <Input
                                         type="text"
-                                        placeholder="🔍 Buscar artículo por nombre o categoría..."
+                                        placeholder="Buscar artículo por nombre o categoría..."
                                         value={busquedaProductos}
                                         onChange={(e) => {
                                             setBusquedaProductos(e.target.value);
                                             setPaginaProductos(1);
                                         }}
-                                        className="h-9 pr-8 text-xs bg-white"
+                                        className="h-9 pl-8 pr-8 text-xs bg-white"
                                     />
                                     {busquedaProductos && (
                                         <button
@@ -1702,10 +1665,10 @@ export default function TabCatalogo({
                                                 setBusquedaProductos('');
                                                 setPaginaProductos(1);
                                             }}
-                                            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 font-bold text-xs"
+                                            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs flex items-center justify-center p-0.5 rounded cursor-pointer"
                                             title="Limpiar búsqueda"
                                         >
-                                            ✕
+                                            <X className="w-3.5 h-3.5" />
                                         </button>
                                     )}
                                 </div>
@@ -1746,7 +1709,9 @@ export default function TabCatalogo({
                                                 <TableHead className="font-bold text-slate-900">Precio Venta</TableHead>
                                                 <TableHead className="font-bold text-slate-900">Costo Unitario</TableHead>
                                                 <TableHead className="font-bold text-slate-900">Ganancia Unitaria</TableHead>
+                                                <TableHead className="font-bold text-slate-900">Vencimiento</TableHead>
                                                 <TableHead className="font-bold text-slate-900">Disponibilidad (Stock)</TableHead>
+                                                <TableHead className="font-bold text-slate-900 text-center">Acciones</TableHead>
                                             </TableRow>
                                         </TableHeader>
                                         <TableBody>
@@ -1761,8 +1726,9 @@ export default function TabCatalogo({
                                                             {p.grupos_modificadores && p.grupos_modificadores.length > 0 && (
                                                                 <div className="flex gap-1 flex-wrap mt-1">
                                                                     {p.grupos_modificadores.map((g) => (
-                                                                        <Badge key={g.id} variant="outline" className="bg-sky-50 text-sky-800 border-sky-200 text-[10px] font-semibold py-0 px-1.5">
-                                                                            ✨ {g.nombre}
+                                                                        <Badge key={g.id} variant="outline" className="bg-sky-50 text-sky-800 border-sky-200 text-[10px] font-semibold py-0 px-1.5 flex items-center gap-1">
+                                                                            <Sparkles className="w-2.5 h-2.5" />
+                                                                            <span>{g.nombre}</span>
                                                                         </Badge>
                                                                     ))}
                                                                 </div>
@@ -1778,9 +1744,10 @@ export default function TabCatalogo({
                                                                             <Badge
                                                                                 key={idx}
                                                                                 variant="secondary"
-                                                                                className="bg-sky-50 text-sky-700 border border-sky-200 text-[11px] font-semibold"
+                                                                                className="bg-sky-50 text-sky-700 border border-sky-200 text-[11px] font-semibold flex items-center gap-1"
                                                                             >
-                                                                                🏷️ {cTrim}
+                                                                                <Tag className="w-2.5 h-2.5" />
+                                                                                <span>{cTrim}</span>
                                                                             </Badge>
                                                                         );
                                                                     })}
@@ -1794,20 +1761,24 @@ export default function TabCatalogo({
                                                         <TableCell>
                                                             <div>
                                                                 {p.tipo_inventario === 'receta' ? (
-                                                                    <Badge variant="outline" className="bg-purple-50 text-purple-700 border-purple-200 font-semibold text-[11px]">
-                                                                        🧪 Receta / Insumo
+                                                                    <Badge variant="outline" className="bg-purple-50 text-purple-700 border-purple-200 font-semibold text-[11px] flex items-center gap-1 w-fit">
+                                                                        <Layers className="w-3 h-3 text-purple-600" />
+                                                                        <span>Receta / Insumo</span>
                                                                     </Badge>
                                                                 ) : p.tipo_inventario === 'directo' ? (
-                                                                    <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200 font-semibold text-[11px]">
-                                                                        📦 Reventa Directa
+                                                                    <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200 font-semibold text-[11px] flex items-center gap-1 w-fit">
+                                                                        <Package className="w-3 h-3 text-blue-600" />
+                                                                        <span>Reventa Directa</span>
                                                                     </Badge>
                                                                 ) : p.tipo_inventario === 'combo' ? (
-                                                                    <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 font-semibold text-[11px]">
-                                                                        🎁 Combo / Promo
+                                                                    <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 font-semibold text-[11px] flex items-center gap-1 w-fit">
+                                                                        <Layers className="w-3 h-3 text-amber-600" />
+                                                                        <span>Combo / Promo</span>
                                                                     </Badge>
                                                                 ) : (
-                                                                    <Badge variant="outline" className="bg-slate-50 text-slate-700 border-slate-200 font-semibold text-[11px]">
-                                                                        ✨ Libre
+                                                                    <Badge variant="outline" className="bg-slate-50 text-slate-700 border-slate-200 font-semibold text-[11px] flex items-center gap-1 w-fit">
+                                                                        <Sparkles className="w-3 h-3 text-slate-500" />
+                                                                        <span>Libre</span>
                                                                     </Badge>
                                                                 )}
                                                             </div>
@@ -1819,12 +1790,14 @@ export default function TabCatalogo({
                                                             {p.tipo_inventario === 'combo' && (p.fecha_inicio_vigencia || p.fecha_fin_vigencia) && (
                                                                 <div className="mt-1">
                                                                     {p.esta_vigente === false ? (
-                                                                        <Badge variant="destructive" className="bg-red-100 text-red-800 border-red-200 hover:bg-red-100 text-[10px]">
-                                                                            ⛔ {p.motivo_no_vigente || 'Fuera de vigencia'}
+                                                                        <Badge variant="destructive" className="bg-red-100 text-red-800 border-red-200 hover:bg-red-100 text-[10px] flex items-center gap-1 w-fit">
+                                                                            <span className="w-1.5 h-1.5 rounded-full bg-red-600 inline-block" />
+                                                                            <span>{p.motivo_no_vigente || 'Fuera de vigencia'}</span>
                                                                         </Badge>
                                                                     ) : (
-                                                                        <Badge className="bg-emerald-100 text-emerald-800 border-emerald-200 hover:bg-emerald-100 text-[10px]">
-                                                                            🟢 En vigencia
+                                                                        <Badge className="bg-emerald-100 text-emerald-800 border-emerald-200 hover:bg-emerald-100 text-[10px] flex items-center gap-1 w-fit">
+                                                                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 inline-block" />
+                                                                            <span>En vigencia</span>
                                                                         </Badge>
                                                                     )}
                                                                 </div>
@@ -1835,10 +1808,51 @@ export default function TabCatalogo({
                                                         <TableCell className={`font-bold ${gananciaUni >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
                                                             Bs {gananciaUni.toFixed(2)}
                                                         </TableCell>
+                                                        <TableCell>
+                                                            {p.fecha_vencimiento ? (
+                                                                <Badge variant="outline" className="bg-amber-50 text-amber-800 border-amber-300 font-medium text-[11px] whitespace-nowrap inline-flex items-center gap-1">
+                                                                    <Clock className="w-3 h-3 text-amber-700" />
+                                                                    <span>{p.fecha_vencimiento}</span>
+                                                                </Badge>
+                                                            ) : (Array.isArray(p.lotes) && p.lotes.length > 0 && p.lotes[0].fecha_vencimiento) ? (
+                                                                <Badge variant="outline" className="bg-amber-50 text-amber-800 border-amber-300 font-medium text-[11px] whitespace-nowrap inline-flex items-center gap-1">
+                                                                    <Clock className="w-3 h-3 text-amber-700" />
+                                                                    <span>{p.lotes[0].fecha_vencimiento}</span>
+                                                                </Badge>
+                                                            ) : (
+                                                                <span className="text-slate-400 text-xs italic">Sin vencimiento</span>
+                                                            )}
+                                                        </TableCell>
                                                         <TableCell className={`font-bold ${p.unidades_disponibles === 0 ? 'text-red-700' : 'text-emerald-700'}`}>
                                                             {p.tipo_inventario === 'libre' || p.unidades_disponibles === null
                                                                 ? 'Libre (Servicio)'
-                                                                : `${p.unidades_disponibles} ${p.unidad_medida || 'u.'} ${p.insumo_limitante ? `(Límite: ${p.insumo_limitante})` : ''} ${stockBajo ? '⚠️ (Reponer)' : ''}`}
+                                                                : `${p.unidades_disponibles} ${p.unidad_medida || 'u.'} ${p.insumo_limitante ? `(Límite: ${p.insumo_limitante})` : ''} ${stockBajo ? '(Reponer)' : ''}`}
+                                                        </TableCell>
+                                                        <TableCell className="text-center">
+                                                            <div className="flex items-center justify-center gap-1.5">
+                                                                <Button
+                                                                    type="button"
+                                                                    size="sm"
+                                                                    variant="outline"
+                                                                    onClick={() => abrirModalEditarProducto(p)}
+                                                                    className="h-7 px-2 text-xs text-sky-700 hover:text-sky-800 hover:bg-sky-50 border-sky-300 font-semibold cursor-pointer flex items-center gap-1"
+                                                                    title="Editar producto o receta"
+                                                                >
+                                                                    <Edit2 className="w-3 h-3" />
+                                                                    <span>Editar</span>
+                                                                </Button>
+                                                                <Button
+                                                                    type="button"
+                                                                    size="sm"
+                                                                    variant="outline"
+                                                                    onClick={() => handleEliminarProducto(p)}
+                                                                    className="h-7 px-2 text-xs text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200 font-semibold cursor-pointer flex items-center gap-1"
+                                                                    title="Eliminar artículo del catálogo"
+                                                                >
+                                                                    <Trash2 className="w-3 h-3" />
+                                                                    <span>Eliminar</span>
+                                                                </Button>
+                                                            </div>
                                                         </TableCell>
                                                     </TableRow>
                                                 );
@@ -1859,9 +1873,10 @@ export default function TabCatalogo({
                                                 variant="outline"
                                                 disabled={paginaProductosValida <= 1}
                                                 onClick={() => setPaginaProductos((p) => Math.max(1, p - 1))}
-                                                className="h-7 text-xs font-bold"
+                                                className="h-7 text-xs font-bold flex items-center gap-1"
                                             >
-                                                ◀ Anterior
+                                                <ChevronLeft className="w-3.5 h-3.5" />
+                                                <span>Anterior</span>
                                             </Button>
                                             <Button
                                                 type="button"
@@ -1869,9 +1884,10 @@ export default function TabCatalogo({
                                                 variant="outline"
                                                 disabled={paginaProductosValida >= totalPaginasProductos}
                                                 onClick={() => setPaginaProductos((p) => Math.min(totalPaginasProductos, p + 1))}
-                                                className="h-7 text-xs font-bold"
+                                                className="h-7 text-xs font-bold flex items-center gap-1"
                                             >
-                                                Siguiente ▶
+                                                <span>Siguiente</span>
+                                                <ChevronRight className="w-3.5 h-3.5" />
                                             </Button>
                                         </div>
                                     </div>
@@ -1880,6 +1896,275 @@ export default function TabCatalogo({
                         )}
                     </section>
                 </>
+            )}
+
+            {/* MODAL DE EDICIÓN DE PRODUCTO Y RECETA */}
+            {modalEditarAbierto && productoAEditar && (
+                <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150">
+                    <div className="bg-white rounded-xl shadow-2xl border border-slate-200 max-w-2xl w-full max-h-[92vh] flex flex-col overflow-hidden">
+                        {/* Cabecera del Modal */}
+                        <div className="px-5 py-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center shrink-0">
+                            <div>
+                                <h3 className="text-base font-bold text-slate-900 flex items-center gap-2 m-0">
+                                    <Edit2 className="w-4 h-4 text-sky-600" />
+                                    <span>Editar Producto #{productoAEditar.id}</span>
+                                    <Badge variant="outline" className="text-[11px] capitalize bg-white text-slate-700">
+                                        {productoAEditar.tipo_inventario === 'receta' ? 'Receta' : productoAEditar.tipo_inventario === 'directo' ? 'Reventa Directa' : productoAEditar.tipo_inventario === 'combo' ? 'Combo' : 'Libre'}
+                                    </Badge>
+                                </h3>
+                                <p className="text-xs text-slate-500 m-0 mt-0.5">
+                                    Modifica los datos del producto, precios o proporciones de insumos de su receta.
+                                </p>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setModalEditarAbierto(false);
+                                    setProductoAEditar(null);
+                                }}
+                                className="text-slate-400 hover:text-slate-600 hover:bg-slate-200/60 rounded-md p-1.5 transition-colors cursor-pointer text-sm flex items-center justify-center"
+                                title="Cerrar ventana"
+                            >
+                                <X className="w-4 h-4" />
+                            </button>
+                        </div>
+
+                        {/* Formulario de Edición */}
+                        <form onSubmit={handleGuardarEdicionProducto} className="p-5 overflow-y-auto flex-1 flex flex-col gap-4 text-slate-800">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                <label className="text-xs font-semibold text-slate-700 flex flex-col gap-1">
+                                    Nombre del Producto:
+                                    <Input
+                                        type="text"
+                                        required
+                                        value={editNombre}
+                                        onChange={(e) => setEditNombre(e.target.value)}
+                                        className="bg-white h-9"
+                                    />
+                                </label>
+
+                                <label className="text-xs font-semibold text-slate-700 flex flex-col gap-1">
+                                    Precio de Venta al Público (Bs):
+                                    <Input
+                                        type="number"
+                                        step="0.01"
+                                        min="0"
+                                        placeholder="Ej. 0.00 o 25.00"
+                                        required
+                                        value={editPrecio}
+                                        onChange={(e) => setEditPrecio(e.target.value)}
+                                        className="bg-white h-9"
+                                    />
+                                </label>
+                            </div>
+
+                            {/* Categorías del Producto */}
+                            <div>
+                                <span className="text-xs font-bold text-slate-700 block mb-1">
+                                    Categorías Asignadas:
+                                </span>
+                                <div className="flex gap-1.5 flex-wrap items-center p-2.5 bg-slate-50 rounded-lg border border-slate-200 min-h-[40px]">
+                                    {(!datos?.categorias || datos.categorias.length === 0) ? (
+                                        <div className="text-xs text-slate-400">No hay categorías registradas.</div>
+                                    ) : (
+                                        datos.categorias.map((cat) => {
+                                            const seleccionada = editCategorias.some(
+                                                (c) => c.toLowerCase() === cat.nombre?.toLowerCase()
+                                            );
+                                            return (
+                                                <button
+                                                    key={cat.id || cat.nombre}
+                                                    type="button"
+                                                    onClick={() => toggleCategoriaEdit(cat.nombre)}
+                                                    className={`px-2.5 py-0.5 rounded-full text-xs font-bold flex items-center gap-1 transition-all ${
+                                                        seleccionada
+                                                            ? 'bg-sky-600 text-white shadow-sm'
+                                                            : 'bg-white text-slate-700 border border-slate-300 hover:border-slate-400'
+                                                    }`}
+                                                >
+                                                    {seleccionada ? (
+                                                        <Check className="w-3 h-3" />
+                                                    ) : (
+                                                        <Tag className="w-3 h-3 text-slate-400" />
+                                                    )}
+                                                    <span>{cat.nombre}</span>
+                                                </button>
+                                            );
+                                        })
+                                    )}
+                                </div>
+                                {editCategorias.length > 0 && (
+                                    <div className="flex justify-between items-center mt-1">
+                                        <span className="text-[11px] text-sky-700 font-medium">
+                                            Asignadas: <strong>{editCategorias.join(', ')}</strong>
+                                        </span>
+                                        <button
+                                            type="button"
+                                            onClick={() => setEditCategorias([])}
+                                            className="text-[11px] text-slate-500 hover:text-slate-700 underline"
+                                        >
+                                            Limpiar selección
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Stock Mínimo y Fecha de Vencimiento */}
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-md">
+                                {(productoAEditar.tipo_inventario === 'directo' || productoAEditar.tipo_inventario === 'receta') && (
+                                    <label className="text-xs font-semibold text-slate-700 flex flex-col gap-1">
+                                        Stock Mínimo (Alerta de Reposición):
+                                        <Input
+                                            type="number"
+                                            step="1"
+                                            min="0"
+                                            value={editStockMinimo}
+                                            onChange={(e) => setEditStockMinimo(e.target.value)}
+                                            className="bg-white h-8 text-xs"
+                                        />
+                                    </label>
+                                )}
+                                <label className="text-xs font-semibold text-slate-700 flex flex-col gap-1">
+                                    <span className="flex items-center gap-1">
+                                        <Clock className="w-3 h-3 text-slate-400" />
+                                        <span>Fecha de Vencimiento:</span>
+                                    </span>
+                                    <Input
+                                        type="date"
+                                        value={editFechaVencimiento}
+                                        onChange={(e) => setEditFechaVencimiento(e.target.value)}
+                                        className="bg-white h-8 text-xs"
+                                    />
+                                </label>
+                            </div>
+
+                            {/* Modificación de Receta */}
+                            {productoAEditar.tipo_inventario === 'receta' && (
+                                <div className="bg-slate-50 p-3.5 rounded-lg border border-slate-200 flex flex-col gap-2">
+                                    <div className="flex justify-between items-center mb-1">
+                                        <span className="text-xs font-bold text-slate-800">
+                                            Insumos y Materiales de la Receta:
+                                        </span>
+                                        <span className={`text-xs font-bold ${editFilasReceta.length >= 30 ? 'text-red-600' : 'text-sky-700'}`}>
+                                            {editFilasReceta.length} / 30 insumos
+                                        </span>
+                                    </div>
+
+                                    {editFilasReceta.map((fila, index) => {
+                                        const insSel = (datos?.insumos || []).find((i) => String(i.id) === String(fila.insumoId));
+                                        const unidadAlm = insSel ? insSel.unidad_medida : 'unidades';
+                                        const opcionesComp = obtenerUnidadesCompatibles(unidadAlm);
+                                        return (
+                                            <div key={index} className="grid grid-cols-[1.4fr_1fr_1fr_32px] gap-1.5 items-center">
+                                                <select
+                                                    required
+                                                    value={fila.insumoId}
+                                                    onChange={(e) => cambiarFilaRecetaEdit(index, 'insumoId', e.target.value)}
+                                                    className="h-8 rounded border border-slate-300 bg-white px-1 text-xs"
+                                                >
+                                                    <option value="">-- Insumo --</option>
+                                                    {(datos?.insumos || []).map((i) => (
+                                                        <option key={i.id} value={i.id}>
+                                                            {i.nombre} ({i.unidad_medida})
+                                                        </option>
+                                                    ))}
+                                                </select>
+
+                                                <Input
+                                                    type="number"
+                                                    step="0.001"
+                                                    min="0.001"
+                                                    required
+                                                    placeholder="Cantidad"
+                                                    value={fila.cantidad}
+                                                    onChange={(e) => cambiarFilaRecetaEdit(index, 'cantidad', e.target.value)}
+                                                    className="h-8 text-xs bg-white"
+                                                />
+
+                                                <select
+                                                    value={fila.unidadReceta || unidadAlm}
+                                                    onChange={(e) => cambiarFilaRecetaEdit(index, 'unidadReceta', e.target.value)}
+                                                    className="h-8 rounded border border-slate-300 bg-white px-1 text-xs"
+                                                >
+                                                    {opcionesComp.map((o) => (
+                                                        <option key={o.valor} value={o.valor}>{o.etiqueta}</option>
+                                                    ))}
+                                                </select>
+
+                                                <button
+                                                    type="button"
+                                                    disabled={editFilasReceta.length <= 1}
+                                                    onClick={() => quitarFilaRecetaEdit(index)}
+                                                    className="h-8 w-8 rounded bg-red-50 text-red-600 hover:bg-red-100 flex items-center justify-center text-xs disabled:opacity-40 cursor-pointer"
+                                                    title="Quitar este insumo"
+                                                >
+                                                    <X className="w-3.5 h-3.5" />
+                                                </button>
+                                            </div>
+                                        );
+                                    })}
+
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        disabled={editFilasReceta.length >= 30}
+                                        onClick={agregarFilaRecetaEdit}
+                                        className="w-full h-8 border-dashed text-xs text-sky-700 hover:bg-sky-50 font-bold mt-1 flex items-center justify-center gap-1"
+                                    >
+                                        <Plus className="w-3.5 h-3.5" />
+                                        <span>Agregar otro insumo ({editFilasReceta.length}/30)</span>
+                                    </Button>
+                                </div>
+                            )}
+
+                            {/* Panel de cálculo en vivo de costo y margen */}
+                            <div className="bg-emerald-50/60 p-3.5 rounded-lg border border-emerald-200 flex justify-around items-center text-center">
+                                <div>
+                                    <div className="text-[10px] text-emerald-800 uppercase font-bold">Costo Estimado</div>
+                                    <div className="text-lg font-bold text-emerald-700">
+                                        Bs {costoEstimadoEdit.toFixed(2)}
+                                    </div>
+                                </div>
+                                <div className="border-l border-emerald-300 h-8" />
+                                <div>
+                                    <div className="text-[10px] text-emerald-800 uppercase font-bold">Ganancia Estimada</div>
+                                    <div className={`text-lg font-bold ${gananciaEstimadaEdit >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
+                                        Bs {gananciaEstimadaEdit.toFixed(2)}
+                                    </div>
+                                </div>
+                                <div className="border-l border-emerald-300 h-8" />
+                                <div>
+                                    <div className="text-[10px] text-emerald-800 uppercase font-bold">Margen Comercial</div>
+                                    <div className={`text-lg font-bold ${margenPorcentajeEdit >= 0 ? 'text-sky-700' : 'text-red-700'}`}>
+                                        {margenPorcentajeEdit.toFixed(1)}%
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Botones de Acción */}
+                            <div className="flex justify-end gap-2 pt-2 border-t border-slate-200">
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    onClick={() => {
+                                        setModalEditarAbierto(false);
+                                        setProductoAEditar(null);
+                                    }}
+                                >
+                                    Cancelar
+                                </Button>
+                                <Button
+                                    type="submit"
+                                    disabled={guardandoEdicion}
+                                    className="bg-blue-600 hover:bg-blue-700 text-white font-bold flex items-center gap-1.5"
+                                >
+                                    <Save className="w-4 h-4" />
+                                    <span>{guardandoEdicion ? 'Guardando...' : 'Guardar Cambios'}</span>
+                                </Button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
             )}
         </div>
     );

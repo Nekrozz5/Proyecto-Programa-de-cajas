@@ -1,6 +1,6 @@
 # Sistema POS y Control de Cajas Híbrido
 
-Aplicación web integral de Punto de Venta (POS), control de turnos/arqueo ciego, estaciones multicaja, motor fiscal modular (IVA / IT), pagos mixtos, Kardex dual cronológico (NIC 2), combos/promociones, modificadores de recetas, reportes contables en Excel (10 hojas) y PDF, construida con **Next.js (App Router)** y **SQLite3**.
+Aplicación web integral de Punto de Venta (POS), control de turnos/arqueo ciego, estaciones multicaja, motor fiscal modular (IVA / IT), pagos mixtos, Kardex dual cronológico (NIC 2), trazabilidad de lotes y fechas de vencimiento con política PEPS (FIFO), combos/promociones, modificadores de recetas, reportes contables en Excel (10 hojas) y PDF, construida con **Next.js (App Router)** y **SQLite3**.
 
 ---
 
@@ -8,8 +8,8 @@ Aplicación web integral de Punto de Venta (POS), control de turnos/arqueo ciego
 
 | Documento | Descripción |
 | :--- | :--- |
-| [docs/ARQUITECTURA.md](docs/ARQUITECTURA.md) | Diseño técnico, modelo de seguridad, base de datos, migraciones (v1-v11), régimen fiscal, Kardex dual, combos, multicaja y reportes. |
-| [docs/PRUEBAS.md](docs/PRUEBAS.md) | Batería de 16 escenarios de verificación funcional, concurrencia, stock, arqueo, modificadores, combos, régimen fiscal, pagos mixtos y Kardex. |
+| [docs/ARQUITECTURA.md](docs/ARQUITECTURA.md) | Diseño técnico, modelo de seguridad, base de datos, migraciones (v1-v12), régimen fiscal, Kardex dual, lotes PEPS, combos, multicaja y reportes. |
+| [docs/PRUEBAS.md](docs/PRUEBAS.md) | Batería de 17 escenarios de verificación funcional, concurrencia, stock, lotes, arqueo, modificadores, combos, régimen fiscal, pagos mixtos y Kardex. |
 | [GEMINI.md](GEMINI.md) | Reglas de negocio, directrices técnicas obligatorias y estado actual del proyecto (fuente de verdad para desarrollo y agentes). |
 
 ---
@@ -18,11 +18,13 @@ Aplicación web integral de Punto de Venta (POS), control de turnos/arqueo ciego
 
 - **Control de Turnos y Arqueo Ciego:** Apertura de caja, cobro reactivo con cálculo de cambio, conciliación separada de efectivo vs. QR, egresos documentados e inyección de sencillo (`ingreso_efectivo`). Cierre ciego con detección de descuadres (sobrante/faltante) y trazabilidad inmutable de reaperturas auditadas.
 - **Multicaja y Estaciones Físicas:** Gestión de terminales físicas de cobro (`cajas_fisicas`) operando turnos independientes en paralelo, con protección de última caja activa y baja lógica protegida.
+- **Trazabilidad de Lotes y Vencimiento PEPS / FIFO (v12):** Gestión de lotes en `producto_lotes` con fecha de expiración, compras con ingreso de lote, mermas imputadas y ventas con política automática PEPS (Primero en Expirar, Primero en Salir) o selección manual de lote específico en el POS.
 - **Régimen Tributario Modular y Snapshot Fiscal (v9-v11):** Soporte de Régimen Simplificado (control interno) y Régimen General con alícuotas configurables (IVA 13%, IT 3%, base IT configurable). Snapshot inmutable congelado en cada venta (`movimientos`), garantizando integridad histórica ante futuras reformas tributarias.
 - **Pagos Mixtos Flexibles (Efectivo + QR):** Fuente de verdad normalizada en `movimientos_pagos`. Desglose exacto por método de pago con cálculo y entrega de cambio exclusivamente sobre la porción en efectivo.
 - **Kardex Cronológico Dual y Costo Ponderado (NIC 2):** Trazabilidad completa de inventario en `movimientos_productos_directos` y `movimientos_insumos` con `stock_resultante` y `costo_promedio_resultante` en cada fila. Preservación de hasta 6 decimales en insumos métricos (g / ml) y función de auditoría matemática de integridad con 0 descuadres.
 - **Combos y Paquetes Promocionales (v8):** Descomposición atómica de stock de componentes directos e insumos de recetas, con costeo dinámico en cascada, vigencia por fecha/hora y modo con límite de unidades restante o sin límite.
 - **Personalización y Modificadores de Receta (v7):** Grupos de complementos con selección única o múltiple, obligatoriedad, recargos de precio y reemplazo inteligente de insumos (ej. Leche entera -> Almendras / Deslactosada), con auditoría congelada en `detalle_movimientos_modificadores`.
+- **Arquitectura Modular con App Router y Shadcn UI:** Rutas desacopladas por dominio (`/admin/resumen`, `/admin/catalogo`, `/admin/insumos`, `/admin/arqueos`, etc. y `/caja/pos`, `/caja/movimientos`) con Providers y Contextos compartidos (`AdminContext`, `CajaContext`), y componentes visuales consistentes (`PasswordInput`, `Dialog`, `Table`, etc.).
 - **Reportes Contables y Exportación Multiformato:** Generación en servidor con `exceljs` de libro Excel `.xlsx` con 10 hojas contables (`Movimientos`, `Arqueos`, `Detalle Ventas CMV`, `Rentabilidad por Producto`, `Compras y Mermas`, `Inventario Kardex`, `Kardex Productos`, `Kardex Insumos`, `Historial Anulaciones` y `Resumen Contable`), exportación PDF con liquidación de impuestos y gráficos interactivos (`recharts`).
 - **Notificaciones Automáticas por Correo:** Envío asíncrono vía SMTP (`nodemailer`) del resumen ejecutivo de arqueo al cerrar cada turno, con el libro oficial en Excel adjunto generado en caliente.
 - **Seguridad Pre-Despliegue y Control de Sesiones:** Autenticación JWT en cookies `HttpOnly`, `INSTANCE_BOOT_ID` para purga de sesiones zombis al reiniciar, rate limiting dual (por IP con `TRUST_PROXY` y por cuenta), token maestro de instalación (`SETUP_TOKEN`) y validación perezosa de secretos (`instrumentation.js`).
@@ -34,29 +36,45 @@ Aplicación web integral de Punto de Venta (POS), control de turnos/arqueo ciego
 ```text
 ├── app/
 │   ├── api/
-│   │   ├── caja/route.js            # API principal de turnos, ventas, modificadores, combos, kardex y fiscal
-│   │   └── reportes/route.js        # API de reportes, estadísticas y exportación (JSON, CSV, XLSX 10 hojas)
+│   │   ├── auth/route.js            # Autenticación, login, logout e instalación
+│   │   ├── caja/route.js            # API de turnos, sincronización y lectura en tiempo real
+│   │   └── reportes/route.js        # API de reportes, estadísticas y exportación (XLSX 10 hojas, CSV)
 │   ├── admin/
-│   │   ├── page.js                  # Panel de administración estructurado con pestañas y paginación
+│   │   ├── layout.js                # Layout administrativo con AdminProvider
+│   │   ├── _context/AdminContext.js # Estado compartido administrativo
+│   │   ├── resumen/page.js          # Subruta: Panel de métricas y gráficos
+│   │   ├── catalogo/page.js         # Subruta: Productos, recetas, combos y lotes
+│   │   ├── insumos/page.js          # Subruta: Insumos de producción y compras
+│   │   ├── arqueos/page.js          # Subruta: Turnos y arqueos ciegos
+│   │   ├── usuarios/page.js         # Subruta: Cajeros y terminales físicas
+│   │   ├── configuracion/page.js    # Subruta: Configuración fiscal y de negocio
+│   │   ├── exportacion/page.js      # Subruta: Reportes Excel y PDF
 │   │   ├── GraficosFinancieros.js   # Métricas visuales interactivas con Recharts
-│   │   └── exportarPDF.js           # Generación de reportes PDF de balance fiscal y auditoría con jsPDF
-│   ├── caja/page.js                 # Interfaz POS de cajero (ventas táctiles, buscador, combos, modificadores)
-│   ├── layout.js                    # Layout raíz de Next.js (protección notranslate contra Google Translate)
+│   │   └── exportarPDF.js           # Generación de reportes PDF de balance fiscal
+│   ├── caja/
+│   │   ├── layout.js                # Layout de caja con CajaProvider
+│   │   ├── _context/CajaContext.js  # Estado reactivo del terminal POS
+│   │   ├── pos/page.js              # Subruta: Terminal táctil de cobro y carrito
+│   │   └── movimientos/page.js      # Subruta: Historial del turno e ingresos/egresos
+│   ├── layout.js                    # Layout raíz de Next.js (protección notranslate)
 │   └── page.js                      # Pantalla de inicio de sesión
 ├── database/
 │   ├── database.js                  # Conexión SQLite (WAL, busy_timeout, foreign_keys, DATABASE_PATH)
-│   └── migraciones.js               # Esquema versionado transaccional (PRAGMA user_version v1-v11)
+│   ├── schema.js                    # Esquema Drizzle ORM (20 tablas tipadas y relaciones)
+│   ├── drizzle.js                   # Cliente Drizzle singleton sobre better-sqlite3
+│   └── migraciones.js               # Esquema versionado transaccional (PRAGMA user_version v1-v12)
 ├── server/
-│   ├── queries.js                   # Lógica de negocio, transacciones, kardex dual, combos y reportes Excel
-│   ├── sesion.js                    # Gestión de sesiones JWT HttpOnly (jose) y TTL por rol
-│   ├── mailer.js                    # Servicio SMTP (nodemailer) con plantillas y adjuntos en background
-│   └── secretos.js                  # Validación de variables de entorno y secretos en producción
+│   ├── actions/                     # Server Actions protegidas ('use server')
+│   ├── domain/                      # Lógica pura de dominio (costos CPP, motor fiscal)
+│   ├── repositories/                # Módulos de persistencia SQL parametrizada
+│   ├── lib/                         # Infraestructura (sesión JWT, secretos, mailer SMTP)
+│   └── queries.js                   # Fachada barrel retrocompatible
+├── components/ui/                   # Componentes de interfaz Shadcn UI (password-input, etc.)
 ├── scripts/
 │   ├── backup.js                    # Respaldo atómico en caliente (VACUUM INTO) con retención automática
 │   ├── update.js                    # Actualización segura (backup previo + git pull + npm ci + build)
-│   └── seed_cafeteria.js            # Sembrado integral v11 (Régimen General, Combos, Modificadores, Kardex)
+│   └── seed_cafeteria.js            # Sembrado integral v11/v12 (Régimen General, Combos, Modificadores, Kardex, Lotes)
 ├── docs/                            # Documentación técnica y batería de pruebas
-├── .env.production.example          # Plantilla de variables de entorno para producción
 ├── ecosystem.config.js              # Configuración de PM2 para ejecución continua
 ├── instrumentation.js               # Validación temprana de seguridad en arranque de Next.js
 └── next.config.js                   # Configuración de empaquetado (serverExternalPackages)

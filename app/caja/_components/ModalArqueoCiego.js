@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { cerrarTurnoAction } from '../../../server/actions/turnos.actions';
+import { Lock, Banknote, QrCode, X } from 'lucide-react';
 
 export default function ModalArqueoCiego({
     isOpen = true,
@@ -78,7 +79,10 @@ export default function ModalArqueoCiego({
             </div>
 
             <label className="text-xs font-bold text-slate-700 flex flex-col gap-1">
-                <span>Efectivo Físico Real Contado en Cajón (Bs):</span>
+                <span className="flex items-center gap-1.5">
+                    <Banknote className="w-4 h-4 text-emerald-600" />
+                    <span>Efectivo Físico Real Contado en Cajón (Bs):</span>
+                </span>
                 <input
                     type="number"
                     step="0.01"
@@ -87,12 +91,15 @@ export default function ModalArqueoCiego({
                     placeholder="Ingresa el monto físico contado..."
                     value={efectivoReal}
                     onChange={(e) => setEfectivoReal(e.target.value)}
-                    className="w-full px-3 py-2 rounded-lg border-2 border-slate-300 bg-white text-base font-bold text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-blue-400 focus:border-blue-400"
+                    className="w-full px-3 py-2 rounded-lg border-2 border-slate-300 bg-white text-base font-bold text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-sky-400 focus:border-sky-400"
                 />
             </label>
 
             <label className="text-xs font-bold text-slate-700 flex flex-col gap-1">
-                <span>Total QR Conciliado en Extracto Bancario (Bs, Opcional):</span>
+                <span className="flex items-center gap-1.5">
+                    <QrCode className="w-4 h-4 text-sky-600" />
+                    <span>Total QR Conciliado en Extracto Bancario (Bs, Opcional):</span>
+                </span>
                 <input
                     type="number"
                     step="0.01"
@@ -100,7 +107,7 @@ export default function ModalArqueoCiego({
                     placeholder="Opcional: monto QR verificado en cuenta..."
                     value={qrRealCierre}
                     onChange={(e) => setQrRealCierre(e.target.value)}
-                    className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-sm text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-blue-400"
+                    className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-sm text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-sky-400"
                 />
             </label>
 
@@ -111,7 +118,7 @@ export default function ModalArqueoCiego({
                     placeholder="Ej. Billete deteriorado, corte de luz, nota al administrador..."
                     value={observacionesCierre}
                     onChange={(e) => setObservacionesCierre(e.target.value)}
-                    className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-sm text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-blue-400"
+                    className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-sm text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-sky-400"
                 />
             </label>
 
@@ -128,9 +135,10 @@ export default function ModalArqueoCiego({
                 <button
                     type="submit"
                     disabled={guardando}
-                    className="px-5 py-2 text-sm font-bold rounded-lg bg-red-600 hover:bg-red-700 active:bg-red-800 text-white shadow-xs transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+                    className="px-5 py-2 text-sm font-bold rounded-lg bg-rose-600 hover:bg-rose-700 active:bg-rose-800 text-white shadow-xs transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-2"
                 >
-                    {guardando ? 'Cerrando caja...' : 'Declarar Efectivo y Cerrar Caja'}
+                    <Lock className="w-4 h-4" />
+                    <span>{guardando ? 'Cerrando caja...' : 'Declarar Efectivo y Cerrar Caja'}</span>
                 </button>
             </div>
         </form>
@@ -142,8 +150,8 @@ export default function ModalArqueoCiego({
                 <div className="bg-white rounded-xl shadow-2xl border border-slate-200 max-w-[520px] w-full max-h-[92vh] flex flex-col overflow-hidden">
                     <div className="px-5 py-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center shrink-0">
                         <div>
-                            <h3 className="text-lg font-bold text-slate-900 flex items-center gap-1.5">
-                                <span>🔒</span>
+                            <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                                <Lock className="w-5 h-5 text-slate-700" />
                                 <span>Cerrar Turno #{cajaAbierta?.id} (Arqueo Ciego)</span>
                             </h3>
                             <div className="text-xs text-slate-500 mt-0.5">
@@ -154,10 +162,10 @@ export default function ModalArqueoCiego({
                             <button
                                 type="button"
                                 onClick={onClose}
-                                className="text-slate-400 hover:text-slate-600 hover:bg-slate-200/60 rounded-md p-1.5 transition-colors cursor-pointer text-lg leading-none"
+                                className="text-slate-400 hover:text-slate-600 hover:bg-slate-200/60 rounded-md p-1.5 transition-colors cursor-pointer"
                                 aria-label="Cerrar modal"
                             >
-                                ✕
+                                <X className="w-5 h-5" />
                             </button>
                         )}
                     </div>
@@ -171,8 +179,8 @@ export default function ModalArqueoCiego({
 
     return (
         <section className="bg-white rounded-xl border border-slate-200 shadow-xs p-6 max-w-[540px]">
-            <h2 className="text-lg font-bold text-slate-900 mb-4 flex items-center gap-1.5">
-                <span>🔒</span>
+            <h2 className="text-lg font-bold text-slate-900 mb-4 flex items-center gap-2">
+                <Lock className="w-5 h-5 text-slate-700" />
                 <span>Cerrar Turno (Arqueo Ciego)</span>
             </h2>
             {contenidoFormulario}

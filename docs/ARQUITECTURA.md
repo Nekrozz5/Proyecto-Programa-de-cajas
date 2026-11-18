@@ -1,6 +1,6 @@
 # Arquitectura Técnica del Sistema
 
-Este documento describe la arquitectura global del sistema POS y Control de Cajas, su modelo de seguridad, la base de datos relacional con SQLite3, el esquema de migraciones versionadas (v1 a v11), el motor tributario modular, los pagos mixtos, el Kardex cronológico dual (NIC 2), los combos, los modificadores de recetas, y el sistema de reportes y notificaciones.
+Este documento describe la arquitectura global del sistema POS y Control de Cajas, su modelo de seguridad, la base de datos relacional con SQLite3, el esquema de migraciones versionadas (v1 a v12), el motor tributario modular, los pagos mixtos, el Kardex cronológico dual (NIC 2), los combos, los modificadores de recetas, la trazabilidad de lotes con política PEPS (FIFO), la modularización de subrutas y layouts en App Router, y el sistema de reportes y notificaciones.
 
 ---
 
@@ -33,11 +33,21 @@ El sistema implementa una arquitectura en capas limpias que separa la interfaz v
 │   │   ├── caja/route.js             # GET: lectura única de estado, catálogo y sincronización (no-store)
 │   │   └── reportes/route.js         # GET: exportación de libros Excel (.xlsx), CSV y tendencias JSON
 │   ├── admin/
-│   │   ├── page.js                   # Panel administrativo principal
+│   │   ├── layout.js                 # Layout administrativo con AdminProvider para estado global
+│   │   ├── page.js                   # Redirección y compatibilidad hacia panel administrativo
 │   │   ├── GraficosFinancieros.js    # Visualizaciones con recharts
 │   │   ├── exportarPDF.js            # Exportación de reporte PDF con jsPDF
+│   │   ├── _context/
+│   │   │   └── AdminContext.js       # Contexto global compartido para pestañas y sincronización
+│   │   ├── resumen/page.js           # Subruta: Métricas ejecutivas, balance y anulación de ventas
+│   │   ├── catalogo/page.js          # Subruta: Categorías, productos, combos, recetas y modificadores
+│   │   ├── insumos/page.js           # Subruta: Insumos de producción, compras y mermas
+│   │   ├── arqueos/page.js           # Subruta: Historial de turnos, arqueos ciegos y reaperturas
+│   │   ├── usuarios/page.js          # Subruta: Cajeros, permisos fiscales y terminales de caja
+│   │   ├── configuracion/page.js     # Subruta: Configuración fiscal y parámetros del negocio
+│   │   ├── exportacion/page.js       # Subruta: Descarga de reportes contables Excel/PDF
 │   │   └── _components/              # Componentes modulares por pestaña administrativa:
-│   │       ├── TabCatalogo.js        # Gestión de categorías, productos, recetas y modificadores
+│   │       ├── TabCatalogo.js        # Gestión de catálogo, combos, lotes y modificadores
 │   │       ├── TabTurnosArqueos.js   # Historial de turnos, arqueos, reaperturas y auditoría
 │   │       ├── TabUsuariosCajas.js   # ABM de cajeros, estaciones físicas y permisos
 │   │       ├── TabKardex.js          # Kardex detallado e integridad matemática
@@ -45,12 +55,17 @@ El sistema implementa una arquitectura en capas limpias que separa la interfaz v
 │   │       ├── TabExportacion.js     # Descarga de reportes contables
 │   │       └── TabResumen.js         # Métricas ejecutivas y anulación de ventas
 │   └── caja/
-│       ├── page.js                   # Terminal POS del operador / cajero
+│       ├── layout.js                 # Layout de caja con CajaProvider para estado reactivo del POS
+│       ├── page.js                   # Redirección y compatibilidad hacia terminal de caja
+│       ├── _context/
+│       │   └── CajaContext.js        # Contexto reactivo para turno activo, catálogo y carrito
+│       ├── pos/page.js               # Subruta: Terminal POS (catálogo táctil, lotes, carrito, cobro)
+│       ├── movimientos/page.js       # Subruta: Historial de ventas del turno e inyecciones de cambio/egresos
 │       ├── _hooks/                   # Hooks personalizados de interfaz:
 │       │   ├── useCarrito.js         # Estado reactivo del carrito de compras y prorrateo
 │       │   └── useInactividad.js     # Temporizador de cierre de sesión por inactividad
 │       └── _components/              # Componentes modulares de operación:
-│           ├── CatalogoProductos.js  # Selección visual de productos por categorías
+│           ├── CatalogoProductos.js  # Selección visual de productos por categorías y lotes
 │           ├── CarritoVenta.js       # Resumen de orden, descuentos y totales
 │           ├── ModalCobro.js         # Cobro efectivo, QR y pagos mixtos con cálculo de cambio
 │           ├── ModalModificadores.js # Selección de reemplazos y complementos de recetas
@@ -59,7 +74,7 @@ El sistema implementa una arquitectura en capas limpias que separa la interfaz v
 │           ├── HistorialTurno.js     # Ventas del turno actual y reemisión de tickets
 │           ├── AperturaTurno.js      # Selección de caja física y fondo inicial
 │           └── LoginCaja.js          # Selector de cajero y PIN numérico
-├── components/ui/                    # Primitivas UI reutilizables de Shadcn (button, card, input, badge, table, dialog, etc.)
+├── components/ui/                    # Primitivas UI reutilizables de Shadcn (button, card, input, password-input, badge, etc.)
 ├── lib/
 │   └── utils.js                      # Utilidad cn() (clsx + tailwind-merge) para clases dinámicas
 ├── server/                           # Núcleo de backend y lógica del servidor
@@ -145,6 +160,7 @@ El sistema implementa una arquitectura en capas limpias que separa la interfaz v
   - **v9:** Régimen tributario modular (`configuracion_negocio`), normalización de pagos en `movimientos_pagos`, compras con respaldo fiscal en `movimientos_insumos`, y creación del Kardex de productos directos (`movimientos_productos_directos`).
   - **v10:** Snapshot fiscal por movimiento (`regimen_tributario`, alícuotas e importes IVA/IT congelados), parámetro configurable `it_base` ('todas_las_ventas' | 'solo_facturadas'), `costo_promedio_resultante` en productos directos y saldos de apertura.
   - **v11:** Kardex cronológico dual enriquecido en `movimientos_insumos` (`stock_resultante`, `costo_promedio_resultante`, `monto_total_compra`), reparación de costos métricos truncados y recálculo en cascada de recetas/combos, e índice multicaja por estación física (`idx_cajas_abiertas_fisica`).
+  - **v12:** Creación de tabla `producto_lotes` para trazabilidad de vencimientos por lote, índices `idx_producto_lotes_producto_id` e `idx_producto_lotes_fecha_vencimiento`, migración automática de stock previo con fecha de vencimiento a su lote inicial, y soporte de políticas de salida PEPS (Primero en Expirar, Primero en Salir) o selección manual de lote.
 - **Transacciones atómicas:** Toda mutación de negocio corre dentro de `transaccion(async (dbTx) => { ... })` en `server/queries.js`.
 - **Manejo de fechas:** Almacenadas en UTC (`CURRENT_TIMESTAMP`) y proyectadas con `'localtime'` en SQLite para filtros y visualización del usuario (`datetime(fecha_hora, 'localtime')`).
 
@@ -211,6 +227,17 @@ El sistema implementa una arquitectura en capas limpias que separa la interfaz v
 - **Prorrateo Exacto de Descuentos:** En tickets con descuento, el sistema distribuye proporcionalmente el descuento entre las líneas de venta (`detalle_movimientos`) y absorbe cualquier residuo fraccionario en la última línea, garantizando matemáticamente que:
   $$\sum \text{ingresos\_netos\_producto} \equiv \text{Ventas Totales}$$
   $$\sum \text{ganancia\_producto} \equiv \text{Ganancia Bruta}$$
+
+### I. Trazabilidad de Vencimientos por Lote y Política PEPS (v12)
+- **Tabla `producto_lotes`:** Almacena cada partida o lote de productos directos con `id`, `producto_id`, `fecha_vencimiento`, `stock`, `costo_unitario`, `activo` y `creado_en`.
+- **Sincronización Bidireccional de Inventario:**
+  - El stock global de la tabla `productos` se mantiene sincronizado con la sumatoria de las unidades existentes en sus lotes activos.
+  - Al registrar compras (`registrarCompra`), si se especifica fecha de vencimiento, se incrementa o crea el lote correspondiente en `producto_lotes` y se registra la entrada en el Kardex.
+  - Al registrar mermas (`registrarMerma`), se puede imputar la pérdida a un lote específico con fecha de expiración cumplida o deterioro.
+- **Descuento Atómico y Modos de Salida en Ventas:**
+  - *Selección de Lote Específico:* El cajero puede vender seleccionando un lote concreto en el modal o selector del POS. El backend valida atómicamente la existencia y suficiencia de stock en dicho lote.
+  - *Política Automática PEPS (Primero en Expirar, Primero en Salir / FIFO):* Si la venta no selecciona un lote específico, el motor descuenta automáticamente las unidades consumiendo en orden ascendente por `fecha_vencimiento ASC, id ASC` entre los lotes con stock disponible (`stock > 0`), asegurando la rotación óptima de mercadería perecedera.
+  - *Blindaje contra Concurrencia:* Las deducciones de lotes emplean `UPDATE producto_lotes SET stock = ROUND(stock - ?, 4) WHERE id = ? AND stock >= ?` garantizando que dos ventas concurrentes no generen existencias negativas.
 
 ---
 

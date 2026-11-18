@@ -32,7 +32,7 @@ async function crearInsumo(nombre, unidadMedida, stockInicial = 0, costoPorUnida
         const res = await runQuery(
             `INSERT INTO insumos (nombre, unidad_medida, stock_actual, costo_por_unidad, stock_seguridad, tiempo_entrega_dias, fecha_vencimiento)
              VALUES (?, ?, ?, ?, ?, ?, ?)`,
-            [nombre.trim(), unidadMedida || 'unidades', stockInicialValidado, costoPorUnidadValidado, stockSeguridadValidado, tiempoEntregaValidado, fechaVencimiento || null]
+            [nombre.trim(), unidadMedida ? String(unidadMedida).trim().toLowerCase() : 'unidades', stockInicialValidado, costoPorUnidadValidado, stockSeguridadValidado, tiempoEntregaValidado, fechaVencimiento || null]
         );
         const insumoId = res.lastID;
 
@@ -195,10 +195,43 @@ async function registrarMermaInsumo(insumoId, cantidadPerdida, motivo, usuarioId
     });
 }
 
+// Helper para validación estricta de fecha en formato YYYY-MM-DD
+function validarFormatoFechaYYYYMMDD(fechaStr) {
+    if (!fechaStr) return null;
+    let limpia = String(fechaStr).trim();
+    if (!limpia) return null;
+
+    if (/^\d{4}-\d{2}-\d{2}T/.test(limpia)) {
+        limpia = limpia.split('T')[0];
+    }
+
+    const regex = /^(\d{4})-(\d{2})-(\d{2})$/;
+    const match = limpia.match(regex);
+    if (!match) {
+        throw new Error(`Formato de fecha inválido: "${fechaStr}". Debe ser YYYY-MM-DD.`);
+    }
+
+    const year = parseInt(match[1], 10);
+    const month = parseInt(match[2], 10);
+    const day = parseInt(match[3], 10);
+
+    if (month < 1 || month > 12) {
+        throw new Error(`Fecha inválida: mes ${month} fuera de rango (01-12).`);
+    }
+
+    const diasPorMes = [31, (year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0)) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    if (day < 1 || day > diasPorMes[month - 1]) {
+        throw new Error(`Fecha inválida: el día ${day} no es válido para el mes ${month} del año ${year}.`);
+    }
+
+    return limpia;
+}
+
 // Reabastecimiento directo de artículos terminados con Costo Promedio Ponderado (NIC 2)
 async function registrarCompraProductoDirecto(productoId, cantidadComprada, costoTotalCompra, fechaVencimiento = null, datosFiscales = {}) {
     const cantValidada = numeroPositivo(cantidadComprada, 'La cantidad comprada');
     const costoValidado = redondear2(numeroNoNegativo(costoTotalCompra, 'El costo total de compra'));
+    const fechaVencimientoValidada = validarFormatoFechaYYYYMMDD(fechaVencimiento);
 
     return await enTransaccion(async () => {
         const prod = await getQuery(`SELECT * FROM productos WHERE id = ? AND activo = 1`, [productoId]);
@@ -217,9 +250,55 @@ async function registrarCompraProductoDirecto(productoId, cantidadComprada, cost
             ? (valorAnterior + costoValidado) / nuevoStock
             : (costoValidado / cantValidada);
 
-        const vencimientoActualizado = fechaVencimiento && String(fechaVencimiento).trim() !== ''
-            ? String(fechaVencimiento).trim()
-            : prod.fecha_vencimiento;
+        const costoUnitCompra = Number((costoValidado / cantValidada).toFixed(4));
+        const cppResultante = Number(nuevoCostoUnitario.toFixed(4));
+
+        // Gestión individual de lotes por fecha de vencimiento
+        if (fechaVencimientoValidada) {
+            const loteExistente = await getQuery(
+                `SELECT id, stock, costo_unitario FROM producto_lotes WHERE producto_id = ? AND fecha_vencimiento = ? AND activo = 1`,
+                [productoId, fechaVencimientoValidada]
+            );
+
+            if (loteExistente) {
+                const stockLoteAnterior = Math.max(0, Number(loteExistente.stock || 0));
+                const valorLoteAnterior = stockLoteAnterior * Number(loteExistente.costo_unitario || 0);
+                const nuevoStockLote = Number((stockLoteAnterior + cantValidada).toFixed(4));
+                const nuevoCostoLote = nuevoStockLote > 0
+                    ? Number(((valorLoteAnterior + costoValidado) / nuevoStockLote).toFixed(4))
+                    : costoUnitCompra;
+
+                await runQuery(
+                    `UPDATE producto_lotes SET stock = ?, costo_unitario = ? WHERE id = ?`,
+                    [nuevoStockLote, nuevoCostoLote, loteExistente.id]
+                );
+            } else {
+                await runQuery(
+                    `INSERT INTO producto_lotes (producto_id, fecha_vencimiento, stock, costo_unitario, activo)
+                     VALUES (?, ?, ?, ?, 1)`,
+                    [productoId, fechaVencimientoValidada, Number(cantValidada.toFixed(4)), costoUnitCompra]
+                );
+            }
+        }
+
+        // Sincronizar siempre el stock total y vencimiento en la tabla productos
+        const lotesRes = await getQuery(
+            `SELECT COALESCE(SUM(stock), 0) as total_stock,
+                    MIN(CASE WHEN stock > 0 THEN fecha_vencimiento ELSE NULL END) as proximo_vencimiento,
+                    COUNT(*) as total_lotes
+             FROM producto_lotes
+             WHERE producto_id = ? AND activo = 1`,
+            [productoId]
+        );
+
+        const tieneLotes = lotesRes && Number(lotesRes.total_lotes) > 0;
+        const stockSincronizado = tieneLotes
+            ? Math.max(Number(nuevoStock.toFixed(4)), Number(Number(lotesRes.total_stock).toFixed(4)))
+            : Number(nuevoStock.toFixed(4));
+
+        const vencimientoActualizado = (tieneLotes && lotesRes.proximo_vencimiento)
+            ? lotesRes.proximo_vencimiento
+            : (fechaVencimientoValidada || prod.fecha_vencimiento);
 
         await runQuery(
             `UPDATE productos
@@ -228,7 +307,7 @@ async function registrarCompraProductoDirecto(productoId, cantidadComprada, cost
                  costo = ?,
                  fecha_vencimiento = ?
              WHERE id = ?`,
-            [Number(nuevoStock.toFixed(4)), Number(nuevoCostoUnitario.toFixed(4)), vencimientoActualizado, productoId]
+            [stockSincronizado, cppResultante, vencimientoActualizado, productoId]
         );
 
         const provNombre = datosFiscales?.proveedorNombre ? String(datosFiscales.proveedorNombre).trim() : null;
@@ -236,10 +315,9 @@ async function registrarCompraProductoDirecto(productoId, cantidadComprada, cost
         const nroFac = datosFiscales?.nroFacturaCompra ? String(datosFiscales.nroFacturaCompra).trim() : null;
         const conFac = datosFiscales?.conFactura || nroFac ? 1 : 0;
         const usuarioId = datosFiscales?.usuarioId ? Number(datosFiscales.usuarioId) : null;
-        const costoUnitCompra = Number((costoValidado / cantValidada).toFixed(4));
-        const cppResultante = Number(nuevoCostoUnitario.toFixed(4));
 
         let motivoKardex = provNombre ? `Compra directo a: ${provNombre}` : 'Compra de stock directo (CPP)';
+        if (fechaVencimientoValidada) motivoKardex += ` [Lote Vence: ${fechaVencimientoValidada}]`;
         if (nroFac) motivoKardex += ` [Fact. #${nroFac}${provNit ? ` | NIT: ${provNit}` : ''}]`;
 
         await runQuery(
@@ -251,7 +329,7 @@ async function registrarCompraProductoDirecto(productoId, cantidadComprada, cost
                 productoId,
                 usuarioId,
                 cantValidada,
-                Number(nuevoStock.toFixed(4)),
+                stockSincronizado,
                 costoUnitCompra,
                 cppResultante,
                 costoValidado,
@@ -267,8 +345,9 @@ async function registrarCompraProductoDirecto(productoId, cantidadComprada, cost
 
         return {
             productoId,
-            nuevoStock: Number(nuevoStock.toFixed(4)),
-            nuevoCostoUnitario: cppResultante
+            nuevoStock: stockSincronizado,
+            nuevoCostoUnitario: cppResultante,
+            fechaVencimiento: vencimientoActualizado
         };
     });
 }
@@ -596,15 +675,203 @@ async function obtenerPrediccionComprasInsumos(diasAnalisis = 30, diasCobertura 
             puntoReordenROP: Number(puntoReorden.toFixed(3)),
             cantidadSugeridaCompra: redondear2(cantidadSugeridaCompra),
             costoEstimadoCompra: redondear2(cantidadSugeridaCompra * ins.costo_por_unidad),
-            estadoAlerta
+            estadoAlerta,
+            fechaVencimiento: ins.fecha_vencimiento
         });
     }
 
     return reporte;
 }
 
+/**
+ * Actualiza los datos de un insumo (nombre, unidad_medida, stock_seguridad, tiempo_entrega_dias).
+ * Si se indica ajuste de stock o costo para calibración, registra el movimiento en movimientos_insumos
+ * con tipo 'ajuste' y recalcula en cascada el costo de recetas y combos vinculados.
+ */
+async function actualizarInsumo(insumoId, datos = {}, usuarioId = null) {
+    const id = Number(insumoId);
+    if (!Number.isFinite(id) || id <= 0) {
+        throw new Error('ID de insumo inválido.');
+    }
+
+    return await enTransaccion(async () => {
+        const insumoActual = await getQuery(`SELECT * FROM insumos WHERE id = ? AND activo = 1`, [id]);
+        if (!insumoActual) {
+            throw new Error('Insumo no encontrado o inactivo.');
+        }
+
+        const nombreFinal = datos.nombre !== undefined ? String(datos.nombre).trim() : insumoActual.nombre;
+        if (!nombreFinal) {
+            throw new Error('El nombre del insumo no puede estar vacío.');
+        }
+
+        const unidadFinal = datos.unidad_medida !== undefined
+            ? String(datos.unidad_medida).trim().toLowerCase()
+            : (datos.unidadMedida !== undefined ? String(datos.unidadMedida).trim().toLowerCase() : insumoActual.unidad_medida);
+        if (!unidadFinal) {
+            throw new Error('La unidad de medida no puede estar vacía.');
+        }
+
+        const stockSeguridadInput = datos.stock_seguridad !== undefined ? datos.stock_seguridad : datos.stockSeguridad;
+        const stockSeguridadFinal = stockSeguridadInput !== undefined
+            ? Number(numeroNoNegativo(stockSeguridadInput, 'El stock de seguridad').toFixed(4))
+            : Number(insumoActual.stock_seguridad || 0);
+
+        const tiempoEntregaInput = datos.tiempo_entrega_dias !== undefined ? datos.tiempo_entrega_dias : datos.tiempoEntregaDias;
+        const tiempoEntregaFinal = tiempoEntregaInput !== undefined
+            ? numeroNoNegativo(tiempoEntregaInput, 'El tiempo de entrega en días')
+            : Number(insumoActual.tiempo_entrega_dias || 1);
+
+        const fechaVencimientoFinal = datos.fecha_vencimiento !== undefined
+            ? datos.fecha_vencimiento
+            : (datos.fechaVencimiento !== undefined ? datos.fechaVencimiento : insumoActual.fecha_vencimiento);
+
+        // Calibración o ajuste de stock / costo inicial
+        const stockAjusteInput = datos.stock_actual !== undefined
+            ? datos.stock_actual
+            : (datos.stockActual !== undefined
+                ? datos.stockActual
+                : (datos.nuevoStock !== undefined ? datos.nuevoStock : (datos.ajusteStock !== undefined ? datos.ajusteStock : undefined)));
+
+        const costoAjusteInput = datos.costo_por_unidad !== undefined
+            ? datos.costo_por_unidad
+            : (datos.costoPorUnidad !== undefined
+                ? datos.costoPorUnidad
+                : (datos.nuevoCosto !== undefined ? datos.nuevoCosto : (datos.ajusteCosto !== undefined ? datos.ajusteCosto : undefined)));
+
+        const hayAjusteStock = stockAjusteInput !== undefined && Number(stockAjusteInput) !== Number(insumoActual.stock_actual);
+        const hayAjusteCosto = costoAjusteInput !== undefined && Number(costoAjusteInput) !== Number(insumoActual.costo_por_unidad);
+
+        if (hayAjusteStock || hayAjusteCosto) {
+            const nuevoStock = stockAjusteInput !== undefined
+                ? Number(numeroNoNegativo(stockAjusteInput, 'El stock del insumo').toFixed(4))
+                : Number(insumoActual.stock_actual || 0);
+            const nuevoCosto = costoAjusteInput !== undefined
+                ? Number(numeroNoNegativo(costoAjusteInput, 'El costo por unidad del insumo').toFixed(6))
+                : Number(insumoActual.costo_por_unidad || 0);
+
+            const diferenciaStock = Number((nuevoStock - Number(insumoActual.stock_actual || 0)).toFixed(4));
+            const motivoAjuste = datos.motivo || datos.motivoAjuste || `Ajuste de calibración (Stock: ${insumoActual.stock_actual} -> ${nuevoStock}, Costo: ${insumoActual.costo_por_unidad} -> ${nuevoCosto})`;
+
+            await runQuery(
+                `UPDATE insumos
+                 SET nombre = ?, unidad_medida = ?, stock_actual = ?, costo_por_unidad = ?, stock_seguridad = ?, tiempo_entrega_dias = ?, fecha_vencimiento = ?
+                 WHERE id = ?`,
+                [nombreFinal, unidadFinal, nuevoStock, nuevoCosto, stockSeguridadFinal, tiempoEntregaFinal, fechaVencimientoFinal ? String(fechaVencimientoFinal).trim() : null, id]
+            );
+
+            await runQuery(
+                `INSERT INTO movimientos_insumos (
+                    insumo_id, usuario_id, tipo, cantidad, stock_resultante,
+                    costo_unitario, costo_promedio_resultante, monto_total_compra, motivo
+                 )
+                 VALUES (?, ?, 'ajuste', ?, ?, ?, ?, ?, ?)`,
+                [
+                    id,
+                    usuarioId ? Number(usuarioId) : null,
+                    Math.abs(diferenciaStock),
+                    nuevoStock,
+                    nuevoCosto,
+                    nuevoCosto,
+                    redondear2(nuevoStock * nuevoCosto),
+                    motivoAjuste
+                ]
+            );
+
+            // Recalcular en cascada el costo de todos los productos y combos que usan este insumo
+            const productosAfectados = await allQuery(`SELECT DISTINCT producto_id FROM recetas WHERE insumo_id = ?`, [id]);
+            for (const prod of productosAfectados) {
+                await recalcularCostoProductoPorReceta(prod.producto_id);
+            }
+        } else {
+            await runQuery(
+                `UPDATE insumos
+                 SET nombre = ?, unidad_medida = ?, stock_seguridad = ?, tiempo_entrega_dias = ?, fecha_vencimiento = ?
+                 WHERE id = ?`,
+                [nombreFinal, unidadFinal, stockSeguridadFinal, tiempoEntregaFinal, fechaVencimientoFinal ? String(fechaVencimientoFinal).trim() : null, id]
+            );
+        }
+
+        return await getQuery(`SELECT * FROM insumos WHERE id = ?`, [id]);
+    });
+}
+
+/**
+ * Da de baja lógica a un insumo o material (activo = 0).
+ * Requiere justificativo obligatorio y valida que no esté amarrado a recetas o modificadores activos.
+ * Si tenía stock físico restante, registra el movimiento de ajuste para mantener balanceado el Kardex.
+ */
+async function eliminarInsumo(insumoId, motivo, adminId) {
+    const id = Number(insumoId);
+    if (!id || isNaN(id)) throw new Error('ID de insumo inválido.');
+
+    const motivoLimpio = motivo ? String(motivo).trim() : '';
+    if (!motivoLimpio || motivoLimpio.length < 3) {
+        throw new Error('Es obligatorio justificar el motivo de eliminación del insumo (mínimo 3 caracteres).');
+    }
+
+    return await enTransaccion(async () => {
+        const insumo = await getQuery(`SELECT * FROM insumos WHERE id = ? AND activo = 1`, [id]);
+        if (!insumo) throw new Error('El material o insumo no existe o ya fue eliminado.');
+
+        // 1. Validar que no esté amarrado a recetas de productos activos
+        const recetasQueLoUsan = await allQuery(
+            `SELECT p.nombre 
+             FROM recetas r
+             JOIN productos p ON r.producto_id = p.id
+             WHERE r.insumo_id = ? AND p.activo = 1`,
+            [id]
+        );
+        if (recetasQueLoUsan.length > 0) {
+            const nombres = recetasQueLoUsan.map((r) => `"${r.nombre}"`).join(', ');
+            throw new Error(`No se puede eliminar el insumo "${insumo.nombre}" porque se utiliza en la receta activa de: ${nombres}. Quítalo o edita esas recetas antes de darlo de baja.`);
+        }
+
+        // 2. Validar que no esté amarrado a modificadores activos
+        const modificadoresQueLoUsan = await allQuery(
+            `SELECT DISTINCT g.nombre as grupo_nombre, o.nombre as opcion_nombre
+             FROM modificadores_opciones o
+             JOIN grupos_modificadores g ON o.grupo_id = g.id
+             WHERE (o.insumo_id = ? OR o.insumo_reemplazado_id = ?) AND o.activo = 1 AND g.activo = 1`,
+            [id, id]
+        );
+        if (modificadoresQueLoUsan.length > 0) {
+            const nombres = modificadoresQueLoUsan.map((m) => `"${m.opcion_nombre}" (${m.grupo_nombre})`).join(', ');
+            throw new Error(`No se puede eliminar el insumo "${insumo.nombre}" porque está asignado al modificador activo: ${nombres}.`);
+        }
+
+        // 3. Si tenía stock remanente, registrar ajuste de salida en el Kardex
+        const stockActual = Number(insumo.stock_actual || 0);
+        if (stockActual > 0) {
+            await runQuery(
+                `INSERT INTO movimientos_insumos (
+                    insumo_id, usuario_id, tipo, cantidad, stock_resultante,
+                    costo_unitario, costo_promedio_resultante, monto_total_compra, motivo
+                 ) VALUES (?, ?, 'ajuste', ?, 0, ?, 0, 0, ?)`,
+                [
+                    id,
+                    adminId ? Number(adminId) : null,
+                    -stockActual,
+                    Number(insumo.costo_por_unidad || 0),
+                    `Baja / Eliminación justificada: ${motivoLimpio}`
+                ]
+            );
+        }
+
+        // 4. Baja lógica
+        await runQuery(
+            `UPDATE insumos SET activo = 0, stock_actual = 0 WHERE id = ?`,
+            [id]
+        );
+
+        return { id, nombre: insumo.nombre, eliminado: true, motivo: motivoLimpio };
+    });
+}
+
 module.exports = {
     crearInsumo,
+    actualizarInsumo,
+    eliminarInsumo,
     obtenerInsumos,
     registrarCompraInsumo,
     registrarMermaInsumo,
@@ -613,5 +880,6 @@ module.exports = {
     verificarIntegridadKardexDirecto,
     verificarIntegridadKardexInsumos,
     obtenerKardexDetallado,
-    obtenerPrediccionComprasInsumos
+    obtenerPrediccionComprasInsumos,
+    validarFormatoFechaYYYYMMDD
 };

@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { PasswordInput } from '@/components/ui/password-input';
 import { Badge } from '@/components/ui/badge';
 import {
     crearUsuarioAction,
@@ -169,9 +170,9 @@ export default function TabUsuariosCajas({
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
                 {/* REGISTRAR NUEVO USUARIO */}
                 <section className="bg-white p-5 rounded-lg border border-slate-200 shadow-sm">
-                    <h3 className="text-lg font-bold text-slate-900 mt-0 mb-1">👥 Registrar Nuevo Usuario</h3>
+                    <h3 className="text-lg font-bold text-slate-900 mt-0 mb-1">Registrar Nuevo Usuario</h3>
                     <p className="text-xs text-slate-600 mb-4">
-                        Jerarquía activa: <strong>Super Admin</strong> &gt; <strong>Admin</strong> &gt; <strong>Cajero (user)</strong>.
+                        Jerarquía activa: <strong>Propietario</strong> &gt; <strong>Administrador</strong> &gt; <strong>Cajero</strong>.
                     </p>
                     <form onSubmit={handleCrearUsuario} className="flex flex-col gap-3">
                         <Input
@@ -181,7 +182,7 @@ export default function TabUsuariosCajas({
                             onChange={(e) => setNuevoUsuarioNombre(e.target.value)}
                             className="bg-white"
                         />
-                        <Input
+                        <PasswordInput
                             placeholder="PIN o Contraseña inicial"
                             required
                             value={nuevoUsuarioPin}
@@ -193,12 +194,12 @@ export default function TabUsuariosCajas({
                             onChange={(e) => setNuevoUsuarioRol(e.target.value)}
                             className="w-full h-9 rounded-md border border-slate-300 bg-white px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-slate-950"
                         >
-                            <option value="user">Cajero (user)</option>
+                            <option value="user">Cajero</option>
                             {(adminAutenticado?.rol === 'superadmin' || adminAutenticado?.rol === 'developer') && (
-                                <option value="admin">Administrador (admin) — Exclusivo Super Admin</option>
+                                <option value="admin">Administrador — Exclusivo Propietario</option>
                             )}
                             {adminAutenticado?.rol === 'developer' && (
-                                <option value="superadmin">Super Admin (superadmin) — Exclusivo Developer</option>
+                                <option value="superadmin">Propietario — Exclusivo Desarrollador</option>
                             )}
                         </select>
                         <Button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white font-bold mt-1">
@@ -222,7 +223,7 @@ export default function TabUsuariosCajas({
                                 }}
                                 className="h-8 bg-slate-900 hover:bg-slate-800 text-amber-400 border border-slate-700 font-bold text-xs"
                             >
-                                💻 Cambiar mi PIN (developer)
+                                Cambiar mi PIN (Desarrollador)
                             </Button>
                         )}
                     </div>
@@ -232,15 +233,19 @@ export default function TabUsuariosCajas({
                             const esInferior = NIVEL_ROL[adminAutenticado?.rol || 'user'] > NIVEL_ROL[u.rol || 'user'];
                             const rolBadge = u.rol === 'superadmin' ? (
                                 <Badge className="bg-amber-100 text-amber-900 border border-amber-300 hover:bg-amber-100 font-bold text-[11px]">
-                                    👑 SUPER ADMIN
+                                    PROPIETARIO
                                 </Badge>
                             ) : u.rol === 'admin' ? (
                                 <Badge className="bg-blue-100 text-blue-800 border border-blue-300 hover:bg-blue-100 font-bold text-[11px]">
-                                    🛡️ ADMIN
+                                    ADMINISTRADOR
+                                </Badge>
+                            ) : u.rol === 'developer' ? (
+                                <Badge className="bg-slate-900 text-amber-400 border border-slate-700 hover:bg-slate-900 font-bold text-[11px]">
+                                    DESARROLLADOR
                                 </Badge>
                             ) : (
                                 <Badge variant="secondary" className="bg-slate-100 text-slate-700 border border-slate-200 font-bold text-[11px]">
-                                    👤 CAJERO
+                                    CAJERO
                                 </Badge>
                             );
 
@@ -262,7 +267,7 @@ export default function TabUsuariosCajas({
                                             }`}
                                             title="Habilitar o deshabilitar que este usuario pueda registrar datos de factura/respaldo en ventas y egresos"
                                         >
-                                            🧾 Respaldo: {Number(u.puede_registrar_respaldo_fiscal ?? 1) === 1 ? 'SÍ' : 'NO'}
+                                            Respaldo: {Number(u.puede_registrar_respaldo_fiscal ?? 1) === 1 ? 'SÍ' : 'NO'}
                                         </button>
                                         {(esMismoUsuario || esInferior) ? (
                                             <Button
@@ -280,16 +285,15 @@ export default function TabUsuariosCajas({
                                             </Button>
                                         ) : (
                                             <span className="text-xs text-slate-400 italic">
-                                                🔒 Rango igual/superior
+                                                Rango igual o superior
                                             </span>
                                         )}
                                         {esInferior && (
                                             <Button
                                                 type="button"
                                                 size="sm"
-                                                variant="destructive"
                                                 onClick={() => handleBorrarUsuario(u.id)}
-                                                className="h-7 text-xs bg-red-600 hover:bg-red-700"
+                                                className="h-7 text-xs bg-red-600 hover:bg-red-700 text-white font-medium px-2.5 shadow-sm transition-colors"
                                             >
                                                 Dar de baja
                                             </Button>
@@ -305,8 +309,7 @@ export default function TabUsuariosCajas({
                         <form onSubmit={confirmarCambioPassword} className="mt-4 p-4 bg-slate-50 rounded-lg border border-slate-300 flex flex-col gap-2.5">
                             <strong className="text-xs text-slate-800">Cambiar PIN / Contraseña de: {usuarioCambioPin.nombre}</strong>
                             {Number(usuarioCambioPin.id) === Number(adminAutenticado?.id) && (
-                                <Input
-                                    type="password"
+                                <PasswordInput
                                     placeholder="Tu PIN / Contraseña actual"
                                     required
                                     value={pinActualInput}
@@ -314,8 +317,7 @@ export default function TabUsuariosCajas({
                                     className="bg-white h-9"
                                 />
                             )}
-                            <Input
-                                type="password"
+                            <PasswordInput
                                 placeholder="Nuevo PIN / Contraseña"
                                 required
                                 value={nuevoPinInput}
@@ -339,7 +341,7 @@ export default function TabUsuariosCajas({
             <section className="bg-white p-5 rounded-lg border border-slate-200 shadow-sm">
                 <div className="flex justify-between items-center flex-wrap gap-3 mb-3">
                     <div>
-                        <h3 className="text-lg font-bold text-slate-900 m-0">🏢 Estaciones Físicas de Caja (Puntos de Venta)</h3>
+                        <h3 className="text-lg font-bold text-slate-900 m-0">Estaciones Físicas de Caja (Puntos de Venta)</h3>
                         <p className="text-xs text-slate-500 m-0 mt-0.5">
                             Gestiona las estaciones de cobro del local. Se requiere al menos una caja física activa para operar.
                         </p>
@@ -384,11 +386,15 @@ export default function TabUsuariosCajas({
                                 </div>
                                 <div className="text-xs text-slate-600">
                                     {tieneTurno ? (
-                                        <span className="text-emerald-700 font-semibold">
-                                            🟢 Turno #{cf.turno_abierto_id} en curso ({cf.operador_abierto || 'Cajero'})
+                                        <span className="text-emerald-700 font-semibold inline-flex items-center">
+                                            <span className="h-2 w-2 rounded-full bg-emerald-500 inline-block mr-1.5" />
+                                            Turno #{cf.turno_abierto_id} en curso ({cf.operador_abierto || 'Cajero'})
                                         </span>
                                     ) : (
-                                        <span>⚪ Sin turno abierto actualmente</span>
+                                        <span className="inline-flex items-center text-slate-500">
+                                            <span className="h-2 w-2 rounded-full bg-slate-300 inline-block mr-1.5" />
+                                            Sin turno abierto actualmente
+                                        </span>
                                     )}
                                 </div>
                                 <div className="mt-1 flex gap-1.5 flex-wrap">
@@ -402,7 +408,7 @@ export default function TabUsuariosCajas({
                                         }`}
                                         title="Habilitar o deshabilitar el registro de factura/respaldo en ventas y egresos de esta estación"
                                     >
-                                        🧾 Respaldo: {Number(cf.habilita_respaldo_fiscal ?? 1) === 1 ? 'SÍ' : 'NO'}
+                                        Respaldo: {Number(cf.habilita_respaldo_fiscal ?? 1) === 1 ? 'SÍ' : 'NO'}
                                     </button>
                                     {esActiva ? (
                                         <Button

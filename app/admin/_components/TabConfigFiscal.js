@@ -4,6 +4,14 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import { 
+    Settings, 
+    Package, 
+    Calendar, 
+    Boxes, 
+    Coffee, 
+    Receipt 
+} from 'lucide-react';
 import {
     guardarConfiguracionAction,
     guardarConfiguracionContableAction
@@ -110,10 +118,13 @@ export default function TabConfigFiscal({
         <div className="flex flex-col gap-6 max-w-4xl">
             {/* ASISTENTE DE MODALIDAD DEL NEGOCIO */}
             <section className="bg-white p-5 rounded-lg border-2 border-sky-600 shadow-sm">
-                <h2 className="text-xl font-bold text-slate-900 mt-0 mb-1.5">
-                    {esPrimeraEjecucion
-                        ? '🚀 Configuración Inicial del Sistema (Primera Ejecución)'
-                        : '⚙️ Configurar Modalidad de Funcionamiento del Inventario'}
+                <h2 className="text-xl font-bold text-slate-900 mt-0 mb-1.5 flex items-center gap-2">
+                    <Settings className="w-5 h-5 text-sky-600" />
+                    <span>
+                        {esPrimeraEjecucion
+                            ? 'Configuración Inicial del Sistema (Primera Ejecución)'
+                            : 'Configurar Modalidad de Funcionamiento del Inventario'}
+                    </span>
                 </h2>
                 <p className="text-slate-600 text-sm mb-4">
                     Selecciona cómo funciona el inventario de tu negocio. El sistema activará u ocultará automáticamente los campos de <strong>Fechas de Vencimiento</strong> y de <strong>Ensamblaje / Recetas de Materiales</strong> según tu modalidad.
@@ -130,7 +141,10 @@ export default function TabConfigFiscal({
                                 : 'border-slate-300 bg-white hover:border-slate-400'
                         }`}
                     >
-                        <strong className="text-sm text-slate-900">🔧 1. Artículos No Perecederos</strong>
+                        <div className="flex items-center gap-1.5">
+                            <Package className="w-4 h-4 text-slate-700" />
+                            <strong className="text-sm text-slate-900">1. Artículos No Perecederos</strong>
+                        </div>
                         <span className="text-xs text-slate-600">
                             Compra y venta directa sin fecha de vencimiento ni recetas.
                         </span>
@@ -146,7 +160,10 @@ export default function TabConfigFiscal({
                                 : 'border-slate-300 bg-white hover:border-slate-400'
                         }`}
                     >
-                        <strong className="text-sm text-slate-900">🛒 2. Productos con Vencimiento</strong>
+                        <div className="flex items-center gap-1.5">
+                            <Calendar className="w-4 h-4 text-slate-700" />
+                            <strong className="text-sm text-slate-900">2. Productos con Vencimiento</strong>
+                        </div>
                         <span className="text-xs text-slate-600">
                             Compra y venta directa controlando lote y caducidad.
                         </span>
@@ -162,7 +179,10 @@ export default function TabConfigFiscal({
                                 : 'border-slate-300 bg-white hover:border-slate-400'
                         }`}
                     >
-                        <strong className="text-sm text-slate-900">🪚 3. Ensamblaje / Fabricación</strong>
+                        <div className="flex items-center gap-1.5">
+                            <Boxes className="w-4 h-4 text-slate-700" />
+                            <strong className="text-sm text-slate-900">3. Ensamblaje / Fabricación</strong>
+                        </div>
                         <span className="text-xs text-slate-600">
                             Une piezas o materiales no perecederos para armar productos.
                         </span>
@@ -178,7 +198,10 @@ export default function TabConfigFiscal({
                                 : 'border-slate-300 bg-white hover:border-slate-400'
                         }`}
                     >
-                        <strong className="text-sm text-slate-900">☕ 4. Elaboración Perecedera</strong>
+                        <div className="flex items-center gap-1.5">
+                            <Coffee className="w-4 h-4 text-slate-700" />
+                            <strong className="text-sm text-slate-900">4. Elaboración Perecedera</strong>
+                        </div>
                         <span className="text-xs text-slate-600">
                             Recetas con ingredientes que tienen caducidad.
                         </span>
@@ -258,8 +281,9 @@ export default function TabConfigFiscal({
             {/* SECCIÓN CONFIGURACIÓN CONTABLE Y RÉGIMEN FISCAL */}
             <section className="bg-white p-5 rounded-lg border border-slate-200 shadow-sm">
                 <div className="flex justify-between items-center mb-1 flex-wrap gap-2">
-                    <h3 className="text-lg font-bold text-slate-900 m-0">
-                        🧾 Régimen Tributario y Configuración Fiscal (Bolivia)
+                    <h3 className="text-lg font-bold text-slate-900 m-0 flex items-center gap-2">
+                        <Receipt className="w-5 h-5 text-slate-700" />
+                        <span>Régimen Tributario y Configuración Fiscal (Bolivia)</span>
                     </h3>
                     <Badge
                         variant="outline"
@@ -270,8 +294,8 @@ export default function TabConfigFiscal({
                         }
                     >
                         {cfgRegimenTributario === 'regimen_general'
-                            ? '🏛️ Régimen General (IVA / IT)'
-                            : '📋 Régimen Simplificado (Sin IVA)'}
+                            ? 'Régimen General (IVA / IT)'
+                            : 'Régimen Simplificado (Sin IVA)'}
                     </Badge>
                 </div>
                 <p className="text-slate-600 text-sm mb-4">
@@ -291,8 +315,8 @@ export default function TabConfigFiscal({
                                 }}
                                 className="w-full h-9 rounded-md border border-slate-300 bg-white px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-slate-950"
                             >
-                                <option value="simplificado_control_interno">📋 Control Interno / Régimen Simplificado (Sin IVA)</option>
-                                <option value="regimen_general">🏛️ Régimen General (Facturación IVA / IT)</option>
+                                <option value="simplificado_control_interno">Control Interno / Régimen Simplificado (Sin IVA)</option>
+                                <option value="regimen_general">Régimen General (Facturación IVA / IT)</option>
                             </select>
                         </label>
 

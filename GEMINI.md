@@ -25,9 +25,9 @@
   - `README.md`: Punto de entrada, estructura general y comandos rápidos.
   - `docs/`: Documentación técnica (`ARQUITECTURA.md`) y checklist de pruebas (`PRUEBAS.md`).
   - `database/database.js`: Inicialización de SQLite, activación de claves foráneas (`PRAGMA foreign_keys = ON`), modo WAL, timeout y ejecución automática de migraciones.
-  - `database/schema.js`: Definición centralizada del esquema tipado con Drizzle ORM (19 tablas y relaciones completas).
+  - `database/schema.js`: Definición centralizada del esquema tipado con Drizzle ORM (20 tablas y relaciones completas, incluyendo `producto_lotes`).
   - `database/drizzle.js`: Cliente Drizzle singleton sobre `better-sqlite3` con modo WAL y timeout de 5000ms.
-  - `database/migraciones.js`: Sistema de migraciones versionado con `PRAGMA user_version` y respaldo automático previo a toda migración (`VACUUM INTO backups/caja-pre-migracion-vX-a-vY-*.db`). Toda mutación al esquema se aplica de forma transaccional e idempotente (migraciones v1 a v11).
+  - `database/migraciones.js`: Sistema de migraciones versionado con `PRAGMA user_version` y respaldo automático previo a toda migración (`VACUUM INTO backups/caja-pre-migracion-vX-a-vY-*.db`). Toda mutación al esquema se aplica de forma transaccional e idempotente (migraciones v1 a v12).
   - `server/actions/`: Capa de mutaciones protegidas mediante Server Actions (`'use server'`) validadas con `_wrapper.js`: `turnos.actions.js`, `ventas.actions.js`, `catalogo.actions.js`, `inventario.actions.js`, `admin.actions.js`.
   - `server/domain/`: Lógica pura de negocio y reglas desacopladas: `costos.js` (CPP NIC 2, cascada de recetas/combos) y `fiscal.js` (snapshot tributario, bases IVA/IT).
   - `server/repositories/`: Módulos de persistencia SQL parametrizada (`db.js`, `auth.repo.js`, `cajas.repo.js`, `catalogo.repo.js`, `configuracion.repo.js`, `inventario.repo.js`, `ventas.repo.js`, `reportes.repo.js`, `index.js`).
@@ -39,9 +39,9 @@
   - `app/api/caja/route.js`: Endpoint exclusivo `GET` con `Cache-Control: no-store` para lectura de estado inicial, catálogo y sincronización/polling de turnos.
   - `app/api/auth/route.js`: Endpoint `POST` para `login`, `logout` e `instalacion_inicial` con gestión de cookies `HttpOnly` (`pos_session`).
   - `app/api/reportes/route.js`: Endpoint administrativo `GET` para tendencias JSON, exportación CSV (`?formato=csv`) y exportación Excel (`?formato=xlsx` con 10 hojas contables).
-  - `app/admin/`: Panel de administración (`page.js`, `GraficosFinancieros.js`, `exportarPDF.js`) con subcomponentes por pestaña en `_components/` (`TabCatalogo.js`, `TabTurnosArqueos.js`, `TabUsuariosCajas.js`, `TabKardex.js`, `TabConfigFiscal.js`, `TabExportacion.js`, `TabResumen.js`).
-  - `app/caja/`: Terminal POS (`page.js`) con subcomponentes atómicos en `_components/` (`CatalogoProductos.js`, `CarritoVenta.js`, `ModalCobro.js`, `ModalModificadores.js`, `ModalArqueoCiego.js`, `ModalMovimientosEfectivo.js`, `HistorialTurno.js`, `AperturaTurno.js`, `LoginCaja.js`) y hooks en `_hooks/` (`useCarrito.js`, `useInactividad.js`).
-  - `components/ui/`: Componentes UI reutilizables de Shadcn (`badge.jsx`, `button.jsx`, `card.jsx`, `dialog.jsx`, `input.jsx`, `separator.jsx`, `table.jsx`, `tabs.jsx`).
+  - `app/admin/`: Panel de administración modular con `layout.js` y contexto global (`_context/AdminContext.js`) desacoplado en subrutas (`resumen/`, `catalogo/`, `insumos/`, `arqueos/`, `usuarios/`, `configuracion/`, `exportacion/`) con subcomponentes en `_components/` (`TabCatalogo.js`, `TabTurnosArqueos.js`, `TabUsuariosCajas.js`, `TabKardex.js`, `TabConfigFiscal.js`, `TabExportacion.js`, `TabResumen.js`, `GraficosFinancieros.js`, `exportarPDF.js`).
+  - `app/caja/`: Terminal POS modular con `layout.js` y contexto global (`_context/CajaContext.js`) desacoplado en subrutas (`pos/`, `movimientos/`) con subcomponentes atómicos en `_components/` (`CatalogoProductos.js`, `CarritoVenta.js`, `ModalCobro.js`, `ModalModificadores.js`, `ModalArqueoCiego.js`, `ModalMovimientosEfectivo.js`, `HistorialTurno.js`, `AperturaTurno.js`, `LoginCaja.js`) y hooks en `_hooks/` (`useCarrito.js`, `useInactividad.js`).
+  - `components/ui/`: Componentes UI reutilizables de Shadcn (`badge.jsx`, `button.jsx`, `card.jsx`, `dialog.jsx`, `input.jsx`, `password-input.jsx`, `separator.jsx`, `table.jsx`, `tabs.jsx`).
   - `lib/utils.js`: Utilidad central `cn` (`clsx` + `tailwind-merge`) para combinación dinámica de clases Tailwind.
   - `next.config.js`: Optimización de paquetes nativos con `serverExternalPackages` y configuración de `experimental.serverActions.allowedOrigins` (`localhost:3000`, `127.0.0.1:3000`, `*.trycloudflare.com`, `ALLOWED_ORIGINS`).
 
@@ -103,6 +103,11 @@
     - `movimientos_productos_directos` y `movimientos_insumos` registran cronológicamente `inventario_inicial`, `compra`, `venta`/`consumo_venta`, `merma`, `reingreso_anulacion` y `ajuste`, almacenando `stock_resultante` y `costo_promedio_resultante` en cada fila.
     - Los insumos métricos preservan hasta 6 decimales en `costo_por_unidad` (ej. `Bs 0.0015/ml`).
     - Funciones de auditoría `verificarIntegridadKardexDirecto()` y `verificarIntegridadKardexInsumos()` verifican que el stock actual coincida exactamente con la suma algebraica del Kardex.
+  - **Trazabilidad de Lotes y Vencimiento PEPS / FIFO (v12):**
+    - Tabla `producto_lotes` vinculada a productos directos para seguimiento de partidas perecederas con fecha de caducidad.
+    - Entrada por lote en compras y mermas imputadas a lotes específicos.
+    - Descuento en ventas con selección manual de lote o política automática PEPS (Primero en Expirar, Primero en Salir / FIFO: `ORDER BY fecha_vencimiento ASC, id ASC`).
+    - Actualización atómica con validación de concurrencia (`WHERE stock >= ?`) impidiendo existencias negativas.
 
 ## 3. Reglas Técnicas Obligatorias
 - **Compatibilidad y Reseteo de Base de Datos:** Si un rediseño del esquema de base de datos no es compatible con versiones anteriores locales, está autorizado reiniciar o eliminar la base de datos local (`caja.db`) y sus copias de seguridad para inicializar el proyecto con un esquema limpio.
@@ -114,7 +119,7 @@
 - **Manejo de fechas y zonas horarias:** Las fechas se almacenan en UTC (`CURRENT_TIMESTAMP`). Al consultar o filtrar fechas para el usuario, utilizar siempre `'localtime'` en SQLite, incluyendo las cláusulas `WHERE` (ej. `datetime(fecha_hora, 'localtime')`).
 - **Evolución del esquema:** Los cambios de esquema se realizan única y exclusivamente mediante migraciones en `database/migraciones.js`, administrando la versión con `PRAGMA user_version`.
 - **Confirmación en cambios críticos:** Antes de modificar el esquema de base de datos o la lógica de cálculo financiero, se debe explicar el impacto detalladamente al usuario y esperar su confirmación explícita.
-- **SQL nativo y Drizzle ORM:** El proyecto cuenta con Drizzle ORM configurado sobre `better-sqlite3` (`database/schema.js`, `database/drizzle.js`) coexistiendo con las consultas SQL parametrizadas en `server/repositories/db.js`. Toda consulta tipada puede apoyarse en `drizzleDb` y el esquema centralizado de 19 tablas, manteniendo control absoluto de transacciones y modo WAL.
+- **SQL nativo y Drizzle ORM:** El proyecto cuenta con Drizzle ORM configurado sobre `better-sqlite3` (`database/schema.js`, `database/drizzle.js`) coexistiendo con las consultas SQL parametrizadas en `server/repositories/db.js`. Toda consulta tipada puede apoyarse en `drizzleDb` y el esquema centralizado de 20 tablas, manteniendo control absoluto de transacciones y modo WAL.
 - **Control de Versiones y Operaciones en Git (Estrictamente Bajo Demanda):**
   - **Ejecución Bajo Demanda (Ahorro de Tokens):** La IA conoce perfectamente todos los comandos y procedimientos de Git local, pero **NO** debe ejecutar `git add`, `git commit` ni operaciones de repositorio automáticamente tras cada cambio de código. Solo ejecutará acciones en Git cuando el usuario lo solicite expresamente (ej. *"haz commit"*, *"guarda los cambios en el repositorio"*, *"prepara el commit"*).
   - **Operaciones Locales Permitidas a la IA:** Cuando el usuario lo solicite: inspeccionar el árbol (`git status`, `git diff`, `git log`), crear y cambiar de ramas (`git branch`, `git checkout`, `git switch`), preparar archivos (`git add`) y redactar commits atómicos y descriptivos (`git commit`).

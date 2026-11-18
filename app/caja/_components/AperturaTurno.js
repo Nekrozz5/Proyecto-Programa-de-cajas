@@ -5,6 +5,7 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Store, KeyRound, ArrowRight, User } from 'lucide-react';
 import { abrirTurnoAction } from '../../../server/actions/turnos.actions';
 
 export default function AperturaTurno({
@@ -54,8 +55,10 @@ export default function AperturaTurno({
     return (
         <Card className="max-w-lg mx-auto shadow-sm border-slate-200 mt-8 mb-8">
             <CardHeader className="p-5 pb-3 border-b border-slate-100">
-                <div className="flex items-center gap-2">
-                    <span className="text-xl">🏪</span>
+                <div className="flex items-center gap-2.5">
+                    <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-sky-50 text-sky-600 border border-sky-100">
+                        <Store className="w-5 h-5" />
+                    </div>
                     <CardTitle className="text-xl font-bold text-slate-900 tracking-tight">
                         Estado: Sin Turno Abierto
                     </CardTitle>
@@ -66,7 +69,7 @@ export default function AperturaTurno({
                 {!puedeAbrirCaja ? (
                     <div className="bg-amber-50 border border-amber-200 text-amber-900 p-4 rounded-xl space-y-2">
                         <div className="flex items-center gap-2 font-bold text-sm">
-                            <span>🔒</span>
+                            <KeyRound className="w-4 h-4 text-amber-700" />
                             <span>Reapertura Restringida al Administrador</span>
                         </div>
                         <p className="text-xs text-amber-800 leading-relaxed">
@@ -77,7 +80,10 @@ export default function AperturaTurno({
                 ) : (
                     <form onSubmit={handleAbrirCaja} className="space-y-4">
                         <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-600 flex items-center justify-between">
-                            <span>Abriendo turno con:</span>
+                            <span className="flex items-center gap-1.5">
+                                <User className="w-3.5 h-3.5 text-slate-400" />
+                                <span>Abriendo turno con:</span>
+                            </span>
                             <div className="flex items-center gap-1.5">
                                 <strong className="text-slate-900 font-semibold">{usuarioActual?.nombre}</strong>
                                 <Badge variant="secondary" className="text-[10px] bg-slate-200 text-slate-700">
@@ -137,7 +143,10 @@ export default function AperturaTurno({
                                     <span>Abriendo turno...</span>
                                 </span>
                             ) : (
-                                'Abrir Turno de Caja'
+                                <span className="flex items-center justify-center gap-2">
+                                    <span>Abrir Turno de Caja</span>
+                                    <ArrowRight className="w-4 h-4" />
+                                </span>
                             )}
                         </Button>
                     </form>

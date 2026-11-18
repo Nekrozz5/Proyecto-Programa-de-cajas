@@ -5,6 +5,13 @@ import {
     registrarEgresoAction,
     registrarIngresoEfectivoAction
 } from '../../../server/actions/ventas.actions';
+import {
+    ArrowDownCircle,
+    ArrowUpCircle,
+    Banknote,
+    Receipt,
+    X
+} from 'lucide-react';
 
 export default function ModalMovimientosEfectivo({
     isOpen = true,
@@ -148,7 +155,7 @@ export default function ModalMovimientosEfectivo({
                             : 'text-slate-600 hover:text-slate-900'
                     }`}
                 >
-                    <span>📥</span>
+                    <ArrowDownCircle className="w-4 h-4 text-emerald-600" />
                     <span>Ingreso de Sencillo</span>
                 </button>
                 <button
@@ -160,7 +167,7 @@ export default function ModalMovimientosEfectivo({
                             : 'text-slate-600 hover:text-slate-900'
                     }`}
                 >
-                    <span>💸</span>
+                    <ArrowUpCircle className="w-4 h-4 text-rose-600" />
                     <span>Salida / Egreso</span>
                 </button>
             </div>
@@ -173,7 +180,10 @@ export default function ModalMovimientosEfectivo({
                     </p>
                     <form onSubmit={handleRegistrarIngreso} className="space-y-3.5 text-slate-800">
                         <label className="text-xs font-bold text-slate-700 flex flex-col gap-1">
-                            <span>Monto en Efectivo que Entra al Cajón (Bs):</span>
+                            <span className="flex items-center gap-1.5">
+                                <Banknote className="w-4 h-4 text-emerald-600" />
+                                <span>Monto en Efectivo que Entra al Cajón (Bs):</span>
+                            </span>
                             <input
                                 type="number"
                                 step="0.01"
@@ -193,7 +203,7 @@ export default function ModalMovimientosEfectivo({
                                 placeholder="Ej. Aporte del director para sencillo, cambio de billetes grandes..."
                                 value={motivoIngresoEfectivo}
                                 onChange={(e) => setMotivoIngresoEfectivo(e.target.value)}
-                                className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-sm text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-blue-400"
+                                className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-sm text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-sky-400"
                             />
                         </label>
                         <div className="flex gap-2.5 pt-2 border-t border-slate-200 justify-end items-center">
@@ -223,7 +233,10 @@ export default function ModalMovimientosEfectivo({
                     </p>
                     <form onSubmit={handleRegistrarEgreso} className="space-y-3.5 text-slate-800">
                         <label className="text-xs font-bold text-slate-700 flex flex-col gap-1">
-                            <span>Monto que sale de Caja (Bs):</span>
+                            <span className="flex items-center gap-1.5">
+                                <Banknote className="w-4 h-4 text-rose-600" />
+                                <span>Monto que sale de Caja (Bs):</span>
+                            </span>
                             <input
                                 type="number"
                                 step="0.01"
@@ -232,7 +245,7 @@ export default function ModalMovimientosEfectivo({
                                 placeholder="0.00"
                                 value={montoEgreso}
                                 onChange={(e) => setMontoEgreso(e.target.value)}
-                                className="w-full px-3 py-2 rounded-lg border-2 border-slate-400 bg-white text-base font-bold text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-blue-400"
+                                className="w-full px-3 py-2 rounded-lg border-2 border-slate-400 bg-white text-base font-bold text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-sky-400"
                             />
                         </label>
 
@@ -246,7 +259,7 @@ export default function ModalMovimientosEfectivo({
                                 <select
                                     value={metodoEgreso}
                                     onChange={(e) => setMetodoEgreso(e.target.value)}
-                                    className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-sm text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-blue-400"
+                                    className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-sm text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-sky-400"
                                 >
                                     <option value="efectivo">Efectivo del Cajón</option>
                                     <option value="qr">Transferencia / QR (Solo Admin)</option>
@@ -259,13 +272,13 @@ export default function ModalMovimientosEfectivo({
                             <select
                                 value={categoriaEgreso}
                                 onChange={(e) => setCategoriaEgreso(e.target.value)}
-                                className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-sm text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-blue-400"
+                                className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-sm text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-sky-400"
                             >
-                                <option value="gasto_operativo">🧹 Gasto Operativo Menor (Hielo, limpieza, transporte...)</option>
-                                <option value="compra_insumo">🧱 Compra Urgente de Insumo / Mercadería</option>
-                                <option value="pago_proveedor">🚚 Pago a Proveedor / Distribuidora</option>
-                                <option value="retiro_dueno">👤 Retiro Personal del Dueño / Socio</option>
-                                <option value="otro">📋 Otro Egreso Autorizado</option>
+                                <option value="gasto_operativo">Gasto Operativo Menor (Hielo, limpieza, transporte...)</option>
+                                <option value="compra_insumo">Compra Urgente de Insumo / Mercadería</option>
+                                <option value="pago_proveedor">Pago a Proveedor / Distribuidora</option>
+                                <option value="retiro_dueno">Retiro Personal del Dueño / Socio</option>
+                                <option value="otro">Otro Egreso Autorizado</option>
                             </select>
                         </label>
 
@@ -274,11 +287,14 @@ export default function ModalMovimientosEfectivo({
                             Number(cajaAbierta?.habilita_respaldo_fiscal ?? 1) === 1) && (
                             <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-2.5">
                                 <label className="text-xs font-bold text-slate-700 flex flex-col gap-1">
-                                    <span>🧾 Tipo de Respaldo Contable:</span>
+                                    <span className="flex items-center gap-1.5">
+                                        <Receipt className="w-3.5 h-3.5 text-slate-600" />
+                                        <span>Tipo de Respaldo Contable:</span>
+                                    </span>
                                     <select
                                         value={tipoComprobanteEgreso}
                                         onChange={(e) => setTipoComprobanteEgreso(e.target.value)}
-                                        className="w-full px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-sm text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-blue-400"
+                                        className="w-full px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-sm text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-sky-400"
                                     >
                                         <option value="recibo">Recibo / Nota de Venta Interna</option>
                                         <option value="factura">Factura Fiscal (Crédito Fiscal IVA)</option>
@@ -290,7 +306,7 @@ export default function ModalMovimientosEfectivo({
                                     placeholder="Nombre del Proveedor / Comercio (Opcional)"
                                     value={nombreProveedorEgreso}
                                     onChange={(e) => setNombreProveedorEgreso(e.target.value)}
-                                    className="w-full px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-xs text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-blue-400"
+                                    className="w-full px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-xs text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-sky-400"
                                 />
                                 {tipoComprobanteEgreso === 'factura' && (
                                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
@@ -300,7 +316,7 @@ export default function ModalMovimientosEfectivo({
                                             placeholder="NIT del Proveedor"
                                             value={nitProveedorEgreso}
                                             onChange={(e) => setNitProveedorEgreso(e.target.value)}
-                                            className="w-full px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-xs text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-blue-400"
+                                            className="w-full px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-xs text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-sky-400"
                                         />
                                         <input
                                             type="text"
@@ -308,7 +324,7 @@ export default function ModalMovimientosEfectivo({
                                             placeholder="N° de Factura"
                                             value={nroFacturaEgreso}
                                             onChange={(e) => setNroFacturaEgreso(e.target.value)}
-                                            className="w-full px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-xs text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-blue-400"
+                                            className="w-full px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-xs text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-sky-400"
                                         />
                                     </div>
                                 )}
@@ -323,7 +339,7 @@ export default function ModalMovimientosEfectivo({
                                 placeholder="Ej. Compra de hielo, botellón de agua, bolsas..."
                                 value={motivoEgreso}
                                 onChange={(e) => setMotivoEgreso(e.target.value)}
-                                className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-sm text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-blue-400"
+                                className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-sm text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-sky-400"
                             />
                         </label>
 
@@ -357,8 +373,12 @@ export default function ModalMovimientosEfectivo({
                 <div className="bg-white rounded-xl shadow-2xl border border-slate-200 max-w-[540px] w-full max-h-[92vh] flex flex-col overflow-hidden">
                     <div className="px-5 py-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center shrink-0">
                         <div>
-                            <h3 className="text-lg font-bold text-slate-900 flex items-center gap-1.5">
-                                <span>{pestaña === 'ingreso' ? '📥' : '💸'}</span>
+                            <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                                {pestaña === 'ingreso' ? (
+                                    <ArrowDownCircle className="w-5 h-5 text-emerald-600" />
+                                ) : (
+                                    <ArrowUpCircle className="w-5 h-5 text-rose-600" />
+                                )}
                                 <span>{pestaña === 'ingreso' ? 'Ingresar Efectivo / Sencillo' : 'Registrar Egreso de Caja'}</span>
                             </h3>
                             <div className="text-xs text-slate-500 mt-0.5">
@@ -369,10 +389,10 @@ export default function ModalMovimientosEfectivo({
                             <button
                                 type="button"
                                 onClick={onClose}
-                                className="text-slate-400 hover:text-slate-600 hover:bg-slate-200/60 rounded-md p-1.5 transition-colors cursor-pointer text-lg leading-none"
+                                className="text-slate-400 hover:text-slate-600 hover:bg-slate-200/60 rounded-md p-1.5 transition-colors cursor-pointer"
                                 aria-label="Cerrar modal"
                             >
-                                ✕
+                                <X className="w-5 h-5" />
                             </button>
                         )}
                     </div>
@@ -386,8 +406,12 @@ export default function ModalMovimientosEfectivo({
 
     return (
         <section className="bg-white rounded-xl border border-slate-200 shadow-xs p-6 max-w-[540px]">
-            <h2 className="text-lg font-bold text-slate-900 mb-4 flex items-center gap-1.5">
-                <span>{pestaña === 'ingreso' ? '📥' : '💸'}</span>
+            <h2 className="text-lg font-bold text-slate-900 mb-4 flex items-center gap-2">
+                {pestaña === 'ingreso' ? (
+                    <ArrowDownCircle className="w-5 h-5 text-emerald-600" />
+                ) : (
+                    <ArrowUpCircle className="w-5 h-5 text-rose-600" />
+                )}
                 <span>{pestaña === 'ingreso' ? 'Ingresar Efectivo / Sencillo' : 'Registrar Egreso de Caja'}</span>
             </h2>
             {contenidoFormulario}

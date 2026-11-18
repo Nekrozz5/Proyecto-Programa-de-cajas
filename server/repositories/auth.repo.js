@@ -280,7 +280,7 @@ function validarPoliticaPin(pin, rol) {
     if (pinStr.length < minimo) {
         const etiqueta = rol === 'user'
             ? 'el PIN de un Cajero'
-            : `la contraseña de un perfil ${rol === 'superadmin' ? 'Super Admin' : rol === 'developer' ? 'Developer' : 'Administrador'}`;
+            : `la contraseña de un perfil ${rol === 'superadmin' ? 'Propietario' : rol === 'developer' ? 'Desarrollador' : 'Administrador'}`;
         throw new Error(`Contraseña / PIN demasiado corto: ${etiqueta} debe tener al menos ${minimo} caracteres.`);
     }
     return pinStr;

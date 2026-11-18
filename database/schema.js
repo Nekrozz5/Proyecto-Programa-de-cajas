@@ -275,6 +275,17 @@ const movimientosInsumos = sqliteTable('movimientos_insumos', {
     fechaHora: text('fecha_hora').default(sql`CURRENT_TIMESTAMP`)
 });
 
+// 20. Lotes de Productos con Fecha de Vencimiento
+const productoLotes = sqliteTable('producto_lotes', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    productoId: integer('producto_id').notNull().references(() => productos.id, { onDelete: 'cascade' }),
+    fechaVencimiento: text('fecha_vencimiento').notNull(),
+    stock: real('stock').notNull().default(0),
+    costoUnitario: real('costo_unitario').notNull().default(0),
+    activo: integer('activo').notNull().default(1),
+    creadoEn: text('creado_en').default(sql`CURRENT_TIMESTAMP`)
+});
+
 // ==========================================
 // DEFINICIONES DE RELACIONES RELACIONALES (DRIZZLE RELATIONS)
 // ==========================================
@@ -285,7 +296,12 @@ const productosRelations = relations(productos, ({ many }) => ({
     componenteDeCombos: many(comboComponentes, { relationName: 'esComponente' }),
     gruposModificadores: many(productoGruposModificadores),
     detallesVenta: many(detalleMovimientos),
-    kardexDirecto: many(movimientosProductosDirectos)
+    kardexDirecto: many(movimientosProductosDirectos),
+    lotes: many(productoLotes)
+}));
+
+const productoLotesRelations = relations(productoLotes, ({ one }) => ({
+    producto: one(productos, { fields: [productoLotes.productoId], references: [productos.id] })
 }));
 
 const insumosRelations = relations(insumos, ({ many }) => ({
@@ -364,6 +380,7 @@ module.exports = {
     detalleMovimientosModificadores,
     movimientosProductosDirectos,
     movimientosInsumos,
+    productoLotes,
     // Relaciones
     productosRelations,
     insumosRelations,
@@ -375,5 +392,6 @@ module.exports = {
     cajasRelations,
     movimientosRelations,
     movimientosPagosRelations,
-    detalleMovimientosRelations
+    detalleMovimientosRelations,
+    productoLotesRelations
 };

@@ -26,7 +26,8 @@ export function useCarrito({ onError, onLimpiarAlertas } = {}) {
     const agregarAlCarrito = useCallback((prod, opcionesElegidas = []) => {
         emitLimpiarAlertas();
         const sortedModIds = opcionesElegidas.map((o) => o.id).sort((a, b) => a - b);
-        const itemKey = `${prod.id}__${sortedModIds.join('_')}`;
+        const loteKey = prod.loteId ? `lote_${prod.loteId}` : 'lote_auto';
+        const itemKey = `${prod.id}__${loteKey}__${sortedModIds.join('_')}`;
 
         const sumaAdicionales = opcionesElegidas.reduce(
             (sum, o) => sum + (Number(o.precio_adicional) || 0),
@@ -43,11 +44,11 @@ export function useCarrito({ onError, onLimpiarAlertas } = {}) {
                 : Infinity;
 
             const totalProdEnCarrito = prev
-                .filter((it) => it.productoId === prod.id)
+                .filter((it) => it.productoId === prod.id && (!prod.loteId || it.loteId === prod.loteId))
                 .reduce((sum, it) => sum + (Number(it.cantidad) || 0), 0);
 
             if (maxDisponible !== Infinity && (totalProdEnCarrito + 1) > maxDisponible) {
-                emitError(`⚠️ Stock máximo alcanzado para "${prod.nombre}" (${maxDisponible} productos disponibles en total).`);
+                emitError(`Stock máximo alcanzado para "${prod.nombre}"${prod.fechaVencimiento ? ` (Lote: ${prod.fechaVencimiento})` : ''} (${maxDisponible} productos disponibles).`);
                 return prev;
             }
 
@@ -64,6 +65,8 @@ export function useCarrito({ onError, onLimpiarAlertas } = {}) {
                 {
                     itemKey,
                     productoId: prod.id,
+                    loteId: prod.loteId || null,
+                    fechaVencimiento: prod.fechaVencimiento || prod.loteVencimiento || null,
                     nombre: prod.nombre,
                     precio: precioUnitario,
                     precioBase: prod.precio,
@@ -102,11 +105,11 @@ export function useCarrito({ onError, onLimpiarAlertas } = {}) {
             }
 
             const totalProdEnCarrito = prev
-                .filter((it) => it.productoId === item.productoId)
+                .filter((it) => it.productoId === item.productoId && (!item.loteId || it.loteId === item.loteId))
                 .reduce((sum, it) => (it.itemKey || String(it.productoId)) === String(itemKey) ? sum + nuevaCantidad : sum + (Number(it.cantidad) || 0), 0);
 
             if (maxDisponible !== Infinity && totalProdEnCarrito > maxDisponible) {
-                emitError(`⚠️ Límite alcanzado: La cantidad máxima disponible para "${item.nombre}" es de ${maxDisponible} productos.`);
+                emitError(`Límite alcanzado: La cantidad máxima disponible para "${item.nombre}"${item.fechaVencimiento ? ` (Lote: ${item.fechaVencimiento})` : ''} es de ${maxDisponible} productos.`);
                 return prev;
             }
 
@@ -156,11 +159,11 @@ export function useCarrito({ onError, onLimpiarAlertas } = {}) {
             }
 
             const totalProdEnCarrito = prev
-                .filter((it) => it.productoId === item.productoId)
+                .filter((it) => it.productoId === item.productoId && (!item.loteId || it.loteId === item.loteId))
                 .reduce((sum, it) => (it.itemKey || String(it.productoId)) === String(itemKey) ? sum + num : sum + (Number(it.cantidad) || 0), 0);
 
             if (maxDisponible !== Infinity && totalProdEnCarrito > maxDisponible) {
-                emitError(`⚠️ Cantidad máxima superada: Para "${item.nombre}" el límite máximo disponible es de ${maxDisponible} productos.`);
+                emitError(`Cantidad máxima superada: Para "${item.nombre}"${item.fechaVencimiento ? ` (Lote: ${item.fechaVencimiento})` : ''} el límite máximo disponible es de ${maxDisponible} productos.`);
                 return prev.map((i) =>
                     (i.itemKey || String(i.productoId)) === String(itemKey)
                         ? { ...i, cantidadTexto: '', cantidad: 0 }

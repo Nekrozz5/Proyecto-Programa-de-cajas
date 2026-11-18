@@ -4,12 +4,15 @@ import { revalidatePath } from 'next/cache';
 import { ejecutarAction } from './_wrapper';
 import {
     crearInsumo,
+    actualizarInsumo,
+    eliminarInsumo,
     registrarCompraProductoDirecto,
     registrarMermaProductoDirecto,
     registrarCompraInsumo,
     registrarMermaInsumo,
     verificarIntegridadKardexDirecto,
-    verificarIntegridadKardexInsumos
+    verificarIntegridadKardexInsumos,
+    validarFormatoFechaYYYYMMDD
 } from '../repositories/inventario.repo';
 
 const ROLES_ADMIN = ['admin', 'superadmin', 'developer'];
@@ -19,11 +22,15 @@ const ROLES_ADMIN = ['admin', 'superadmin', 'developer'];
  */
 export async function comprarProductoDirectoAction(datos) {
     return ejecutarAction(ROLES_ADMIN, async (usuario) => {
+        const fechaVencimientoValida = datos.fechaVencimiento
+            ? validarFormatoFechaYYYYMMDD(datos.fechaVencimiento)
+            : null;
+
         const res = await registrarCompraProductoDirecto(
             Number(datos.productoId),
             Number(datos.cantidadComprada),
             Number(datos.costoTotalCompra),
-            datos.fechaVencimiento || null,
+            fechaVencimientoValida,
             {
                 proveedorNombre: datos.proveedorNombre || datos.distribuidora || null,
                 proveedorNit: datos.proveedorNit || null,
@@ -132,5 +139,32 @@ export async function crearInsumoAction(datos) {
         revalidatePath('/admin');
         revalidatePath('/caja');
         return { insumoId: id };
+    });
+}
+
+/**
+ * Actualiza los datos de un insumo (nombre, unidad de medida, stock de seguridad, tiempo de entrega, ajustes de stock/costo).
+ */
+export async function actualizarInsumoAction(datos) {
+    return ejecutarAction(ROLES_ADMIN, async (usuario) => {
+        const insumoId = Number(datos.insumoId || datos.id);
+        const resultado = await actualizarInsumo(insumoId, datos, usuario.id);
+        revalidatePath('/admin');
+        revalidatePath('/caja');
+        return resultado;
+    });
+}
+
+/**
+ * Da de baja lógica a un insumo con justificación obligatoria.
+ */
+export async function eliminarInsumoAction(datos) {
+    return ejecutarAction(ROLES_ADMIN, async (usuario) => {
+        const insumoId = Number(datos.insumoId || datos.id);
+        const motivo = datos.motivo;
+        const resultado = await eliminarInsumo(insumoId, motivo, usuario.id);
+        revalidatePath('/admin');
+        revalidatePath('/caja');
+        return resultado;
     });
 }

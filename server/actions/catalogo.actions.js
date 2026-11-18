@@ -5,6 +5,8 @@ import { ejecutarAction } from './_wrapper';
 import {
     crearCategoria,
     crearProductoConInsumos,
+    actualizarProducto,
+    eliminarProducto,
     asignarIngredienteReceta,
     crearGrupoModificadores,
     actualizarGrupoModificadores,
@@ -33,6 +35,32 @@ export async function crearCategoriaAction(datos) {
 export async function crearProductoAction(datos) {
     return ejecutarAction(ROLES_ADMIN, async (usuario) => {
         const resultado = await crearProductoConInsumos({ ...datos, usuarioId: usuario.id });
+        revalidatePath('/admin');
+        revalidatePath('/caja');
+        return resultado;
+    });
+}
+
+/**
+ * Actualiza los datos de un producto (nombre, precio, categoría, stock mínimo, receta o combo).
+ */
+export async function actualizarProductoAction(datos) {
+    return ejecutarAction(ROLES_ADMIN, async (usuario) => {
+        const prodId = Number(datos.productoId || datos.id);
+        const resultado = await actualizarProducto(prodId, datos, usuario.id);
+        revalidatePath('/admin');
+        revalidatePath('/caja');
+        return resultado;
+    });
+}
+
+/**
+ * Da de baja lógica a un producto o receta del catálogo.
+ */
+export async function eliminarProductoAction(datos) {
+    return ejecutarAction(ROLES_ADMIN, async (usuario) => {
+        const prodId = Number(datos.productoId || datos.id);
+        const resultado = await eliminarProducto(prodId, usuario.id);
         revalidatePath('/admin');
         revalidatePath('/caja');
         return resultado;

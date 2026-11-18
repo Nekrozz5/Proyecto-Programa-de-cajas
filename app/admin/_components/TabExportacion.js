@@ -4,6 +4,15 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import { 
+    Download, 
+    Calendar, 
+    X, 
+    Info, 
+    FileSpreadsheet, 
+    FileText, 
+    FileDown 
+} from 'lucide-react';
 import { exportarReportePDF } from '../exportarPDF';
 
 export default function TabExportacion({
@@ -27,7 +36,8 @@ export default function TabExportacion({
             {/* Encabezado de la Sección */}
             <section className="bg-white p-5 rounded-lg border border-slate-200 shadow-sm">
                 <h2 className="text-xl font-bold text-slate-900 m-0 mb-1.5 flex items-center gap-2">
-                    📥 Centro de Exportación de Reportes
+                    <Download className="w-5 h-5 text-slate-700" />
+                    <span>Centro de Exportación de Reportes</span>
                 </h2>
                 <p className="text-slate-600 text-sm m-0">
                     Exporta y audita los datos operativos y financieros del negocio en los 3 formatos oficiales: <strong>Excel (.xlsx)</strong>, <strong>PDF de Auditoría de Turno</strong> y <strong>CSV Contable</strong>. Puedes aplicar filtros por rango de fechas, operador y estación física de caja.
@@ -38,7 +48,8 @@ export default function TabExportacion({
             <section className="bg-slate-50 p-5 rounded-lg border border-slate-200 shadow-sm">
                 <div className="flex justify-between items-center mb-3.5 flex-wrap gap-2">
                     <h3 className="m-0 text-sm font-bold text-slate-900 flex items-center gap-1.5">
-                        📅 Filtros de Exportación (Excel y CSV)
+                        <Calendar className="w-4 h-4 text-slate-600" />
+                        <span>Filtros de Exportación (Excel y CSV)</span>
                     </h3>
                     {(filtroExportDesde || filtroExportHasta || filtroExportUsuarioId || filtroExportCajaFisicaId) && (
                         <Button
@@ -51,9 +62,10 @@ export default function TabExportacion({
                                 setFiltroExportUsuarioId('');
                                 setFiltroExportCajaFisicaId('');
                             }}
-                            className="h-7 text-xs font-semibold"
+                            className="h-7 text-xs font-semibold gap-1"
                         >
-                            ✕ Limpiar Filtros
+                            <X className="w-3.5 h-3.5" />
+                            <span>Limpiar Filtros</span>
                         </Button>
                     )}
                 </div>
@@ -116,13 +128,15 @@ export default function TabExportacion({
                     </div>
                 </div>
                 {(filtroExportDesde || filtroExportHasta || filtroExportUsuarioId || filtroExportCajaFisicaId) && (
-                    <div className="mt-3 text-xs text-sky-800 bg-sky-50 border border-sky-200 px-3 py-2 rounded-md flex flex-wrap gap-1">
-                        ℹ️ Filtro activo: {[
+                    <div className="mt-3 text-xs text-sky-800 bg-sky-50 border border-sky-200 px-3 py-2 rounded-md flex items-center flex-wrap gap-2">
+                        <Info className="w-4 h-4 text-sky-700 shrink-0" />
+                        <span className="font-semibold">Filtro activo:</span>
+                        <span>{[
                             filtroExportDesde ? `Desde: ${filtroExportDesde}` : '',
                             filtroExportHasta ? `Hasta: ${filtroExportHasta}` : '',
                             filtroExportUsuarioId ? `Operador: ${(datos?.usuarios || []).find(u => Number(u.id) === Number(filtroExportUsuarioId))?.nombre || filtroExportUsuarioId}` : '',
                             filtroExportCajaFisicaId ? `Estación: ${(datos?.cajasFisicas || []).find(cf => Number(cf.id) === Number(filtroExportCajaFisicaId))?.nombre || filtroExportCajaFisicaId}` : ''
-                        ].filter(Boolean).join(' | ')}
+                        ].filter(Boolean).join(' | ')}</span>
                     </div>
                 )}
             </section>
@@ -133,8 +147,9 @@ export default function TabExportacion({
                 <section className="bg-white p-5 rounded-lg border border-slate-200 shadow-sm flex flex-col justify-between border-t-4 border-t-emerald-600 gap-4">
                     <div>
                         <div className="flex justify-between items-center mb-2">
-                            <h3 className="m-0 text-emerald-800 font-bold text-lg">
-                                📊 Excel Contable (.xlsx)
+                            <h3 className="m-0 text-emerald-800 font-bold text-lg flex items-center gap-2">
+                                <FileSpreadsheet className="w-5 h-5 text-emerald-600" />
+                                <span>Excel Contable (.xlsx)</span>
                             </h3>
                             <Badge className="bg-emerald-100 text-emerald-800 hover:bg-emerald-100 border border-emerald-300 font-bold">
                                 10 Hojas Contables
@@ -153,9 +168,10 @@ export default function TabExportacion({
                     </div>
                     <a
                         href={`/api/reportes?formato=xlsx${filtroExportDesde ? `&desde=${filtroExportDesde}` : ''}${filtroExportHasta ? `&hasta=${filtroExportHasta}` : ''}${filtroExportUsuarioId ? `&usuarioId=${filtroExportUsuarioId}` : ''}${filtroExportCajaFisicaId ? `&cajaFisicaId=${filtroExportCajaFisicaId}` : ''}`}
-                        className="w-full text-center py-2.5 px-4 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm shadow transition-colors block"
+                        className="w-full text-center py-2.5 px-4 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm shadow transition-colors flex items-center justify-center gap-2"
                     >
-                        📊 Descargar Excel Contable (.xlsx)
+                        <FileSpreadsheet className="w-4 h-4" />
+                        <span>Descargar Excel Contable (.xlsx)</span>
                     </a>
                 </section>
 
@@ -163,8 +179,9 @@ export default function TabExportacion({
                 <section className="bg-white p-5 rounded-lg border border-slate-200 shadow-sm flex flex-col justify-between border-t-4 border-t-red-600 gap-4">
                     <div>
                         <div className="flex justify-between items-center mb-2">
-                            <h3 className="m-0 text-red-800 font-bold text-lg">
-                                📄 PDF de Auditoría de Turno
+                            <h3 className="m-0 text-red-800 font-bold text-lg flex items-center gap-2">
+                                <FileText className="w-5 h-5 text-red-600" />
+                                <span>PDF de Auditoría de Turno</span>
                             </h3>
                             <Badge variant="destructive" className="bg-red-100 text-red-800 hover:bg-red-100 border border-red-300 font-bold">
                                 Turno #{datos?.cajaAuditada?.id || '—'}
@@ -216,9 +233,10 @@ export default function TabExportacion({
                                 desglosePagos: datos?.desglosePagos
                             })
                         }
-                        className="w-full bg-red-600 hover:bg-red-700 text-white font-bold text-sm py-2.5 shadow"
+                        className="w-full bg-red-600 hover:bg-red-700 text-white font-bold text-sm py-2.5 shadow flex items-center justify-center gap-2"
                     >
-                        📄 Descargar PDF (Turno #{datos?.cajaAuditada?.id || '—'})
+                        <FileText className="w-4 h-4" />
+                        <span>Descargar PDF (Turno #{datos?.cajaAuditada?.id || '—'})</span>
                     </Button>
                 </section>
 
@@ -226,8 +244,9 @@ export default function TabExportacion({
                 <section className="bg-white p-5 rounded-lg border border-slate-200 shadow-sm flex flex-col justify-between border-t-4 border-t-sky-600 gap-4">
                     <div>
                         <div className="flex justify-between items-center mb-2">
-                            <h3 className="m-0 text-sky-800 font-bold text-lg">
-                                📥 CSV Contable
+                            <h3 className="m-0 text-sky-800 font-bold text-lg flex items-center gap-2">
+                                <FileDown className="w-5 h-5 text-sky-600" />
+                                <span>CSV Contable</span>
                             </h3>
                             <Badge variant="outline" className="bg-sky-50 text-sky-800 border-sky-300 font-bold">
                                 Texto Plano UTF-8
@@ -245,9 +264,10 @@ export default function TabExportacion({
                     </div>
                     <a
                         href={`/api/reportes?formato=csv${filtroExportDesde ? `&desde=${filtroExportDesde}` : ''}${filtroExportHasta ? `&hasta=${filtroExportHasta}` : ''}${filtroExportUsuarioId ? `&usuarioId=${filtroExportUsuarioId}` : ''}${filtroExportCajaFisicaId ? `&cajaFisicaId=${filtroExportCajaFisicaId}` : ''}`}
-                        className="w-full text-center py-2.5 px-4 rounded-md bg-sky-600 hover:bg-sky-700 text-white font-bold text-sm shadow transition-colors block"
+                        className="w-full text-center py-2.5 px-4 rounded-md bg-sky-600 hover:bg-sky-700 text-white font-bold text-sm shadow transition-colors flex items-center justify-center gap-2"
                     >
-                        📥 Descargar CSV Contable
+                        <FileDown className="w-4 h-4" />
+                        <span>Descargar CSV Contable</span>
                     </a>
                 </section>
             </div>

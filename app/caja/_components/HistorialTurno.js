@@ -13,6 +13,7 @@ import {
     TableHeader,
     TableRow
 } from '@/components/ui/table';
+import { Receipt, RefreshCw, Ban, Printer, FileText, CheckCircle2 } from 'lucide-react';
 import { anularVentaAction } from '../../../server/actions/ventas.actions';
 
 export default function HistorialTurno({
@@ -61,7 +62,7 @@ export default function HistorialTurno({
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                     <div>
                         <CardTitle className="text-xl font-bold text-slate-900 tracking-tight flex items-center gap-2">
-                            <span>📋</span>
+                            <Receipt className="w-5 h-5 text-slate-700" />
                             <span>Historial de Movimientos del Turno #{cajaAbierta?.id}</span>
                         </CardTitle>
                         <p className="text-xs text-slate-500 mt-1">
@@ -72,9 +73,10 @@ export default function HistorialTurno({
                         type="button"
                         variant="outline"
                         onClick={onActualizar}
-                        className="min-h-[44px] px-4 text-xs font-semibold border-slate-300 hover:bg-slate-50 self-start sm:self-auto"
+                        className="min-h-[44px] px-4 text-xs font-semibold border-slate-300 hover:bg-slate-50 self-start sm:self-auto gap-1.5"
                     >
-                        🔄 Actualizar
+                        <RefreshCw className="w-3.5 h-3.5" />
+                        <span>Actualizar</span>
                     </Button>
                 </div>
             </CardHeader>
@@ -144,11 +146,16 @@ export default function HistorialTurno({
                                             </TableCell>
                                             <TableCell>
                                                 {m.tipo_comprobante === 'factura' ? (
-                                                    <span className="text-blue-700 font-semibold">
-                                                        🧾 Fact. #{m.nro_factura || '-'} ({m.cliente_nit || m.proveedor_nit || 'S/N'})
-                                                    </span>
+                                                    <Badge variant="outline" className="border-blue-200 bg-blue-50 text-blue-700 font-semibold gap-1 text-[11px] py-0.5">
+                                                        <FileText className="w-3 h-3 text-blue-600" />
+                                                        <span>Fact. #{m.nro_factura || '-'}</span>
+                                                        <span className="text-blue-500 text-[10px] font-normal">({m.cliente_nit || m.proveedor_nit || 'S/N'})</span>
+                                                    </Badge>
                                                 ) : (
-                                                    <span className="text-slate-500">{m.tipo_comprobante || 'recibo'}</span>
+                                                    <Badge variant="outline" className="border-slate-200 bg-slate-50 text-slate-600 font-medium gap-1 text-[11px] py-0.5">
+                                                        <Receipt className="w-3 h-3 text-slate-400" />
+                                                        <span className="capitalize">{m.tipo_comprobante || 'recibo'}</span>
+                                                    </Badge>
                                                 )}
                                             </TableCell>
                                             <TableCell>
@@ -175,13 +182,23 @@ export default function HistorialTurno({
                                             <TableCell>
                                                 <Badge
                                                     variant="secondary"
-                                                    className={`text-[10px] font-bold ${
+                                                    className={`text-[10px] font-bold gap-1 ${
                                                         esAnulado
                                                             ? 'bg-rose-100 text-rose-800'
                                                             : 'bg-emerald-100 text-emerald-800'
                                                     }`}
                                                 >
-                                                    {m.estado.toUpperCase()}
+                                                    {esAnulado ? (
+                                                        <>
+                                                            <Ban className="w-3 h-3" />
+                                                            <span>ANULADO</span>
+                                                        </>
+                                                    ) : (
+                                                        <>
+                                                            <CheckCircle2 className="w-3 h-3" />
+                                                            <span>COMPLETADO</span>
+                                                        </>
+                                                    )}
                                                 </Badge>
                                             </TableCell>
                                             {usuarioActual?.rol !== 'user' && (
@@ -224,9 +241,10 @@ export default function HistorialTurno({
                                                                 variant="outline"
                                                                 size="sm"
                                                                 onClick={() => { setMovimientoAAnularId(m.id); setMotivoAnulacionCaja(''); }}
-                                                                className="h-7 text-xs text-rose-700 border-rose-200 bg-rose-50 hover:bg-rose-100 font-semibold px-2.5"
+                                                                className="h-7 text-xs text-rose-700 border-rose-200 bg-rose-50 hover:bg-rose-100 font-semibold px-2.5 gap-1"
                                                             >
-                                                                🚫 Anular
+                                                                <Ban className="w-3 h-3" />
+                                                                <span>Anular</span>
                                                             </Button>
                                                         )
                                                     )}

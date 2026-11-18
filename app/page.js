@@ -5,7 +5,20 @@ import Link from 'next/link';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { PasswordInput } from '@/components/ui/password-input';
 import { Badge } from '@/components/ui/badge';
+import { 
+    AlertCircle, 
+    Check, 
+    ShoppingCart, 
+    ShieldCheck, 
+    Package, 
+    Calendar, 
+    Boxes, 
+    Coffee, 
+    ArrowLeft, 
+    ArrowRight 
+} from 'lucide-react';
 
 export default function HomePage() {
     const [cargando, setCargando] = useState(true);
@@ -149,7 +162,7 @@ export default function HomePage() {
                     <CardContent className="pt-6">
                         {error && (
                             <div className="mb-6 p-4 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm font-medium flex items-center gap-2">
-                                <span>⚠️</span>
+                                <AlertCircle className="w-5 h-5 text-red-600 shrink-0" />
                                 <div><strong>Error:</strong> {error}</div>
                             </div>
                         )}
@@ -176,9 +189,10 @@ export default function HomePage() {
                                                 : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50/50'
                                         }`}
                                     >
-                                        <span className="font-semibold text-slate-900 text-sm">
-                                            🔧 Artículos No Perecederos
-                                        </span>
+                                        <div className="flex items-center gap-2 font-semibold text-slate-900 text-sm">
+                                            <Package className="w-4 h-4 text-slate-700" />
+                                            <span>Artículos No Perecederos</span>
+                                        </div>
                                         <span className="text-xs text-slate-600 mt-1">
                                             Compra y venta directa por unidad, metro o kilo con Costo Promedio Ponderado.
                                         </span>
@@ -196,9 +210,10 @@ export default function HomePage() {
                                                 : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50/50'
                                         }`}
                                     >
-                                        <span className="font-semibold text-slate-900 text-sm">
-                                            🛒 Productos Perecederos
-                                        </span>
+                                        <div className="flex items-center gap-2 font-semibold text-slate-900 text-sm">
+                                            <Calendar className="w-4 h-4 text-slate-700" />
+                                            <span>Productos Perecederos</span>
+                                        </div>
                                         <span className="text-xs text-slate-600 mt-1">
                                             Compra y venta directa solicitando fecha de vencimiento y cantidad por lote.
                                         </span>
@@ -216,9 +231,10 @@ export default function HomePage() {
                                                 : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50/50'
                                         }`}
                                     >
-                                        <span className="font-semibold text-slate-900 text-sm">
-                                            🪚 Ensamblaje / Fabricación
-                                        </span>
+                                        <div className="flex items-center gap-2 font-semibold text-slate-900 text-sm">
+                                            <Boxes className="w-4 h-4 text-slate-700" />
+                                            <span>Ensamblaje / Fabricación</span>
+                                        </div>
                                         <span className="text-xs text-slate-600 mt-1">
                                             Usa materiales o piezas no perecederas que se ensamblan para armar un producto final.
                                         </span>
@@ -236,9 +252,10 @@ export default function HomePage() {
                                                 : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50/50'
                                         }`}
                                     >
-                                        <span className="font-semibold text-slate-900 text-sm">
-                                            ☕ Elaboración con Recetas
-                                        </span>
+                                        <div className="flex items-center gap-2 font-semibold text-slate-900 text-sm">
+                                            <Coffee className="w-4 h-4 text-slate-700" />
+                                            <span>Elaboración con Recetas</span>
+                                        </div>
                                         <span className="text-xs text-slate-600 mt-1">
                                             Recetas de preparación con insumos que tienen control de caducidad.
                                         </span>
@@ -283,7 +300,8 @@ export default function HomePage() {
 
                                 <div className="flex justify-end pt-2">
                                     <Button onClick={() => setPaso(2)}>
-                                        Siguiente: Nombre de la Empresa →
+                                        <span>Siguiente: Nombre de la Empresa</span>
+                                        <ArrowRight className="w-4 h-4 ml-2" />
                                     </Button>
                                 </div>
                             </div>
@@ -316,7 +334,8 @@ export default function HomePage() {
 
                                 <div className="flex items-center justify-between pt-4 border-t border-slate-100">
                                     <Button variant="outline" onClick={() => setPaso(1)}>
-                                        ← Volver al Paso 1
+                                        <ArrowLeft className="w-4 h-4 mr-2" />
+                                        Volver al Paso 1
                                     </Button>
                                     <Button
                                         onClick={() => {
@@ -328,7 +347,8 @@ export default function HomePage() {
                                             setPaso(3);
                                         }}
                                     >
-                                        Siguiente: Crear Super Admin →
+                                        <span>Siguiente: Crear Super Admin</span>
+                                        <ArrowRight className="w-4 h-4 ml-2" />
                                     </Button>
                                 </div>
                             </div>
@@ -365,8 +385,7 @@ export default function HomePage() {
                                         <label className="text-sm font-semibold text-slate-700">
                                             PIN o Contraseña de Acceso:
                                         </label>
-                                        <Input
-                                            type="password"
+                                        <PasswordInput
                                             required
                                             placeholder="Crea tu PIN o contraseña secreta"
                                             value={adminPin}
@@ -379,8 +398,7 @@ export default function HomePage() {
                                         <label className="text-sm font-semibold text-slate-700">
                                             Token de Instalación (SETUP_TOKEN):
                                         </label>
-                                        <Input
-                                            type="password"
+                                        <PasswordInput
                                             autoComplete="off"
                                             placeholder="Valor de SETUP_TOKEN configurado en el servidor"
                                             value={setupToken}
@@ -395,14 +413,16 @@ export default function HomePage() {
 
                                 <div className="flex items-center justify-between pt-4 border-t border-slate-100">
                                     <Button type="button" variant="outline" onClick={() => setPaso(2)}>
-                                        ← Volver al Paso 2
+                                        <ArrowLeft className="w-4 h-4 mr-2" />
+                                        Volver al Paso 2
                                     </Button>
                                     <Button
                                         type="submit"
                                         disabled={guardando}
                                         className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold"
                                     >
-                                        {guardando ? 'Guardando configuración...' : '✅ Finalizar Configuración e Iniciar'}
+                                        <Check className="w-4 h-4 mr-2" />
+                                        {guardando ? 'Guardando configuración...' : 'Finalizar Configuración e Iniciar'}
                                     </Button>
                                 </div>
                             </form>
@@ -434,13 +454,15 @@ export default function HomePage() {
                 <CardContent className="pt-4 pb-6">
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <Button asChild size="lg" className="h-14 text-base font-semibold shadow-md">
-                            <Link href="/caja">
-                                🛒 Ir a Caja (Ventas)
+                            <Link href="/caja" className="flex items-center justify-center gap-2">
+                                <ShoppingCart className="w-5 h-5" />
+                                <span>Ir a Caja (Ventas)</span>
                             </Link>
                         </Button>
                         <Button asChild size="lg" variant="secondary" className="h-14 text-base font-semibold shadow-sm bg-slate-800 text-white hover:bg-slate-900">
-                            <Link href="/admin">
-                                🛡️ Panel de Administración
+                            <Link href="/admin" className="flex items-center justify-center gap-2">
+                                <ShieldCheck className="w-5 h-5" />
+                                <span>Panel de Administración</span>
                             </Link>
                         </Button>
                     </div>

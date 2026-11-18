@@ -15,6 +15,7 @@ import {
     Tooltip,
     Legend
 } from 'recharts';
+import { TrendingUp, Clock, Award, CreditCard } from 'lucide-react';
 
 const COLORES_PAGO = ['#16a34a', '#0284c7', '#f59e0b', '#7c3aed'];
 
@@ -47,7 +48,8 @@ export default function GraficosFinancieros({ estadisticas, tendencias, desglose
             <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm transition-shadow hover:shadow-md flex flex-col justify-between">
                 <div className="flex items-center justify-between mb-3 border-b border-slate-100 pb-2.5">
                     <h3 className="font-semibold text-sm text-slate-800 flex items-center gap-2">
-                        <span>📈</span> Ingresos vs Egresos (Últimos 7 días)
+                        <TrendingUp className="w-4 h-4 text-emerald-600" />
+                        <span>Ingresos vs Egresos (Últimos 7 días)</span>
                     </h3>
                     <span className="text-[11px] font-medium text-slate-400 bg-slate-100 px-2 py-0.5 rounded">
                         Semanal
@@ -81,7 +83,8 @@ export default function GraficosFinancieros({ estadisticas, tendencias, desglose
             <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm transition-shadow hover:shadow-md flex flex-col justify-between">
                 <div className="flex items-center justify-between mb-3 border-b border-slate-100 pb-2.5">
                     <h3 className="font-semibold text-sm text-slate-800 flex items-center gap-2">
-                        <span>🕒</span> Ventas por Hora (Hoy)
+                        <Clock className="w-4 h-4 text-sky-600" />
+                        <span>Ventas por Hora (Hoy)</span>
                     </h3>
                     <span className="text-[11px] font-medium text-slate-400 bg-slate-100 px-2 py-0.5 rounded">
                         En tiempo real
@@ -120,7 +123,8 @@ export default function GraficosFinancieros({ estadisticas, tendencias, desglose
             <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm transition-shadow hover:shadow-md flex flex-col justify-between">
                 <div className="flex items-center justify-between mb-3 border-b border-slate-100 pb-2.5">
                     <h3 className="font-semibold text-sm text-slate-800 flex items-center gap-2">
-                        <span>🏆</span> Top Productos (Turno #{cajaId || '—'})
+                        <Award className="w-4 h-4 text-amber-600" />
+                        <span>Top Productos (Turno #{cajaId || '—'})</span>
                     </h3>
                     <span className="text-[11px] font-medium text-slate-400 bg-slate-100 px-2 py-0.5 rounded">
                         Ingreso vs Ganancia
@@ -154,7 +158,8 @@ export default function GraficosFinancieros({ estadisticas, tendencias, desglose
             <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm transition-shadow hover:shadow-md flex flex-col justify-between">
                 <div className="flex items-center justify-between mb-3 border-b border-slate-100 pb-2.5">
                     <h3 className="font-semibold text-sm text-slate-800 flex items-center gap-2">
-                        <span>💳</span> Métodos de Pago (Turno #{cajaId || '—'})
+                        <CreditCard className="w-4 h-4 text-indigo-600" />
+                        <span>Métodos de Pago (Turno #{cajaId || '—'})</span>
                     </h3>
                     <span className="text-[11px] font-medium text-slate-400 bg-slate-100 px-2 py-0.5 rounded">
                         Efectivo / QR

@@ -1199,6 +1199,58 @@ const MIGRACIONES = [
                 }
             }
         }
+    },
+    {
+        version: 12,
+        descripcion: 'Creación de tabla producto_lotes para trazabilidad de vencimientos por lote, índices por producto y fecha, y migración de stock inicial con vencimiento',
+        up: async (conn) => {
+            await runRaw(conn, `
+                CREATE TABLE IF NOT EXISTS producto_lotes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    producto_id INTEGER NOT NULL,
+                    fecha_vencimiento TEXT NOT NULL,
+                    stock REAL NOT NULL DEFAULT 0,
+                    costo_unitario REAL NOT NULL DEFAULT 0,
+                    activo INTEGER NOT NULL DEFAULT 1,
+                    creado_en DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (producto_id) REFERENCES productos(id) ON DELETE CASCADE
+                )
+            `);
+
+            await runRaw(conn, `CREATE INDEX IF NOT EXISTS idx_producto_lotes_producto_id ON producto_lotes(producto_id)`);
+            await runRaw(conn, `CREATE INDEX IF NOT EXISTS idx_producto_lotes_fecha_vencimiento ON producto_lotes(fecha_vencimiento)`);
+
+            // Migrar cualquier producto existente que tenga fecha_vencimiento y stock > 0 a un lote inicial
+            const productosConVencimiento = await allRaw(
+                conn,
+                `SELECT id, stock, costo, fecha_vencimiento
+                 FROM productos
+                 WHERE fecha_vencimiento IS NOT NULL
+                   AND TRIM(fecha_vencimiento) != ''
+                   AND stock > 0`
+            );
+
+            for (const prod of productosConVencimiento) {
+                const fechaLimpia = String(prod.fecha_vencimiento).trim();
+                const stockVal = Number(Number(prod.stock || 0).toFixed(4));
+                const costoVal = Number(Number(prod.costo || 0).toFixed(4));
+
+                const existeLote = await getRaw(
+                    conn,
+                    `SELECT id FROM producto_lotes WHERE producto_id = ? AND fecha_vencimiento = ? LIMIT 1`,
+                    [prod.id, fechaLimpia]
+                );
+
+                if (!existeLote && stockVal > 0) {
+                    await runRaw(
+                        conn,
+                        `INSERT INTO producto_lotes (producto_id, fecha_vencimiento, stock, costo_unitario, activo)
+                         VALUES (?, ?, ?, ?, 1)`,
+                        [prod.id, fechaLimpia, stockVal, costoVal]
+                    );
+                }
+            }
+        }
     }
 ];
 

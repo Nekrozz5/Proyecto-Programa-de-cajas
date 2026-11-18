@@ -1052,7 +1052,7 @@ async function sembrarCafeteriaCompleta() {
     console.log(`- Turno #2 (Hoy, ABIERTO): En Caja 1 con fondo de Bs 150.00 a nombre de "carlos"`);
     console.log('------------------------------------------------------------------');
     console.log('Credenciales de acceso para pruebas:');
-    console.log('  - Super Admin: carlos   | Clave: 12345678');
+    console.log('  - Propietario (superadmin): carlos   | Clave: 12345678');
     console.log('  - Admin:       sofia    | Clave: 12345678');
     console.log('  - Cajera 1:    lucia    | Clave: 12345678');
     console.log('  - Cajero 2:    marcos   | Clave: 12345678');

@@ -5,6 +5,16 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { 
+    Receipt, 
+    Building2, 
+    Mail, 
+    Send, 
+    Eye, 
+    FileSpreadsheet, 
+    RotateCcw, 
+    CheckCircle2 
+} from 'lucide-react';
 import { abrirTurnoAction, reabrirTurnoAction } from '../../../server/actions/turnos.actions';
 import {
     probarEmailAction,
@@ -94,7 +104,7 @@ export default function TabTurnosArqueos({
             setEnviandoPruebaEmail(true);
             const res = await probarEmailAction();
             if (!res.ok) throw new Error(res.error || 'Error al enviar correo de prueba.');
-            setMensaje?.(`✅ ${res.data?.mensaje || 'Correo de prueba enviado exitosamente.'}`);
+            setMensaje?.(res.data?.mensaje || 'Correo de prueba enviado exitosamente.');
         } catch (err) {
             setError?.(err.message);
         } finally {
@@ -108,7 +118,7 @@ export default function TabTurnosArqueos({
             setEnviandoEmailCajaId(cajaId);
             const res = await reenviarCierreEmailAction({ cajaId });
             if (!res.ok) throw new Error(res.error || 'Error al enviar el reporte por correo.');
-            setMensaje?.(`✅ ${res.data?.mensaje || 'Reporte de cierre enviado exitosamente por correo.'}`);
+            setMensaje?.(res.data?.mensaje || 'Reporte de cierre enviado exitosamente por correo.');
         } catch (err) {
             setError?.(err.message);
         } finally {
@@ -202,7 +212,10 @@ export default function TabTurnosArqueos({
         <section className="bg-white p-5 rounded-lg border border-slate-200 shadow-sm flex flex-col gap-5">
             <div className="flex justify-between items-center flex-wrap gap-4">
                 <div>
-                    <h2 className="text-xl font-bold text-slate-900 m-0">🏦 Auditoría de Cierres y Arqueos por Turno</h2>
+                    <h2 className="text-xl font-bold text-slate-900 m-0 flex items-center gap-2">
+                        <Receipt className="w-5 h-5 text-slate-700" />
+                        <span>Auditoría de Cierres y Arqueos por Turno</span>
+                    </h2>
                     <p className="text-slate-500 text-sm mt-1 mb-0">
                         Revisa si hubo dinero faltante o sobrante en cada turno cerrado y habilita o reabre turnos cuando sea necesario.
                     </p>
@@ -213,9 +226,10 @@ export default function TabTurnosArqueos({
                         variant="secondary"
                         size="sm"
                         onClick={() => setMostrarPanelContable(!mostrarPanelContable)}
-                        className={`text-xs font-semibold ${mostrarPanelContable ? 'bg-sky-100 text-sky-900 hover:bg-sky-200' : ''}`}
+                        className={`text-xs font-semibold gap-1.5 ${mostrarPanelContable ? 'bg-sky-100 text-sky-900 hover:bg-sky-200' : ''}`}
                     >
-                        🧾 {mostrarPanelContable ? 'Ocultar Régimen Contable' : 'Régimen Contable / Facturación'}
+                        <Receipt className="w-3.5 h-3.5" />
+                        <span>{mostrarPanelContable ? 'Ocultar Régimen Contable' : 'Régimen Contable / Facturación'}</span>
                     </Button>
 
                     <Button
@@ -223,9 +237,10 @@ export default function TabTurnosArqueos({
                         variant="secondary"
                         size="sm"
                         onClick={() => setMostrarPanelCajasFisicas(!mostrarPanelCajasFisicas)}
-                        className="text-xs font-semibold"
+                        className="text-xs font-semibold gap-1.5"
                     >
-                        🏢 {mostrarPanelCajasFisicas ? 'Ocultar Estaciones' : 'Gestionar Estaciones de Caja'} ({(datos?.cajasFisicas || []).length})
+                        <Building2 className="w-3.5 h-3.5" />
+                        <span>{mostrarPanelCajasFisicas ? 'Ocultar Estaciones' : 'Gestionar Estaciones de Caja'} ({(datos?.cajasFisicas || []).length})</span>
                     </Button>
 
                     {cajasFisicasDisponibles.length > 0 && (
@@ -264,7 +279,11 @@ export default function TabTurnosArqueos({
                 datos?.estadoEmail?.configurado ? 'bg-emerald-50 border-emerald-200' : 'bg-slate-50 border-slate-200'
             }`}>
                 <div className="flex items-center gap-2.5 text-xs">
-                    <span className="text-lg">{datos?.estadoEmail?.configurado ? '🟢' : '✉️'}</span>
+                    {datos?.estadoEmail?.configurado ? (
+                        <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+                    ) : (
+                        <Mail className="w-5 h-5 text-slate-400 shrink-0" />
+                    )}
                     <div>
                         {datos?.estadoEmail?.configurado ? (
                             <>
@@ -291,7 +310,7 @@ export default function TabTurnosArqueos({
                         onClick={handleProbarEmail}
                         className="h-7 text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-semibold"
                     >
-                        {enviandoPruebaEmail ? '⏳ Enviando prueba...' : '🧪 Enviar Correo de Prueba'}
+                        {enviandoPruebaEmail ? 'Enviando prueba...' : 'Enviar Correo de Prueba'}
                     </Button>
                 )}
             </div>
@@ -300,7 +319,10 @@ export default function TabTurnosArqueos({
             {mostrarPanelContable && (
                 <form onSubmit={handleGuardarConfiguracionContable} className="bg-slate-50 border-2 border-sky-600 rounded-lg p-4 flex flex-col gap-3.5">
                     <div>
-                        <h4 className="text-sm font-bold text-slate-900 m-0">🧾 Configuración Contable y Régimen Tributario Modular (Bolivia)</h4>
+                        <h4 className="text-sm font-bold text-slate-900 m-0 flex items-center gap-1.5">
+                            <Receipt className="w-4 h-4 text-slate-700" />
+                            <span>Configuración Contable y Régimen Tributario Modular (Bolivia)</span>
+                        </h4>
                         <p className="text-xs text-slate-600 m-0 mt-0.5">
                             Adapta el sistema según el régimen del cliente: <strong>Control Interno / Régimen Simplificado (RTS)</strong> o <strong>Régimen General (Con Facturación IVA / IT)</strong>. Todos los reportes Excel, CSV y PDF se ajustan automáticamente.
                         </p>
@@ -317,8 +339,8 @@ export default function TabTurnosArqueos({
                                 }}
                                 className="w-full h-8 rounded-md border border-slate-300 bg-white px-2 py-0.5 text-xs shadow-sm focus:outline-none"
                             >
-                                <option value="simplificado_control_interno">📋 Control Interno / Régimen Simplificado (Sin IVA)</option>
-                                <option value="regimen_general">🏛️ Régimen General (Facturación IVA / IT)</option>
+                                <option value="simplificado_control_interno">Control Interno / Régimen Simplificado (Sin IVA)</option>
+                                <option value="regimen_general">Régimen General (Facturación IVA / IT)</option>
                             </select>
                         </label>
                         <label className="text-xs font-semibold text-slate-800 flex flex-col gap-1">
@@ -405,7 +427,10 @@ export default function TabTurnosArqueos({
                 <div className="bg-slate-50 border border-slate-300 rounded-lg p-4">
                     <div className="flex justify-between items-center flex-wrap gap-3 mb-3">
                         <div>
-                            <h4 className="text-sm font-bold text-slate-900 m-0">🏢 Estaciones Físicas de Caja (Puntos de Venta)</h4>
+                            <h4 className="text-sm font-bold text-slate-900 m-0 flex items-center gap-1.5">
+                                <Building2 className="w-4 h-4 text-slate-700" />
+                                <span>Estaciones Físicas de Caja (Puntos de Venta)</span>
+                            </h4>
                             <p className="text-xs text-slate-500 m-0 mt-0.5">
                                 Define las terminales físicas del negocio. Puedes agregar nuevas o desactivar las que no uses (mínimo 1 activa requerida).
                             </p>
@@ -450,11 +475,15 @@ export default function TabTurnosArqueos({
                                     </div>
                                     <div className="text-xs text-slate-600">
                                         {tieneTurno ? (
-                                            <span className="text-emerald-700 font-semibold">
-                                                🟢 Turno #{cf.turno_abierto_id} en curso ({cf.operador_abierto || 'Cajero'})
+                                            <span className="text-emerald-700 font-semibold flex items-center gap-1.5">
+                                                <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block" />
+                                                <span>Turno #{cf.turno_abierto_id} en curso ({cf.operador_abierto || 'Cajero'})</span>
                                             </span>
                                         ) : (
-                                            <span>⚪ Sin turno abierto actualmente</span>
+                                            <span className="text-slate-500 flex items-center gap-1.5">
+                                                <span className="w-2 h-2 rounded-full bg-slate-300 inline-block" />
+                                                <span>Sin turno abierto actualmente</span>
+                                            </span>
                                         )}
                                     </div>
                                     <div className="mt-1 flex gap-1.5 flex-wrap">
@@ -468,7 +497,7 @@ export default function TabTurnosArqueos({
                                             }`}
                                             title="Habilitar o deshabilitar el registro de factura/respaldo en ventas y egresos de esta estación"
                                         >
-                                            🧾 Respaldo: {Number(cf.habilita_respaldo_fiscal ?? 1) === 1 ? 'SÍ' : 'NO'}
+                                            Respaldo Fiscal: {Number(cf.habilita_respaldo_fiscal ?? 1) === 1 ? 'SÍ' : 'NO'}
                                         </button>
                                         {esActiva ? (
                                             <Button
@@ -533,19 +562,19 @@ export default function TabTurnosArqueos({
                                     if (dif < 0) {
                                         badgeDiferencia = (
                                             <Badge variant="destructive" className="bg-red-100 text-red-800 hover:bg-red-100 border border-red-300 font-bold">
-                                                ⚠️ FALTANTE: Bs {dif.toFixed(2)}
+                                                Faltante: Bs {dif.toFixed(2)}
                                             </Badge>
                                         );
                                     } else if (dif > 0) {
                                         badgeDiferencia = (
                                             <Badge className="bg-blue-100 text-blue-800 hover:bg-blue-100 border border-blue-300 font-bold">
-                                                SOBRANTE: +Bs {dif.toFixed(2)}
+                                                Sobrante: +Bs {dif.toFixed(2)}
                                             </Badge>
                                         );
                                     } else {
                                         badgeDiferencia = (
                                             <Badge className="bg-emerald-100 text-emerald-800 hover:bg-emerald-100 border border-emerald-300 font-bold">
-                                                ✅ CUADRE EXACTO (Bs 0.00)
+                                                Cuadre exacto (Bs 0.00)
                                             </Badge>
                                         );
                                     }
@@ -571,7 +600,7 @@ export default function TabTurnosArqueos({
                                                 )}
                                                 {Number(c.veces_reabierta) > 0 && (
                                                     <Badge variant="outline" className="bg-amber-50 text-amber-900 border-amber-300 font-bold text-[10px]">
-                                                        🔄 REABIERTO ({c.veces_reabierta} {Number(c.veces_reabierta) === 1 ? 'vez' : 'veces'})
+                                                        Reabierto ({c.veces_reabierta} {Number(c.veces_reabierta) === 1 ? 'vez' : 'veces'})
                                                     </Badge>
                                                 )}
                                             </div>
@@ -602,15 +631,17 @@ export default function TabTurnosArqueos({
                                                         size="sm"
                                                         variant={Number(datos?.cajaAuditada?.id) === Number(c.id) ? "default" : "secondary"}
                                                         onClick={() => seleccionarTurnoParaAuditar?.(c.id)}
-                                                        className="h-7 text-xs font-semibold"
+                                                        className="h-7 text-xs font-semibold gap-1"
                                                     >
-                                                        {Number(datos?.cajaAuditada?.id) === Number(c.id) ? '👁️ Auditando' : '🔍 Auditar / PDF'}
+                                                        <Eye className="w-3.5 h-3.5" />
+                                                        <span>{Number(datos?.cajaAuditada?.id) === Number(c.id) ? 'Auditando' : 'Auditar / PDF'}</span>
                                                     </Button>
                                                     <a
                                                         href={`/api/reportes?formato=xlsx&cajaId=${c.id}`}
-                                                        className="inline-flex items-center px-2 py-1 rounded text-xs font-semibold bg-emerald-100 text-emerald-800 hover:bg-emerald-200 transition-colors"
+                                                        className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-semibold bg-emerald-100 text-emerald-800 hover:bg-emerald-200 transition-colors"
                                                     >
-                                                        📊 Excel
+                                                        <FileSpreadsheet className="w-3.5 h-3.5" />
+                                                        <span>Excel</span>
                                                     </a>
                                                 </div>
                                                 {c.estado === 'cerrada' && !datos?.cajaAbierta && (
@@ -663,9 +694,10 @@ export default function TabTurnosArqueos({
                                                         size="sm"
                                                         disabled={enviandoEmailCajaId === c.id}
                                                         onClick={() => handleReenviarEmailCierre(c.id)}
-                                                        className="h-7 text-xs bg-emerald-700 hover:bg-emerald-800 text-white font-semibold self-start"
+                                                        className="h-7 text-xs bg-emerald-700 hover:bg-emerald-800 text-white font-semibold self-start gap-1"
                                                     >
-                                                        {enviandoEmailCajaId === c.id ? '⏳ Enviando...' : '✉️ Enviar por Correo'}
+                                                        <Mail className="w-3.5 h-3.5" />
+                                                        <span>{enviandoEmailCajaId === c.id ? 'Enviando...' : 'Enviar por Correo'}</span>
                                                     </Button>
                                                 )}
                                             </div>

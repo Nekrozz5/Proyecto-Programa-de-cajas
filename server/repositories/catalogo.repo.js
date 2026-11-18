@@ -209,7 +209,7 @@ async function crearProductoConInsumos({
     if (!nombre || String(nombre).trim() === '') {
         throw new Error('El nombre del producto es obligatorio.');
     }
-    const precioValidado = redondear2(numeroPositivo(precio, 'El precio del producto'));
+    const precioValidado = redondear2(numeroNoNegativo(precio, 'El precio del producto'));
 
     // Normalizar categorías múltiples: puede venir como array o string separado por comas
     let listaCategorias = [];
@@ -408,7 +408,7 @@ async function crearProductoConInsumos({
                 ? Number(numeroNoNegativo(arguments[0].stockMinimo, 'El stock mínimo').toFixed(4))
                 : 0;
             const unidadMedida = arguments[0].unidadMedida && String(arguments[0].unidadMedida).trim() !== ''
-                ? String(arguments[0].unidadMedida).trim()
+                ? String(arguments[0].unidadMedida).trim().toLowerCase()
                 : 'unidades';
             const fechaVenc = arguments[0].fechaVencimiento && String(arguments[0].fechaVencimiento).trim() !== ''
                 ? String(arguments[0].fechaVencimiento).trim()
@@ -421,6 +421,14 @@ async function crearProductoConInsumos({
                 [nombre.trim(), precioValidado, costoInicial, catFinal, unidadMedida, stockInicial, stockMinimo, fechaVenc]
             );
             const productoId = resProd.lastID;
+
+            if (fechaVenc && stockInicial > 0) {
+                await runQuery(
+                    `INSERT INTO producto_lotes (producto_id, fecha_vencimiento, stock, costo_unitario, activo)
+                     VALUES (?, ?, ?, ?, 1)`,
+                    [productoId, fechaVenc, stockInicial, costoInicial]
+                );
+            }
 
             await runQuery(
                 `INSERT INTO movimientos_productos_directos (
@@ -455,7 +463,7 @@ async function crearProducto(nombre, precio, costo = 0, categoria = '', stock = 
     if (!nombre || String(nombre).trim() === '') {
         throw new Error('El nombre del producto es obligatorio.');
     }
-    const precioValidado = redondear2(numeroPositivo(precio, 'El precio del producto'));
+    const precioValidado = redondear2(numeroNoNegativo(precio, 'El precio del producto'));
     const costoValidado = redondear2(numeroNoNegativo(costo ?? 0, 'El costo del producto'));
     const stockValidado = (stock !== null && stock !== undefined && stock !== '')
         ? redondear2(numeroNoNegativo(stock, 'El stock inicial del producto'))
@@ -467,7 +475,7 @@ async function crearProducto(nombre, precio, costo = 0, categoria = '', stock = 
         const res = await runQuery(
             `INSERT INTO productos (nombre, precio, costo, categoria, unidad_medida, tipo_inventario, stock, stock_minimo, fecha_vencimiento)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [nombre.trim(), precioValidado, costoValidado, categoria ? String(categoria).trim() : '', unidadMedida || 'unidades', tipoInventario, stockValidado, stockMinimoValidado, fechaVencimiento || null]
+            [nombre.trim(), precioValidado, costoValidado, categoria ? String(categoria).trim() : '', unidadMedida ? String(unidadMedida).trim().toLowerCase() : 'unidades', tipoInventario, stockValidado, stockMinimoValidado, fechaVencimiento || null]
         );
         const prodId = res.lastID;
 
@@ -681,7 +689,7 @@ async function asignarModificadoresAProducto(productoId, grupoIds, adminId) {
 }
 
 async function obtenerProductos() {
-    const [productos, gruposModificadores, enlaces, todosInsumos, recetasTodas, componentesCombos] = await Promise.all([
+    const [productos, gruposModificadores, enlaces, todosInsumos, recetasTodas, componentesCombos, lotesActivos] = await Promise.all([
         allQuery(`
             SELECT p.*,
                    COUNT(r.id) as num_ingredientes,
@@ -699,7 +707,12 @@ async function obtenerProductos() {
         obtenerGruposModificadores(true),
         allQuery(`SELECT producto_id, grupo_id FROM producto_grupos_modificadores`),
         allQuery(`SELECT id, nombre, unidad_medida, stock_actual, costo_por_unidad FROM insumos WHERE activo = 1`),
-        allQuery(`SELECT producto_id, insumo_id, cantidad_requerida FROM recetas`),
+        allQuery(`
+            SELECT r.producto_id, r.insumo_id, r.cantidad_requerida,
+                   i.nombre as insumo_nombre, i.unidad_medida as insumo_unidad, i.costo_por_unidad as insumo_costo
+            FROM recetas r
+            LEFT JOIN insumos i ON r.insumo_id = i.id
+        `),
         allQuery(`
             SELECT cc.combo_producto_id, cc.componente_producto_id, cc.cantidad,
                    p.nombre as componente_nombre, p.tipo_inventario as componente_tipo,
@@ -707,6 +720,12 @@ async function obtenerProductos() {
             FROM combo_componentes cc
             INNER JOIN productos p ON cc.componente_producto_id = p.id
             WHERE p.activo = 1
+        `),
+        allQuery(`
+            SELECT id, producto_id, fecha_vencimiento, stock, costo_unitario
+            FROM producto_lotes
+            WHERE activo = 1 AND stock > 0
+            ORDER BY fecha_vencimiento ASC, id ASC
         `)
     ]);
 
@@ -715,6 +734,18 @@ async function obtenerProductos() {
     for (const e of enlaces) {
         if (!gruposPorProducto[e.producto_id]) gruposPorProducto[e.producto_id] = [];
         gruposPorProducto[e.producto_id].push(e.grupo_id);
+    }
+
+    const lotesPorProducto = {};
+    for (const l of lotesActivos) {
+        if (!lotesPorProducto[l.producto_id]) lotesPorProducto[l.producto_id] = [];
+        lotesPorProducto[l.producto_id].push({
+            id: l.id,
+            producto_id: l.producto_id,
+            fecha_vencimiento: l.fecha_vencimiento,
+            stock: Number(l.stock || 0),
+            costo_unitario: Number(l.costo_unitario || 0)
+        });
     }
 
     const mapaInsumos = new Map(todosInsumos.map((i) => [i.id, i]));
@@ -877,14 +908,254 @@ async function obtenerProductos() {
 
         return {
             ...productoLimpio,
+            receta: recetasPorProducto[p.id] || [],
             unidades_disponibles: unidadesDisponibles,
             insumo_limitante: insumoLimitante,
             esta_vigente: estaVigente,
             motivo_no_vigente: motivoNoVigente,
             componentes_combo: componentesPorCombo[p.id] || [],
             grupos_modificadores_ids: idsGrupos,
-            grupos_modificadores: gruposAsignados
+            grupos_modificadores: gruposAsignados,
+            lotes: p.tipo_inventario === 'directo' ? (lotesPorProducto[p.id] || []) : []
         };
+    });
+}
+
+/**
+ * Actualiza los datos de un producto (nombre, precio, categoría, stock mínimo, recetas y combos).
+ */
+async function actualizarProducto(productoId, datos = {}, usuarioId = null) {
+    const prodId = Number(productoId);
+    if (!Number.isFinite(prodId) || prodId <= 0) {
+        throw new Error('ID de producto inválido.');
+    }
+
+    return await enTransaccion(async () => {
+        const prod = await getQuery(`SELECT * FROM productos WHERE id = ? AND activo = 1`, [prodId]);
+        if (!prod) {
+            throw new Error('Producto no encontrado o inactivo.');
+        }
+
+        const nombreFinal = datos.nombre !== undefined ? String(datos.nombre).trim() : prod.nombre;
+        if (!nombreFinal) {
+            throw new Error('El nombre del producto no puede estar vacío.');
+        }
+
+        const precioFinal = datos.precio !== undefined
+            ? redondear2(numeroNoNegativo(datos.precio, 'El precio del producto'))
+            : prod.precio;
+
+        // Normalizar categorías si se proporcionan
+        let catFinal = prod.categoria;
+        if (datos.categorias !== undefined || datos.categoria !== undefined) {
+            let listaCategorias = [];
+            if (Array.isArray(datos.categorias) && datos.categorias.length > 0) {
+                listaCategorias = datos.categorias;
+            } else if (Array.isArray(datos.categoria)) {
+                listaCategorias = datos.categoria;
+            } else if (typeof datos.categoria === 'string' && datos.categoria.trim() !== '') {
+                listaCategorias = datos.categoria.split(',').map((c) => c.trim()).filter(Boolean);
+            }
+
+            listaCategorias = listaCategorias
+                .map((c) => String(c).trim())
+                .filter((c) => c !== '' && c.toLowerCase() !== 'todas');
+
+            const catsUnicas = [];
+            const seenCats = new Set();
+            for (const c of listaCategorias) {
+                if (!seenCats.has(c.toLowerCase())) {
+                    seenCats.add(c.toLowerCase());
+                    catsUnicas.push(c);
+                }
+            }
+            catFinal = catsUnicas.join(', ');
+
+            for (const c of catsUnicas) {
+                await runQuery(`INSERT OR IGNORE INTO categorias (nombre, activo) VALUES (?, 1)`, [c]);
+            }
+        }
+
+        const stockMinimoInput = datos.stock_minimo !== undefined ? datos.stock_minimo : datos.stockMinimo;
+        const stockMinimoFinal = stockMinimoInput !== undefined
+            ? Number(numeroNoNegativo(stockMinimoInput, 'El stock mínimo').toFixed(4))
+            : Number(prod.stock_minimo || 0);
+
+        const fechaVencimientoFinal = datos.fecha_vencimiento !== undefined
+            ? datos.fecha_vencimiento
+            : (datos.fechaVencimiento !== undefined ? datos.fechaVencimiento : prod.fecha_vencimiento);
+
+        await runQuery(
+            `UPDATE productos
+             SET nombre = ?, precio = ?, categoria = ?, stock_minimo = ?, fecha_vencimiento = ?
+             WHERE id = ?`,
+            [nombreFinal, precioFinal, catFinal, stockMinimoFinal, fechaVencimientoFinal ? String(fechaVencimientoFinal).trim() : null, prodId]
+        );
+
+        // Si es receta y se envían insumosReceta, reemplazar atómicamente y recalcular costos
+        if (prod.tipo_inventario === 'receta') {
+            const insumosReceta = Array.isArray(datos.insumosReceta)
+                ? datos.insumosReceta
+                : (Array.isArray(datos.receta) ? datos.receta : (Array.isArray(datos.insumos) ? datos.insumos : null));
+
+            if (insumosReceta !== null) {
+                if (insumosReceta.length === 0) {
+                    throw new Error('Debes agregar al menos un insumo para la receta o ensamblaje.');
+                }
+                if (insumosReceta.length > 30) {
+                    throw new Error('Límite excedido: No se pueden agregar más de 30 insumos en una sola receta.');
+                }
+
+                await runQuery(`DELETE FROM recetas WHERE producto_id = ?`, [prodId]);
+                const insumosUnicos = new Set();
+
+                for (const ing of insumosReceta) {
+                    if (!ing) continue;
+                    const insumoId = Number(ing.insumoId || ing.insumo_id);
+                    if (!insumoId) continue;
+                    if (insumosUnicos.has(insumoId)) {
+                        throw new Error(`El insumo ID ${insumoId} está duplicado en la receta.`);
+                    }
+                    insumosUnicos.add(insumoId);
+
+                    const insumo = await getQuery(`SELECT id, nombre, unidad_medida FROM insumos WHERE id = ? AND activo = 1`, [insumoId]);
+                    if (!insumo) {
+                        throw new Error(`El insumo con ID ${insumoId} no existe o está inactivo.`);
+                    }
+
+                    const cantVal = numeroPositivo(ing.cantidad ?? ing.cantidad_requerida, `La cantidad del insumo ${insumo.nombre}`);
+                    const unidadOrigen = ing.unidadReceta || ing.unidad_medida || ing.insumo_unidad;
+                    const cantidadConvertidaAlmacen = unidadOrigen
+                        ? convertirCantidadMedida(cantVal, unidadOrigen, insumo.unidad_medida)
+                        : cantVal;
+
+                    await runQuery(
+                        `INSERT INTO recetas (producto_id, insumo_id, cantidad_requerida) VALUES (?, ?, ?)`,
+                        [prodId, insumoId, cantidadConvertidaAlmacen]
+                    );
+                }
+
+                await recalcularCostoProductoPorReceta(prodId);
+                await recalcularCostoCombosQueContienenProducto(prodId);
+            }
+        }
+
+        // Si es combo y se envían componentes, actualizar combo_componentes y recalcular costo
+        if (prod.tipo_inventario === 'combo') {
+            const componentes = Array.isArray(datos.componentesCombo)
+                ? datos.componentesCombo
+                : (Array.isArray(datos.componentes) ? datos.componentes : (Array.isArray(datos.componentes_combo) ? datos.componentes_combo : null));
+
+            if (componentes !== null) {
+                const componentesLimpios = componentes.filter((c) => c && (c.productoId || c.componente_producto_id) && Number(c.cantidad) > 0);
+                if (componentesLimpios.length === 0) {
+                    throw new Error('Debes agregar al menos un producto componente con cantidad mayor a 0 para el combo.');
+                }
+                if (componentesLimpios.length > 20) {
+                    throw new Error('Límite excedido: No se pueden agregar más de 20 componentes en un solo combo.');
+                }
+
+                await runQuery(`DELETE FROM combo_componentes WHERE combo_producto_id = ?`, [prodId]);
+                const componentesUnicos = new Set();
+
+                for (const comp of componentesLimpios) {
+                    const compProdId = Number(comp.productoId || comp.componente_producto_id);
+                    if (compProdId === prodId) {
+                        throw new Error('Un combo no puede contenerse a sí mismo.');
+                    }
+                    if (componentesUnicos.has(compProdId)) {
+                        throw new Error(`El producto ID ${compProdId} está duplicado en los componentes del combo.`);
+                    }
+                    componentesUnicos.add(compProdId);
+
+                    const productoComp = await getQuery(`SELECT id, nombre, tipo_inventario FROM productos WHERE id = ? AND activo = 1`, [compProdId]);
+                    if (!productoComp) {
+                        throw new Error(`El producto componente con ID ${compProdId} no existe o está inactivo.`);
+                    }
+                    if (productoComp.tipo_inventario === 'combo') {
+                        throw new Error(`El producto "${productoComp.nombre}" es un combo. No se permiten combos anidados.`);
+                    }
+
+                    const cantVal = numeroPositivo(comp.cantidad, `La cantidad del componente ${productoComp.nombre}`);
+                    await runQuery(
+                        `INSERT INTO combo_componentes (combo_producto_id, componente_producto_id, cantidad) VALUES (?, ?, ?)`,
+                        [prodId, compProdId, cantVal]
+                    );
+                }
+
+                await recalcularCostoCombo(prodId);
+            }
+
+            if (datos.limiteMaximoActivo !== undefined || datos.limite_maximo_activo !== undefined) {
+                const limiteActivo = (datos.limiteMaximoActivo ?? datos.limite_maximo_activo) ? 1 : 0;
+                let limiteTotal = prod.limite_unidades_total;
+                let limiteRestante = prod.limite_unidades_restante;
+                if (limiteActivo) {
+                    const lInput = datos.limiteUnidadesTotal ?? datos.limite_unidades_total;
+                    if (lInput !== undefined) {
+                        limiteTotal = Math.floor(numeroPositivo(lInput, 'La cantidad máxima de venta del combo'));
+                        limiteRestante = limiteTotal;
+                    }
+                } else {
+                    limiteTotal = null;
+                    limiteRestante = null;
+                }
+                await runQuery(
+                    `UPDATE productos SET limite_maximo_activo = ?, limite_unidades_total = ?, limite_unidades_restante = ? WHERE id = ?`,
+                    [limiteActivo, limiteTotal, limiteRestante, prodId]
+                );
+            }
+
+            if (datos.fechaInicioVigencia !== undefined || datos.fecha_inicio_vigencia !== undefined ||
+                datos.fechaFinVigencia !== undefined || datos.fecha_fin_vigencia !== undefined) {
+                const fIni = (datos.fechaInicioVigencia ?? datos.fecha_inicio_vigencia) || null;
+                const fFin = (datos.fechaFinVigencia ?? datos.fecha_fin_vigencia) || null;
+                if (fIni && fFin && new Date(fIni) > new Date(fFin)) {
+                    throw new Error('La fecha y hora de inicio de vigencia no puede ser posterior a la fecha y hora final.');
+                }
+                await runQuery(
+                    `UPDATE productos SET fecha_inicio_vigencia = ?, fecha_fin_vigencia = ? WHERE id = ?`,
+                    [fIni ? String(fIni).trim() : null, fFin ? String(fFin).trim() : null, prodId]
+                );
+            }
+        }
+
+        // Si otros combos contienen a este producto (directo o receta), recalcular sus costos
+        await recalcularCostoCombosQueContienenProducto(prodId);
+
+        return await getQuery(`SELECT * FROM productos WHERE id = ?`, [prodId]);
+    });
+}
+
+/**
+ * Da de baja lógica a un producto o receta del catálogo (activo = 0).
+ * Protege la integridad de ventas históricas y valida que no forme parte de combos activos.
+ */
+async function eliminarProducto(productoId, adminId) {
+    const prodId = Number(productoId);
+    if (!prodId || isNaN(prodId)) throw new Error('ID de producto inválido.');
+
+    return await enTransaccion(async () => {
+        const prod = await getQuery(`SELECT * FROM productos WHERE id = ? AND activo = 1`, [prodId]);
+        if (!prod) throw new Error('El artículo no existe o ya fue eliminado del catálogo.');
+
+        // Verificar si forma parte de algún combo activo
+        const combosQueLoUsan = await allQuery(
+            `SELECT p.nombre 
+             FROM combo_componentes cc
+             JOIN productos p ON cc.combo_producto_id = p.id
+             WHERE cc.componente_producto_id = ? AND p.activo = 1`,
+            [prodId]
+        );
+        if (combosQueLoUsan.length > 0) {
+            const nombres = combosQueLoUsan.map((c) => `"${c.nombre}"`).join(', ');
+            throw new Error(`No se puede eliminar el artículo porque forma parte del combo activo: ${nombres}.`);
+        }
+
+        // Baja lógica: preservar trazabilidad contable y de movimientos
+        await runQuery(`UPDATE productos SET activo = 0 WHERE id = ?`, [prodId]);
+
+        return { id: prodId, nombre: prod.nombre, eliminado: true };
     });
 }
 
@@ -900,6 +1171,8 @@ module.exports = {
     crearCategoria,
     crearProductoConInsumos,
     crearProducto,
+    actualizarProducto,
+    eliminarProducto,
     obtenerGruposModificadores,
     crearGrupoModificadores,
     actualizarGrupoModificadores,

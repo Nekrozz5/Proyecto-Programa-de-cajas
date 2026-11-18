@@ -4,7 +4,9 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { PasswordInput } from '@/components/ui/password-input';
 import { Button } from '@/components/ui/button';
+import { Store, KeyRound, ArrowRight, User } from 'lucide-react';
 
 export default function LoginCaja({
     usuarios = [],
@@ -60,10 +62,10 @@ export default function LoginCaja({
         <div className="min-h-[80vh] flex items-center justify-center p-4">
             <Card className="w-full max-w-md shadow-lg border-slate-200">
                 <CardHeader className="text-center pb-4">
-                    <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 text-primary">
-                        <span className="text-2xl">🔐</span>
+                    <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-sky-50 text-sky-600 ring-8 ring-sky-50/50 shadow-inner">
+                        <Store className="h-7 w-7" />
                     </div>
-                    <CardTitle className="text-2xl font-bold tracking-tight">Iniciar Sesión en Caja</CardTitle>
+                    <CardTitle className="text-2xl font-bold tracking-tight text-slate-900">Iniciar Sesión en Caja</CardTitle>
                     <CardDescription className="text-slate-500 text-sm">
                         Identifícate con tu PIN o contraseña para registrar tus operaciones y ventas.
                     </CardDescription>
@@ -73,8 +75,9 @@ export default function LoginCaja({
                     <form onSubmit={handleLogin} className="space-y-4">
                         {!modoLoginManualCaja ? (
                             <div className="space-y-1.5">
-                                <label className="text-sm font-semibold text-slate-700">
-                                    Selecciona tu Usuario
+                                <label className="text-sm font-semibold text-slate-700 flex items-center gap-1.5">
+                                    <User className="h-4 w-4 text-slate-400" />
+                                    <span>Selecciona tu Usuario</span>
                                 </label>
                                 <select
                                     value={loginUsuarioId}
@@ -91,8 +94,9 @@ export default function LoginCaja({
                             </div>
                         ) : (
                             <div className="space-y-1.5">
-                                <label className="text-sm font-semibold text-slate-700">
-                                    Nombre de Usuario
+                                <label className="text-sm font-semibold text-slate-700 flex items-center gap-1.5">
+                                    <User className="h-4 w-4 text-slate-400" />
+                                    <span>Nombre de Usuario</span>
                                 </label>
                                 <Input
                                     type="text"
@@ -108,11 +112,11 @@ export default function LoginCaja({
                         )}
 
                         <div className="space-y-1.5">
-                            <label className="text-sm font-semibold text-slate-700">
-                                PIN / Contraseña
+                            <label className="text-sm font-semibold text-slate-700 flex items-center gap-1.5">
+                                <KeyRound className="h-4 w-4 text-slate-400" />
+                                <span>PIN / Contraseña</span>
                             </label>
-                            <Input
-                                type="password"
+                            <PasswordInput
                                 placeholder="Ingresa tu PIN o contraseña"
                                 value={loginPin}
                                 onChange={(e) => setLoginPin(e.target.value)}
@@ -123,9 +127,16 @@ export default function LoginCaja({
                         <Button
                             type="submit"
                             disabled={procesando}
-                            className="w-full h-11 text-base font-semibold transition-all"
+                            className="w-full h-11 text-base font-semibold transition-all gap-2"
                         >
-                            {procesando ? 'Verificando...' : 'Ingresar a Caja'}
+                            {procesando ? (
+                                'Verificando...'
+                            ) : (
+                                <>
+                                    <span>Ingresar a Caja</span>
+                                    <ArrowRight className="h-4 w-4" />
+                                </>
+                            )}
                         </Button>
 
                         <div className="text-center pt-1">
@@ -140,22 +151,22 @@ export default function LoginCaja({
                                 className="text-xs font-medium text-slate-500 hover:text-primary transition-colors underline underline-offset-4"
                             >
                                 {modoLoginManualCaja
-                                    ? '← Seleccionar usuario de la lista'
+                                    ? 'Volver a lista de usuarios'
                                     : '¿Ingresar nombre de usuario manualmente?'}
                             </button>
                         </div>
                     </form>
                 </CardContent>
 
-                <CardFooter className="flex gap-2 pt-2 border-t border-slate-100 bg-slate-50/50 rounded-b-lg">
-                    <Button variant="outline" asChild className="flex-1">
+                <CardFooter className="flex gap-2 pt-3 border-t border-slate-100 bg-slate-50/50 rounded-b-lg">
+                    <Button variant="outline" asChild className="flex-1 text-xs font-medium text-slate-600 border-slate-200">
                         <Link href="/">
-                            🏠 Inicio
+                            Inicio
                         </Link>
                     </Button>
-                    <Button variant="outline" asChild className="flex-1">
+                    <Button variant="outline" asChild className="flex-1 text-xs font-medium text-slate-600 border-slate-200">
                         <Link href="/admin">
-                            🛡️ Panel Admin
+                            Panel Admin
                         </Link>
                     </Button>
                 </CardFooter>

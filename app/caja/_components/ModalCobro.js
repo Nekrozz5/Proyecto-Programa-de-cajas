@@ -2,6 +2,19 @@
 
 import { useState, useEffect } from 'react';
 import { registrarVentaAction } from '../../../server/actions/ventas.actions';
+import {
+    Banknote,
+    QrCode,
+    Split,
+    CheckCircle2,
+    ArrowRight,
+    X,
+    AlertCircle,
+    Tag,
+    Receipt,
+    CreditCard
+} from 'lucide-react';
+import { PasswordInput } from '@/components/ui/password-input';
 
 export default function ModalCobro({
     isOpen,
@@ -161,6 +174,7 @@ export default function ModalCobro({
                 items: carrito.map((i) => ({
                     productoId: i.productoId,
                     cantidad: i.cantidad,
+                    loteId: i.loteId || null,
                     modificadores: (i.modificadores || []).map((m) => m.id)
                 })),
                 descuento: descuentoAplicadoNum > 0 ? descuentoAplicadoNum : 0,
@@ -253,7 +267,8 @@ export default function ModalCobro({
                 <div className="px-5 py-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center shrink-0">
                     <div>
                         <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
-                            <span>💳</span> Cobro y Salida de Cambio
+                            <CreditCard className="w-5 h-5 text-sky-600" />
+                            <span>Cobro y Salida de Cambio</span>
                         </h3>
                         <div className="text-xs text-slate-500 mt-0.5">
                             {cajaAbierta ? `Turno #${cajaAbierta.id} • ${cajaAbierta.caja_fisica_nombre || 'Caja Principal'}` : ''}
@@ -262,10 +277,10 @@ export default function ModalCobro({
                     <button
                         type="button"
                         onClick={onClose}
-                        className="text-slate-400 hover:text-slate-600 hover:bg-slate-200/60 rounded-md p-1.5 transition-colors cursor-pointer text-lg leading-none"
+                        className="text-slate-400 hover:text-slate-600 hover:bg-slate-200/60 rounded-md p-1.5 transition-colors cursor-pointer"
                         aria-label="Cerrar modal"
                     >
-                        ✕
+                        <X className="w-5 h-5" />
                     </button>
                 </div>
 
@@ -273,24 +288,24 @@ export default function ModalCobro({
                 <form onSubmit={handleConfirmarCobro} className="p-5 overflow-y-auto flex-1 flex flex-col gap-4 text-slate-800">
                     {/* Alerta de Error dentro del Modal */}
                     {errorLocal && (
-                        <div className="bg-red-50 border border-red-300 rounded-lg p-3 text-red-800 text-sm">
+                        <div className="bg-rose-50 border border-rose-200 rounded-lg p-3 text-rose-800 text-sm">
                             <div className="font-semibold flex items-center gap-1.5">
-                                <span>⚠️</span>
+                                <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
                                 <span>Error al procesar: {errorLocal}</span>
                             </div>
 
                             {sesionExpirada && (
-                                <div className="mt-3 pt-3 border-t border-red-200">
-                                    <div className="text-xs text-red-900 mb-2">
+                                <div className="mt-3 pt-3 border-t border-rose-200">
+                                    <div className="text-xs text-rose-900 mb-2">
                                         Ingresa el PIN de <strong>{usuarioActual?.nombre || 'tu usuario'}</strong> para restaurar la sesión y completar el cobro sin perder los productos:
                                     </div>
                                     <div className="flex gap-2 items-center">
-                                        <input
-                                            type="password"
+                                        <PasswordInput
                                             placeholder="Ingresa tu PIN"
                                             value={pinReconexion}
                                             onChange={(e) => setPinReconexion(e.target.value)}
-                                            className="flex-1 px-3 py-1.5 rounded-md border border-red-400 text-sm bg-white focus:outline-hidden focus:ring-2 focus:ring-red-400"
+                                            containerClassName="flex-1"
+                                            className="h-8 border-rose-300 bg-white text-sm focus-visible:ring-rose-400 focus-visible:border-rose-400"
                                             autoFocus
                                         />
                                         <button
@@ -309,19 +324,19 @@ export default function ModalCobro({
 
                     {/* CASILLAS SUPERIORES: TOTAL / CAMBIO REACTIVO */}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <div className="bg-blue-50/80 border-2 border-blue-500 rounded-xl p-3.5 flex flex-col justify-between">
+                        <div className="bg-sky-50/80 border-2 border-sky-500 rounded-xl p-3.5 flex flex-col justify-between">
                             <div>
-                                <div className="text-xs font-bold text-blue-700 uppercase tracking-wide">
+                                <div className="text-xs font-bold text-sky-700 uppercase tracking-wide">
                                     Total a Cobrar
                                 </div>
-                                <div className="text-2xl font-black text-blue-950 mt-0.5">
+                                <div className="text-2xl font-black text-sky-950 mt-0.5">
                                     Bs {totalCarrito.toFixed(2)}
                                 </div>
                             </div>
                             {descuentoAplicadoNum > 0 && !descuentoInvalido && (
                                 <div className="text-xs text-slate-600 mt-1.5 flex items-center gap-1.5 flex-wrap">
                                     <span>Sub: Bs {subtotalBrutoCarrito.toFixed(2)}</span>
-                                    <span className="text-red-600 font-semibold bg-red-100/70 px-1.5 py-0.5 rounded text-[11px]">
+                                    <span className="text-rose-600 font-semibold bg-rose-100/70 px-1.5 py-0.5 rounded text-[11px]">
                                         Desc: -Bs {descuentoAplicadoNum.toFixed(2)}
                                     </span>
                                 </div>
@@ -330,12 +345,12 @@ export default function ModalCobro({
 
                         <div className={`border-2 rounded-xl p-3.5 flex flex-col justify-between transition-colors ${
                             (metodoPago === 'efectivo' || metodoPago === 'mixto')
-                                ? (faltaDineroRecibido ? 'bg-red-50/80 border-red-400' : 'bg-emerald-50/80 border-emerald-500')
+                                ? (faltaDineroRecibido ? 'bg-rose-50/80 border-rose-400' : 'bg-emerald-50/80 border-emerald-500')
                                 : 'bg-slate-50 border-slate-300'
                         }`}>
                             <div className={`text-xs font-bold uppercase tracking-wide ${
                                 (metodoPago === 'efectivo' || metodoPago === 'mixto')
-                                    ? (faltaDineroRecibido ? 'text-red-700' : 'text-emerald-700')
+                                    ? (faltaDineroRecibido ? 'text-rose-700' : 'text-emerald-700')
                                     : 'text-slate-500'
                             }`}>
                                 {(metodoPago === 'efectivo' || metodoPago === 'mixto') ? 'Cambio que Sale de Caja (Bs)' : 'Pago QR (Sin Cambio)'}
@@ -361,7 +376,10 @@ export default function ModalCobro({
                     {/* Descuento sobre el Ticket */}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-end">
                         <label className="text-xs font-bold text-slate-700 flex flex-col gap-1">
-                            <span>🏷️ Descuento Ticket (Bs, Opcional):</span>
+                            <span className="flex items-center gap-1.5">
+                                <Tag className="w-3.5 h-3.5 text-slate-500" />
+                                <span>Descuento Ticket (Bs, Opcional):</span>
+                            </span>
                             <input
                                 type="number"
                                 step="0.01"
@@ -382,15 +400,16 @@ export default function ModalCobro({
                                 }}
                                 className={`w-full px-3 py-2 rounded-lg border text-sm transition-colors focus:outline-hidden focus:ring-2 ${
                                     descuentoInvalido
-                                        ? 'border-red-400 bg-red-50 text-red-900 focus:ring-red-300'
-                                        : 'border-slate-300 bg-white text-slate-800 focus:ring-blue-400'
+                                        ? 'border-rose-400 bg-rose-50 text-rose-900 focus:ring-rose-300'
+                                        : 'border-slate-300 bg-white text-slate-800 focus:ring-sky-400'
                                 }`}
                             />
                         </label>
                         <div className="text-xs pb-2">
                             {descuentoInvalido ? (
-                                <span className="font-semibold text-red-600">
-                                    ⚠️ El descuento debe ser menor al subtotal (Bs {subtotalBrutoCarrito.toFixed(2)}).
+                                <span className="font-semibold text-rose-600 flex items-center gap-1">
+                                    <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                                    <span>El descuento debe ser menor al subtotal (Bs {subtotalBrutoCarrito.toFixed(2)}).</span>
                                 </span>
                             ) : (
                                 <span className="text-slate-500">
@@ -411,11 +430,11 @@ export default function ModalCobro({
                                 onClick={() => handleSeleccionarMetodoPago('efectivo')}
                                 className={`py-2 px-2 text-xs sm:text-sm font-bold rounded-md transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
                                     metodoPago === 'efectivo'
-                                        ? 'bg-white shadow-xs text-blue-700 border border-slate-200/80'
+                                        ? 'bg-white shadow-xs text-sky-700 border border-slate-200/80'
                                         : 'text-slate-600 hover:text-slate-900'
                                 }`}
                             >
-                                <span>💵</span>
+                                <Banknote className="w-4 h-4" />
                                 <span>Efectivo</span>
                             </button>
                             <button
@@ -423,11 +442,11 @@ export default function ModalCobro({
                                 onClick={() => handleSeleccionarMetodoPago('qr')}
                                 className={`py-2 px-2 text-xs sm:text-sm font-bold rounded-md transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
                                     metodoPago === 'qr'
-                                        ? 'bg-white shadow-xs text-blue-700 border border-slate-200/80'
+                                        ? 'bg-white shadow-xs text-sky-700 border border-slate-200/80'
                                         : 'text-slate-600 hover:text-slate-900'
                                 }`}
                             >
-                                <span>📱</span>
+                                <QrCode className="w-4 h-4" />
                                 <span>QR</span>
                             </button>
                             <button
@@ -435,11 +454,11 @@ export default function ModalCobro({
                                 onClick={() => handleSeleccionarMetodoPago('mixto')}
                                 className={`py-2 px-2 text-xs sm:text-sm font-bold rounded-md transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
                                     metodoPago === 'mixto'
-                                        ? 'bg-white shadow-xs text-blue-700 border border-slate-200/80'
+                                        ? 'bg-white shadow-xs text-sky-700 border border-slate-200/80'
                                         : 'text-slate-600 hover:text-slate-900'
                                 }`}
                             >
-                                <span>🔀</span>
+                                <Split className="w-4 h-4" />
                                 <span>Mixto</span>
                             </button>
                         </div>
@@ -456,7 +475,7 @@ export default function ModalCobro({
                                     placeholder={`Ej. ${montoEfectivoRequerido.toFixed(2)}`}
                                     value={montoRecibido}
                                     onChange={(e) => handleChangeMontoRecibido(e.target.value)}
-                                    className="w-full px-3 py-2 rounded-lg border-2 border-blue-400 bg-white text-base font-bold text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-blue-300"
+                                    className="w-full px-3 py-2 rounded-lg border-2 border-sky-400 bg-white text-base font-bold text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-sky-300"
                                 />
                             </label>
                         )}
@@ -469,7 +488,7 @@ export default function ModalCobro({
                                     placeholder="Ej. 849201"
                                     value={referenciaQr}
                                     onChange={(e) => setReferenciaQr(e.target.value)}
-                                    className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-sm text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-blue-400"
+                                    className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-sm text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-sky-400"
                                 />
                             </label>
                         )}
@@ -482,7 +501,7 @@ export default function ModalCobro({
                             <button
                                 type="button"
                                 onClick={() => handleChangeMontoRecibido(String(montoEfectivoRequerido))}
-                                className="px-2.5 py-1 rounded-md text-xs font-bold bg-blue-50 border border-blue-200 text-blue-700 hover:bg-blue-100 hover:border-blue-300 transition-colors cursor-pointer"
+                                className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-sky-50 border border-sky-200 text-sky-700 hover:bg-sky-100 hover:border-sky-300 transition-colors cursor-pointer shadow-xs"
                             >
                                 Exacto
                             </button>
@@ -491,7 +510,7 @@ export default function ModalCobro({
                                     key={billete}
                                     type="button"
                                     onClick={() => handleChangeMontoRecibido(String(billete))}
-                                    className="px-2.5 py-1 rounded-md text-xs font-bold bg-blue-50 border border-blue-200 text-blue-700 hover:bg-blue-100 hover:border-blue-300 transition-colors cursor-pointer"
+                                    className="px-2.5 py-1 rounded-lg text-xs font-medium bg-slate-50 border border-slate-200 text-slate-700 hover:bg-slate-100 hover:border-slate-300 transition-colors cursor-pointer shadow-xs"
                                 >
                                     Bs {billete}
                                 </button>
@@ -503,12 +522,15 @@ export default function ModalCobro({
                     {metodoPago === 'mixto' && (
                         <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 flex flex-col gap-3">
                             <div className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
-                                <span>🔀</span>
+                                <Split className="w-4 h-4 text-sky-600" />
                                 <span>Desglose de Pago Mixto (Total: Bs {totalCarrito.toFixed(2)})</span>
                             </div>
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                 <label className="text-xs font-semibold text-slate-700 flex flex-col gap-1">
-                                    <span>💵 Parte en Efectivo (Bs):</span>
+                                    <span className="flex items-center gap-1">
+                                        <Banknote className="w-3.5 h-3.5 text-emerald-600" />
+                                        <span>Parte en Efectivo (Bs):</span>
+                                    </span>
                                     <input
                                         type="number"
                                         step="0.01"
@@ -520,7 +542,10 @@ export default function ModalCobro({
                                     />
                                 </label>
                                 <label className="text-xs font-semibold text-slate-700 flex flex-col gap-1">
-                                    <span>📱 Parte por QR (Bs):</span>
+                                    <span className="flex items-center gap-1">
+                                        <QrCode className="w-3.5 h-3.5 text-sky-600" />
+                                        <span>Parte por QR (Bs):</span>
+                                    </span>
                                     <input
                                         type="number"
                                         step="0.01"
@@ -539,12 +564,13 @@ export default function ModalCobro({
                                     placeholder="Código de transacción bancaria QR..."
                                     value={referenciaQr}
                                     onChange={(e) => setReferenciaQr(e.target.value)}
-                                    className="w-full px-3 py-1.5 rounded-lg border border-slate-300 text-sm bg-white focus:outline-hidden focus:ring-2 focus:ring-blue-400"
+                                    className="w-full px-3 py-1.5 rounded-lg border border-slate-300 text-sm bg-white focus:outline-hidden focus:ring-2 focus:ring-sky-400"
                                 />
                             </label>
                             {mixtoDescuadrado && totalCarrito > 0 && (
-                                <div className="text-xs font-bold text-red-600">
-                                    ⚠️ Efectivo + QR suma Bs {(montoEfectivoRequerido + montoQrRequerido).toFixed(2)} (debe sumar Bs {totalCarrito.toFixed(2)}).
+                                <div className="text-xs font-bold text-rose-600 flex items-center gap-1">
+                                    <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                                    <span>Efectivo + QR suma Bs {(montoEfectivoRequerido + montoQrRequerido).toFixed(2)} (debe sumar Bs {totalCarrito.toFixed(2)}).</span>
                                 </div>
                             )}
                         </div>
@@ -561,9 +587,12 @@ export default function ModalCobro({
                                     type="checkbox"
                                     checked={conFacturaVenta}
                                     onChange={(e) => setConFacturaVenta(e.target.checked)}
-                                    className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 h-4 w-4"
+                                    className="rounded border-slate-300 text-sky-600 focus:ring-sky-500 h-4 w-4"
                                 />
-                                <span>🧾 Registrar con Factura / Datos Fiscales del Cliente</span>
+                                <span className="flex items-center gap-1.5">
+                                    <Receipt className="w-4 h-4 text-slate-600" />
+                                    <span>Registrar con Factura / Datos Fiscales del Cliente</span>
+                                </span>
                             </label>
                             {conFacturaVenta && (
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
@@ -573,7 +602,7 @@ export default function ModalCobro({
                                         placeholder="NIT / CI del cliente"
                                         value={nitClienteVenta}
                                         onChange={(e) => setNitClienteVenta(e.target.value)}
-                                        className="w-full px-3 py-1.5 rounded-lg border border-slate-300 text-xs bg-white focus:outline-hidden focus:ring-2 focus:ring-blue-400"
+                                        className="w-full px-3 py-1.5 rounded-lg border border-slate-300 text-xs bg-white focus:outline-hidden focus:ring-2 focus:ring-sky-400"
                                     />
                                     <input
                                         type="text"
@@ -581,14 +610,14 @@ export default function ModalCobro({
                                         placeholder="N° Factura (ej. 104)"
                                         value={nroFacturaVenta}
                                         onChange={(e) => setNroFacturaVenta(e.target.value)}
-                                        className="w-full px-3 py-1.5 rounded-lg border border-slate-300 text-xs bg-white focus:outline-hidden focus:ring-2 focus:ring-blue-400"
+                                        className="w-full px-3 py-1.5 rounded-lg border border-slate-300 text-xs bg-white focus:outline-hidden focus:ring-2 focus:ring-sky-400"
                                     />
                                     <input
                                         type="text"
                                         placeholder="Nombre / Razón Social del cliente"
                                         value={razonSocialVenta}
                                         onChange={(e) => setRazonSocialVenta(e.target.value)}
-                                        className="w-full px-3 py-1.5 rounded-lg border border-slate-300 text-xs bg-white sm:col-span-2 focus:outline-hidden focus:ring-2 focus:ring-blue-400"
+                                        className="w-full px-3 py-1.5 rounded-lg border border-slate-300 text-xs bg-white sm:col-span-2 focus:outline-hidden focus:ring-2 focus:ring-sky-400"
                                     />
                                 </div>
                             )}
@@ -607,9 +636,17 @@ export default function ModalCobro({
                         <button
                             type="submit"
                             disabled={guardando || carrito.length === 0 || faltaDineroRecibido || hayCantidadInvalida || mixtoDescuadrado || descuentoInvalido}
-                            className="px-5 py-2 text-sm font-bold rounded-lg bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white shadow-xs transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                            className="px-5 py-2 text-sm font-bold rounded-lg bg-sky-600 hover:bg-sky-700 active:bg-sky-800 text-white shadow-xs transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                         >
-                            {guardando ? 'Procesando...' : `Confirmar Cobro (${metodoPago.toUpperCase()})`}
+                            {guardando ? (
+                                <span>Procesando...</span>
+                            ) : (
+                                <>
+                                    <CheckCircle2 className="w-4 h-4" />
+                                    <span>Confirmar Cobro ({metodoPago.toUpperCase()})</span>
+                                    <ArrowRight className="w-4 h-4" />
+                                </>
+                            )}
                         </button>
                     </div>
                 </form>

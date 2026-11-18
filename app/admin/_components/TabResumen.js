@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { History } from 'lucide-react';
 import GraficosFinancieros from '../GraficosFinancieros';
 import { anularVentaAction } from '../../../server/actions/ventas.actions';
 
@@ -207,7 +208,8 @@ export default function TabResumen({
                 <CardHeader className="border-b border-slate-100 pb-4">
                     <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                         <CardTitle className="text-base font-bold text-slate-900 flex items-center gap-2">
-                            <span>📊</span> Movimientos del Turno #{cajaAuditada?.id || '—'} ({cajaAuditada?.caja_fisica_nombre || 'Caja Principal'})
+                            <History className="w-4 h-4 text-slate-700" />
+                            <span>Movimientos del Turno #{cajaAuditada?.id || '—'} ({cajaAuditada?.caja_fisica_nombre || 'Caja Principal'})</span>
                         </CardTitle>
                         <Badge variant="secondary">
                             {movimientos.length} registro{movimientos.length !== 1 ? 's' : ''} auditado{movimientos.length !== 1 ? 's' : ''}
