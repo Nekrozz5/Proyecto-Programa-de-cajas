@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192" width="192" height="192">
+  <rect width="192" height="192" rx="36" fill="#0f172a"/>
+  <!-- Base / Cash Drawer -->
+  <rect x="28" y="126" width="136" height="34" rx="8" fill="#1e293b" stroke="#334155" stroke-width="3"/>
+  <rect x="80" y="140" width="32" height="6" rx="3" fill="#0284c7"/>
+  <circle cx="144" cy="143" r="3.5" fill="#10b981"/>
+  <!-- Main Register Body -->
+  <path d="M42 126 L56 74 L136 74 L150 126 Z" fill="#1e293b" stroke="#334155" stroke-width="3"/>
+  <!-- Keypad Area -->
+  <rect x="58" y="86" width="22" height="12" rx="3" fill="#334155"/>
+  <rect x="85" y="86" width="22" height="12" rx="3" fill="#334155"/>
+  <rect x="112" y="86" width="22" height="12" rx="3" fill="#10b981"/>
+  <rect x="58" y="104" width="22" height="12" rx="3" fill="#334155"/>
+  <rect x="85" y="104" width="22" height="12" rx="3" fill="#334155"/>
+  <rect x="112" y="104" width="22" height="12" rx="3" fill="#0284c7"/>
+  <!-- Terminal / Screen Stand & Screen -->
+  <rect x="91" y="62" width="10" height="12" fill="#334155"/>
+  <rect x="48" y="28" width="96" height="38" rx="6" fill="#090d16" stroke="#0284c7" stroke-width="2.5"/>
+  <text x="56" y="47" font-family="system-ui, -apple-system, sans-serif" font-weight="700" font-size="12" fill="#38bdf8">POS</text>
+  <text x="86" y="52" font-family="system-ui, -apple-system, sans-serif" font-weight="800" font-size="15" fill="#10b981">Bs 0.00</text>
+</svg>

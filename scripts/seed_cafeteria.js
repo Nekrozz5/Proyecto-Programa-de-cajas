@@ -1,5 +1,5 @@
 // ==========================================
-// SEED DE PRUEBA INTEGRAL: CAFETERÍA & BAKERY GOURMET (v11)
+// SEED DE PRUEBA INTEGRAL: CAFETERÍA & BAKERY GOURMET (v12)
 // Puebla la base de datos con datos completos y coherentes para pruebas exhaustivas
 // utilizando el 100% de las funcionalidades del sistema:
 // - Régimen General con liquidación fiscal (IVA 13%, IT 3%, base configurable y facturas)
@@ -8,6 +8,7 @@
 // - Materia prima métrica con hasta 6 decimales (NIC 2 CPP) y Kardex de Insumos v11
 // - Compras de reposición con factura (crédito fiscal) y mermas registradas en Kardex
 // - Productos directos de reventa con Kardex de Productos Directos
+// - Trazabilidad de Lotes y Vencimiento PEPS / FIFO (v12): multi-lote, selección manual y PEPS automático
 // - Productos elaborados por receta con escandallo multi-insumo
 // - Grupos de modificadores (v7): reemplazos de insumos, adiciones y operativos
 // - Combos y promociones (v8): descomposición atómica, límites de unidades y vigencia
@@ -17,7 +18,7 @@
 // - Egresos operativos y egresos respaldados con factura
 // - Inyecciones de sencillo (ingreso_efectivo)
 // - Arqueo ciego cuadrado en Turno #1 (ayer) y Turno #2 ABIERTO (hoy)
-// - Verificación automática de integridad algebraica de Kardex directo e insumos
+// - Verificación automática de integridad algebraica de Kardex directo, insumos y Lotes PEPS (v12)
 // ==========================================
 
 const bcrypt = require('bcryptjs');
@@ -55,7 +56,7 @@ function all(sql, params = []) {
 
 async function sembrarCafeteriaCompleta() {
     console.log('==================================================================');
-    console.log('--- INICIANDO SEED INTEGRAL DE CAFETERÍA & BAKERY (v11) ---');
+    console.log('--- INICIANDO SEED INTEGRAL DE CAFETERÍA & BAKERY (v12) ---');
     console.log('==================================================================');
 
     // 1. Limpieza de tablas operativas
@@ -72,6 +73,7 @@ async function sembrarCafeteriaCompleta() {
     await run(`DELETE FROM detalle_movimientos`);
     await run(`DELETE FROM movimientos`);
     await run(`DELETE FROM recetas`);
+    await run(`DELETE FROM producto_lotes`);
     await run(`DELETE FROM productos`);
     await run(`DELETE FROM insumos`);
     await run(`DELETE FROM cajas`);
@@ -116,20 +118,20 @@ async function sembrarCafeteriaCompleta() {
     const PASSWORD_UNIVERSAL = '12345678';
     const hashUniversal = await bcrypt.hash(PASSWORD_UNIVERSAL, BCRYPT_ROUNDS);
 
-    // Superadmin: carlos
+    // Propietario(a): carlos
     let carlosId;
     const carlos = await get(`SELECT id FROM usuarios WHERE LOWER(nombre) = 'carlos'`);
     if (!carlos) {
         const res = await run(
             `INSERT INTO usuarios (nombre, pin_o_password, rol, activo, puede_registrar_respaldo_fiscal)
-             VALUES ('carlos', ?, 'superadmin', 1, 1)`,
+             VALUES ('carlos', ?, 'propietario', 1, 1)`,
             [hashUniversal]
         );
         carlosId = res.lastID;
     } else {
         await run(
             `UPDATE usuarios
-             SET pin_o_password = ?, rol = 'superadmin', activo = 1, puede_registrar_respaldo_fiscal = 1
+             SET pin_o_password = ?, rol = 'propietario', activo = 1, puede_registrar_respaldo_fiscal = 1
              WHERE id = ?`,
             [hashUniversal, carlos.id]
         );
@@ -357,8 +359,8 @@ async function sembrarCafeteriaCompleta() {
         mapaProductos[prod.nombre] = typeof res === 'object' && res !== null ? res.id : res;
     }
 
-    // Compra con factura de producto directo (Kardex Directo)
-    console.log('    -> Registrando compra con factura fiscal de Kombucha (Kardex directo)...');
+    // Compra con factura de producto directo (Kardex Directo y segundo lote de Kombucha)
+    console.log('    -> Registrando compra con factura fiscal de Kombucha (Kardex directo y 2do lote)...');
     await queries.registrarCompraProductoDirecto(
         mapaProductos['Kombucha Frutos Rojos 330ml'],
         15, // 15 unidades más
@@ -368,6 +370,22 @@ async function sembrarCafeteriaCompleta() {
             proveedorNombre: 'Bebidas Naturales Andinas S.A.',
             proveedorNit: '1829402011',
             nroFacturaCompra: 'F-8921',
+            conFactura: true,
+            usuarioId: sofiaId
+        }
+    );
+
+    // Compra adicional de nuevo lote para Galletas de Avena (trazabilidad multi-lote v12)
+    console.log('    -> Registrando compra de segundo lote de Galletas de Avena (trazabilidad multi-lote v12)...');
+    await queries.registrarCompraProductoDirecto(
+        mapaProductos['Galletas de Avena Artesanales'],
+        20, // 20 unidades más
+        90.00,
+        '2027-02-28',
+        {
+            proveedorNombre: 'Panadería Artesanal del Valle',
+            proveedorNit: '9482019283',
+            nroFacturaCompra: 'F-3310',
             conFactura: true,
             usuarioId: sofiaId
         }
@@ -828,10 +846,15 @@ async function sembrarCafeteriaCompleta() {
         luciaId,
         null,
         {
+            descuentoTotal: 4.00,
             descuento: 4.00,
             montoEfectivo: 10.00,
             montoQr: 20.00,
-            referenciaQr: 'TRANSF-BNB-998231'
+            referenciaQr: 'TRANSF-BNB-998231',
+            pagos: [
+                { metodo: 'efectivo', monto: 10.00, recibido: 20.00 },
+                { metodo: 'qr', monto: 20.00, referencia: 'TRANSF-BNB-998231' }
+            ]
         }
     );
 
@@ -1023,22 +1046,71 @@ async function sembrarCafeteriaCompleta() {
         carlosId
     );
 
-    // Verificación final de integridad de Kardex
-    console.log('\n--- VERIFICACIÓN AUTOMÁTICA DE INTEGRIDAD ALGEBRAICA DE KARDEX ---');
+    // Venta de hoy 3: Trazabilidad de lotes (v12)
+    // 1 Galleta de Avena especificando lote manual y 1 Kombucha con PEPS automático
+    const loteGalletaReciente = await get(
+        `SELECT id, fecha_vencimiento, stock FROM producto_lotes WHERE producto_id = ? ORDER BY fecha_vencimiento DESC LIMIT 1`,
+        [mapaProductos['Galletas de Avena Artesanales']]
+    );
+
+    console.log(`    -> Turno 2: Venta 3 con selección manual de lote #${loteGalletaReciente.id} (${loteGalletaReciente.fecha_vencimiento}) y Kombucha con PEPS automático...`);
+    await queries.registrarVentaCompleta(
+        turno2Id,
+        [
+            {
+                productoId: mapaProductos['Galletas de Avena Artesanales'],
+                cantidad: 1,
+                loteId: loteGalletaReciente.id
+            },
+            {
+                productoId: mapaProductos['Kombucha Frutos Rojos 330ml'],
+                cantidad: 1
+                // Sin loteId: aplica automáticamente PEPS (consume del lote que vence primero)
+            }
+        ],
+        'efectivo',
+        25.00,
+        'Snack tarde con selección de lote fresco y política PEPS',
+        carlosId
+    );
+
+    // Verificación final de integridad de Kardex y Lotes
+    console.log('\n--- VERIFICACIÓN AUTOMÁTICA DE INTEGRIDAD ALGEBRAICA (KARDEX & LOTES PEPS) ---');
     const checkKardexDirecto = await queries.verificarIntegridadKardexDirecto();
     const checkKardexInsumos = await queries.verificarIntegridadKardexInsumos();
 
+    // Verificación de consistencia de producto_lotes vs stock en productos directos
+    const checkLotes = await all(
+        `SELECT p.id as producto_id, p.nombre, p.stock as stock_producto,
+                COALESCE(SUM(pl.stock), 0) as stock_total_lotes,
+                COUNT(pl.id) as cantidad_lotes
+         FROM productos p
+         LEFT JOIN producto_lotes pl ON p.id = pl.producto_id AND pl.activo = 1
+         WHERE p.tipo_inventario = 'directo' AND p.fecha_vencimiento IS NOT NULL
+         GROUP BY p.id`
+    );
+
+    let descuadresLotes = 0;
+    for (const cl of checkLotes) {
+        if (Math.abs(Number(cl.stock_producto) - Number(cl.stock_total_lotes)) > 0.001) {
+            descuadresLotes++;
+            console.error(`Descuadre en lotes de ${cl.nombre}: Stock producto ${cl.stock_producto} vs Suma lotes ${cl.stock_total_lotes}`);
+        }
+    }
+    const lotesOk = descuadresLotes === 0;
+
     console.log(`[Kardex Directo] Válido: ${checkKardexDirecto.integridadOk} | Productos auditados: ${checkKardexDirecto.totalProductosDirectos} | Descuadres: ${checkKardexDirecto.totalDescuadres}`);
     console.log(`[Kardex Insumos] Válido: ${checkKardexInsumos.integridadOk} | Insumos auditados: ${checkKardexInsumos.totalInsumos} | Descuadres: ${checkKardexInsumos.totalDescuadres}`);
+    console.log(`[Lotes PEPS v12] Válido: ${lotesOk} | Productos con lotes: ${checkLotes.length} | Descuadres: ${descuadresLotes}`);
 
-    if (!checkKardexDirecto.integridadOk || !checkKardexInsumos.integridadOk) {
-        console.error('ADVERTENCIA: Se detectaron descuadres en la verificación de Kardex.');
+    if (!checkKardexDirecto.integridadOk || !checkKardexInsumos.integridadOk || !lotesOk) {
+        console.error('ADVERTENCIA: Se detectaron descuadres en la verificación de Kardex / Lotes.');
     } else {
-        console.log('✓ Kardex dual auditado y matemáticamente consistente al 100% (0 descuadres).');
+        console.log('✓ Kardex dual y trazabilidad de lotes PEPS auditados y matemáticamente consistentes al 100% (0 descuadres).');
     }
 
     console.log('==================================================================');
-    console.log(' SEED INTEGRAL v11 COMPLETADO EXITOSAMENTE');
+    console.log(' SEED INTEGRAL v12 COMPLETADO EXITOSAMENTE');
     console.log('==================================================================');
     console.log(`- Establecimiento: Café Gourmet & Bakery Aroma`);
     console.log(`- Régimen Fiscal: Régimen General (IVA 13%, IT 3%, Base: todas_las_ventas)`);
@@ -1046,13 +1118,14 @@ async function sembrarCafeteriaCompleta() {
     console.log(`- Categorías: ${categorias.length} categorías creadas`);
     console.log(`- Insumos de almacén: ${listaInsumos.length} con Kardex y NIC 2`);
     console.log(`- Productos en catálogo: ${Object.keys(mapaProductos).length} (Directos, Recetas y Combos)`);
+    console.log(`- Trazabilidad de Lotes (v12): Lotes activos con control PEPS / FIFO y selección manual`);
     console.log(`- Grupos de Modificadores: 4 grupos (Leches con reemplazo, Endulzante, Extras, Sándwiches)`);
     console.log(`- Combos configurados: 3 combos (Estándar, Con límite regresivo y Con vigencia temporal)`);
     console.log(`- Turno #1 (Ayer, CERRADO): Cuadrado con arqueo ciego, pagos mixtos, facturas y anulación`);
     console.log(`- Turno #2 (Hoy, ABIERTO): En Caja 1 con fondo de Bs 150.00 a nombre de "carlos"`);
     console.log('------------------------------------------------------------------');
     console.log('Credenciales de acceso para pruebas:');
-    console.log('  - Propietario (superadmin): carlos   | Clave: 12345678');
+    console.log('  - Propietario(a): carlos   | Clave: 12345678');
     console.log('  - Admin:       sofia    | Clave: 12345678');
     console.log('  - Cajera 1:    lucia    | Clave: 12345678');
     console.log('  - Cajero 2:    marcos   | Clave: 12345678');

@@ -307,25 +307,23 @@ export default function CatalogoProductos({
                                 return (
                                     <div
                                         key={p.id}
+                                        onClick={() => !sinStock && onSeleccionarProducto && onSeleccionarProducto(prodConLotePeps)}
                                         className={`group relative flex flex-col justify-between text-left p-3.5 rounded-xl border transition-all duration-150 min-h-[140px] select-none ${
                                             sinStock
                                                 ? 'bg-slate-50 border-slate-200 opacity-60 cursor-not-allowed'
                                                 : cantidadEnCarrito > 0
-                                                    ? 'bg-sky-50/70 border-sky-500 ring-2 ring-sky-500/20 shadow-sm'
-                                                    : 'bg-white border-slate-200 hover:border-sky-300 hover:shadow-md shadow-sm'
+                                                    ? 'bg-sky-50/70 border-sky-500 ring-2 ring-sky-500/20 shadow-sm cursor-pointer hover:border-sky-400 hover:shadow-md active:scale-[0.99]'
+                                                    : 'bg-white border-slate-200 hover:border-sky-300 hover:shadow-md shadow-sm cursor-pointer active:scale-[0.99]'
                                         }`}
                                     >
                                         {cantidadEnCarrito > 0 && (
-                                            <Badge className="absolute top-2.5 right-2.5 bg-sky-600 hover:bg-sky-600 text-white font-bold text-[11px] px-2 py-0.5 shadow-sm">
+                                            <Badge className="absolute top-2.5 right-2.5 bg-sky-600 hover:bg-sky-600 text-white font-bold text-[11px] px-2 py-0.5 shadow-sm pointer-events-none">
                                                 {cantidadEnCarrito} en pedido
                                             </Badge>
                                         )}
 
-                                        {/* Área clickeable principal del producto */}
-                                        <div
-                                            onClick={() => !sinStock && onSeleccionarProducto && onSeleccionarProducto(prodConLotePeps)}
-                                            className={`${sinStock ? 'cursor-not-allowed' : 'cursor-pointer'}`}
-                                        >
+                                        {/* Contenido principal del producto */}
+                                        <div className="w-full pointer-events-none">
                                             <div className="flex items-center gap-1.5 flex-wrap pr-14 mb-1">
                                                 <Badge variant="outline" className="text-[10px] text-slate-600 bg-slate-50 border-slate-200 px-1.5 py-0 font-medium max-w-[130px] truncate">
                                                     {(p.categoria && p.categoria.trim()) ? p.categoria : 'Sin categoría'}
@@ -385,7 +383,10 @@ export default function CatalogoProductos({
 
                                         {/* Selector de Lotes Diferenciados por Fecha de Vencimiento */}
                                         {tieneMultiplesLotes ? (
-                                            <div className="mt-2.5 pt-2 border-t border-slate-100 space-y-1.5">
+                                            <div
+                                                className="mt-2.5 pt-2 border-t border-slate-100 space-y-1.5"
+                                                onClick={(e) => e.stopPropagation()}
+                                            >
                                                 <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center justify-between">
                                                     <span className="flex items-center gap-1">
                                                         <Calendar className="w-3 h-3 text-slate-400" />
@@ -460,7 +461,7 @@ export default function CatalogoProductos({
                                                 </div>
                                             </div>
                                         ) : (
-                                            <div className="mt-3 pt-2 border-t border-slate-100 flex flex-col gap-1">
+                                            <div className="mt-3 pt-2 border-t border-slate-100 flex flex-col gap-1 pointer-events-none">
                                                 <div className="text-[11px] font-medium">
                                                     {esLibre ? (
                                                         <span className="text-emerald-700 font-medium">Disponible (Libre)</span>

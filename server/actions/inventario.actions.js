@@ -15,7 +15,7 @@ import {
     validarFormatoFechaYYYYMMDD
 } from '../repositories/inventario.repo';
 
-const ROLES_ADMIN = ['admin', 'superadmin', 'developer'];
+const ROLES_ADMIN = ['admin', 'propietario', 'developer'];
 
 /**
  * Registra una compra de mercadería directa para reventa, aplicando Costo Promedio Ponderado (CPP).
@@ -36,6 +36,12 @@ export async function comprarProductoDirectoAction(datos) {
                 proveedorNit: datos.proveedorNit || null,
                 nroFacturaCompra: datos.nroFacturaCompra || null,
                 conFactura: Boolean(datos.conFactura),
+                nroAutorizacionCuf: Boolean(datos.conFactura) && (datos.nroAutorizacionCuf || datos.cufAutorizacion)
+                    ? String(datos.nroAutorizacionCuf || datos.cufAutorizacion).trim()
+                    : '',
+                codigoControl: Boolean(datos.conFactura) && datos.codigoControl
+                    ? String(datos.codigoControl).trim()
+                    : '0',
                 usuarioId: usuario.id
             }
         );
@@ -78,6 +84,12 @@ export async function comprarInsumoAction(datos) {
                 proveedorNit: datos.proveedorNit || null,
                 nroFacturaCompra: datos.nroFacturaCompra || null,
                 conFactura: Boolean(datos.conFactura),
+                nroAutorizacionCuf: Boolean(datos.conFactura) && (datos.nroAutorizacionCuf || datos.cufAutorizacion)
+                    ? String(datos.nroAutorizacionCuf || datos.cufAutorizacion).trim()
+                    : '',
+                codigoControl: Boolean(datos.conFactura) && datos.codigoControl
+                    ? String(datos.codigoControl).trim()
+                    : '0',
                 usuarioId: usuario.id
             }
         );

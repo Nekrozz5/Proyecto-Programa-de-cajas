@@ -14,7 +14,7 @@ import {
     asignarModificadoresAProducto
 } from '../repositories/catalogo.repo';
 
-const ROLES_ADMIN = ['admin', 'superadmin', 'developer'];
+const ROLES_ADMIN = ['admin', 'propietario', 'developer'];
 
 /**
  * Registra una nueva categoría en el catálogo de productos.

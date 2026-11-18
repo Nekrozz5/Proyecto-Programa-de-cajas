@@ -17,11 +17,11 @@ if (!globalThis.__POS_INSTANCE_BOOT_ID__) {
 }
 const INSTANCE_BOOT_ID = globalThis.__POS_INSTANCE_BOOT_ID__;
 
-const ROLES_ADMINISTRATIVOS_O_TECNICOS = ['developer', 'superadmin', 'admin'];
+const ROLES_ADMINISTRATIVOS_O_TECNICOS = ['developer', 'propietario', 'admin'];
 
 const TTL_POR_ROL = {
     developer: 15 * 60,    // 15 minutos (rol técnico de diagnóstico puntual)
-    superadmin: 30 * 60,   // 30 minutos
+    propietario: 30 * 60,  // 30 minutos
     admin: 30 * 60,        // 30 minutos
     user: 8 * 60 * 60      // 8 horas (turno normal de cajero)
 };

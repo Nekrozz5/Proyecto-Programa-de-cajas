@@ -74,7 +74,9 @@ export async function POST(request) {
         if (accion === 'instalacion_inicial') {
             const resultado = await inicializarSistemaPrimeraVez({
                 ...body,
-                setupToken: typeof body.setupToken === 'string' ? body.setupToken : ''
+                setupToken: typeof body.setupToken === 'string' ? body.setupToken : '',
+                smtp: body.smtp || null,
+                destinatarioInicial: body.destinatarioInicial || null
             });
             return NextResponse.json({ ok: true, ...resultado }, { headers: HEADERS_SIN_CACHE });
         }

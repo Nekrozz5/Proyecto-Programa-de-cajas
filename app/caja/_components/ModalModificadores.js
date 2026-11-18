@@ -161,19 +161,19 @@ export default function ModalModificadores({
                                                         });
                                                     }
                                                 }}
-                                                className={`p-2.5 rounded-lg text-left transition-all cursor-pointer flex flex-col justify-between ${
+                                                className={`p-2.5 rounded-lg text-left transition-all cursor-pointer flex flex-col justify-between w-full select-none active:scale-[0.98] ${
                                                     esSeleccionado
                                                         ? 'border-2 border-sky-600 bg-sky-50/90 text-sky-950 font-bold shadow-xs'
                                                         : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 hover:border-slate-400 font-medium'
                                                 }`}
                                             >
-                                                <div className="flex items-start justify-between gap-1">
+                                                <div className="flex items-start justify-between gap-1 w-full pointer-events-none">
                                                     <span className="text-xs sm:text-sm line-clamp-2">{op.nombre}</span>
                                                     {esSeleccionado && (
                                                         <Check className="w-3.5 h-3.5 text-sky-600 shrink-0 mt-0.5" />
                                                     )}
                                                 </div>
-                                                <div className={`text-xs mt-1.5 font-bold ${
+                                                <div className={`text-xs mt-1.5 font-bold pointer-events-none ${
                                                     Number(op.precio_adicional || 0) > 0 ? 'text-emerald-700' : 'text-slate-400 font-normal'
                                                 }`}>
                                                     {Number(op.precio_adicional || 0) > 0 ? `+Bs ${Number(op.precio_adicional).toFixed(2)}` : 'Sin recargo'}

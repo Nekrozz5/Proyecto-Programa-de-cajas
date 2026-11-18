@@ -101,6 +101,9 @@ const dbProxy = {
             .catch((err) => {
                 console.error('Error en db.serialize tras migración:', err.message);
             });
+    },
+    obtenerConexion() {
+        return asegurarConexionYMigraciones();
     }
 };
 

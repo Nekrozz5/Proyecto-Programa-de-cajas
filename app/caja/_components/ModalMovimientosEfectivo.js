@@ -41,6 +41,8 @@ export default function ModalMovimientosEfectivo({
     const [nroFacturaEgreso, setNroFacturaEgreso] = useState('');
     const [nitProveedorEgreso, setNitProveedorEgreso] = useState('');
     const [nombreProveedorEgreso, setNombreProveedorEgreso] = useState('');
+    const [cufAutorizacionEgreso, setCufAutorizacionEgreso] = useState('');
+    const [codigoControlEgreso, setCodigoControlEgreso] = useState('0');
 
     useEffect(() => {
         if (tipoInicial) setPestaña(tipoInicial);
@@ -120,6 +122,8 @@ export default function ModalMovimientosEfectivo({
                 tipoComprobante: tipoComprobanteEgreso,
                 conFactura: tipoComprobanteEgreso === 'factura',
                 nroFactura: tipoComprobanteEgreso === 'factura' && nroFacturaEgreso.trim() !== '' ? nroFacturaEgreso.trim() : null,
+                cufAutorizacion: tipoComprobanteEgreso === 'factura' && cufAutorizacionEgreso.trim() !== '' ? cufAutorizacionEgreso.trim() : '',
+                codigoControl: tipoComprobanteEgreso === 'factura' && codigoControlEgreso.trim() !== '' ? codigoControlEgreso.trim() : '0',
                 proveedorNit: tipoComprobanteEgreso === 'factura' && nitProveedorEgreso.trim() !== '' ? nitProveedorEgreso.trim() : null,
                 proveedorNombre: nombreProveedorEgreso.trim() !== '' ? nombreProveedorEgreso.trim() : null
             });
@@ -131,6 +135,8 @@ export default function ModalMovimientosEfectivo({
             setNroFacturaEgreso('');
             setNitProveedorEgreso('');
             setNombreProveedorEgreso('');
+            setCufAutorizacionEgreso('');
+            setCodigoControlEgreso('0');
             setTipoComprobanteEgreso('recibo');
 
             onMovimientoExitoso?.(`Egreso #${res.data?.movimientoId} registrado por ${usuarioActual?.nombre || 'Cajero'}.`);
@@ -309,23 +315,41 @@ export default function ModalMovimientosEfectivo({
                                     className="w-full px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-xs text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-sky-400"
                                 />
                                 {tipoComprobanteEgreso === 'factura' && (
-                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
-                                        <input
-                                            type="text"
-                                            required
-                                            placeholder="NIT del Proveedor"
-                                            value={nitProveedorEgreso}
-                                            onChange={(e) => setNitProveedorEgreso(e.target.value)}
-                                            className="w-full px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-xs text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-sky-400"
-                                        />
-                                        <input
-                                            type="text"
-                                            required
-                                            placeholder="N° de Factura"
-                                            value={nroFacturaEgreso}
-                                            onChange={(e) => setNroFacturaEgreso(e.target.value)}
-                                            className="w-full px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-xs text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-sky-400"
-                                        />
+                                    <div className="space-y-2 pt-1">
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                            <input
+                                                type="text"
+                                                required
+                                                placeholder="NIT del Proveedor"
+                                                value={nitProveedorEgreso}
+                                                onChange={(e) => setNitProveedorEgreso(e.target.value)}
+                                                className="w-full px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-xs text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-sky-400"
+                                            />
+                                            <input
+                                                type="text"
+                                                required
+                                                placeholder="N° de Factura"
+                                                value={nroFacturaEgreso}
+                                                onChange={(e) => setNroFacturaEgreso(e.target.value)}
+                                                className="w-full px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-xs text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-sky-400"
+                                            />
+                                        </div>
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                            <input
+                                                type="text"
+                                                placeholder="N° Autorización / CUF (Opcional)"
+                                                value={cufAutorizacionEgreso}
+                                                onChange={(e) => setCufAutorizacionEgreso(e.target.value)}
+                                                className="w-full px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-xs text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-sky-400"
+                                            />
+                                            <input
+                                                type="text"
+                                                placeholder="Código de Control (Opcional, def: 0)"
+                                                value={codigoControlEgreso}
+                                                onChange={(e) => setCodigoControlEgreso(e.target.value)}
+                                                className="w-full px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-xs text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-sky-400"
+                                            />
+                                        </div>
                                     </div>
                                 )}
                             </div>

@@ -13,7 +13,8 @@ import {
     Eye, 
     FileSpreadsheet, 
     RotateCcw, 
-    CheckCircle2 
+    CheckCircle2,
+    Smartphone 
 } from 'lucide-react';
 import { abrirTurnoAction, reabrirTurnoAction } from '../../../server/actions/turnos.actions';
 import {
@@ -59,6 +60,24 @@ export default function TabTurnosArqueos({
     // Notificaciones por correo
     const [enviandoPruebaEmail, setEnviandoPruebaEmail] = useState(false);
     const [enviandoEmailCajaId, setEnviandoEmailCajaId] = useState(null);
+
+    const cajaAuditada = datos?.cajaAuditada;
+    const totalAppsAuditada = (() => {
+        const pagosApps = (datos?.desglosePagos || [])
+            .filter((p) => p.metodoPago === 'pedidos_ya' || p.metodoPago === 'yango')
+            .reduce((acc, p) => acc + Number(p.total || 0), 0);
+        if (pagosApps > 0) return pagosApps;
+
+        const movsApps = (datos?.movimientos || [])
+            .filter((m) => m.tipo === 'ingreso' && m.estado !== 'anulado' && (
+                m.canal_venta === 'pedidos_ya' || m.metodo_pago === 'pedidos_ya' ||
+                m.canal_venta === 'yango' || m.metodo_pago === 'yango'
+            ))
+            .reduce((acc, m) => acc + Number(m.monto || 0), 0);
+        if (movsApps > 0) return movsApps;
+
+        return Number(cajaAuditada?.ventas_apps_total || (Number(cajaAuditada?.ventas_pedidos_ya || 0) + Number(cajaAuditada?.ventas_yango || 0)));
+    })();
 
     const cajasFisicasDisponibles = (datos?.cajasFisicas || []).filter(
         (cf) => Number(cf.activa) === 1 && !cf.turno_abierto_id
@@ -529,6 +548,26 @@ export default function TabTurnosArqueos({
                 </div>
             )}
 
+            {/* TARJETA INFORMATIVA DIFERENCIADA DE VENTAS POR APPS DE COMIDA */}
+            {cajaAuditada && (
+                <div className="p-3.5 rounded-lg border border-purple-200 bg-purple-50 flex justify-between items-center flex-wrap gap-3">
+                    <div className="flex items-center gap-2.5 text-xs">
+                        <Smartphone className="w-5 h-5 text-purple-600 shrink-0" />
+                        <div>
+                            <span className="font-bold text-purple-950 text-sm">
+                                Turno #{cajaAuditada.id} ({cajaAuditada.caja_fisica_nombre || 'Caja Principal'}) — Ventas por Apps (PedidosYa / Yango): Bs {totalAppsAuditada.toFixed(2)}
+                            </span>
+                            <div className="text-purple-700 text-xs mt-0.5">
+                                Cobro liquidado externamente (no afecta arqueo en efectivo).
+                            </div>
+                        </div>
+                    </div>
+                    <Badge variant="outline" className="bg-purple-100 text-purple-800 border-purple-300 font-semibold text-xs">
+                        Plataformas Externas
+                    </Badge>
+                </div>
+            )}
+
             {/* TABLA HISTORIAL DE TURNOS DE CAJA */}
             {(datos?.historialCajas || []).length === 0 ? (
                 <p className="text-slate-500 text-sm">Aún no se ha abierto ni cerrado ningún turno de caja.</p>
@@ -622,7 +661,14 @@ export default function TabTurnosArqueos({
                                                 )}
                                             </div>
                                         </TableCell>
-                                        <TableCell>Bs {Number(c.qr_esperado || 0).toFixed(2)}</TableCell>
+                                        <TableCell>
+                                            <div className="font-semibold text-slate-800">Bs {Number(c.qr_esperado || 0).toFixed(2)}</div>
+                                            {Number(datos?.cajaAuditada?.id) === Number(c.id) && totalAppsAuditada > 0 && (
+                                                <span className="text-[11px] text-purple-700 font-bold block" title="Cobro liquidado externamente (no afecta arqueo en efectivo)">
+                                                    Apps: Bs {totalAppsAuditada.toFixed(2)}
+                                                </span>
+                                            )}
+                                        </TableCell>
                                         <TableCell>
                                             <div className="flex flex-col gap-1.5 min-w-[170px]">
                                                 <div className="flex gap-1.5 flex-wrap">

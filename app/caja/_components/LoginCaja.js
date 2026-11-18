@@ -49,7 +49,8 @@ export default function LoginCaja({
 
             setLoginPin('');
             setLoginNombreManualCaja('');
-            onLoginExitoso?.(data.usuario, `Sesión iniciada como ${data.usuario.nombre} (${data.usuario.rol}).`);
+            const rolEtiqueta = (data.usuario.rol === 'propietario' || data.usuario.rol === 'superadmin') ? 'Propietario(a)' : data.usuario.rol === 'admin' ? 'Administrador' : data.usuario.rol === 'developer' ? 'Desarrollador' : 'Cajero';
+            onLoginExitoso?.(data.usuario, `Sesión iniciada como ${data.usuario.nombre} (${rolEtiqueta}).`);
         } catch (err) {
             setLoginPin('');
             onError?.(err.message);

@@ -791,7 +791,7 @@ async function generarReporteExcel(cajaId = null, filtros = {}) {
                 ROUND(i.stock_actual * i.costo_por_unidad, 2) as valor_total,
                 i.stock_seguridad,
                 i.tiempo_entrega_dias,
-                datetime(i.fecha_actualizacion, 'localtime') as fecha_actualizacion
+                COALESCE((SELECT datetime(MAX(fecha_hora), 'localtime') FROM movimientos_insumos WHERE insumo_id = i.id), datetime('now', 'localtime')) as fecha_actualizacion
          FROM insumos i
          WHERE i.activo = 1
          ORDER BY i.nombre ASC`
@@ -807,7 +807,7 @@ async function generarReporteExcel(cajaId = null, filtros = {}) {
                 ROUND(COALESCE(p.stock, 0) * COALESCE(p.costo, 0), 2) as valor_total,
                 p.stock_minimo as stock_seguridad,
                 1 as tiempo_entrega_dias,
-                datetime(p.fecha_creacion, 'localtime') as fecha_actualizacion
+                COALESCE((SELECT datetime(MAX(fecha_hora), 'localtime') FROM movimientos_productos_directos WHERE producto_id = p.id), datetime('now', 'localtime')) as fecha_actualizacion
          FROM productos p
          WHERE p.activo = 1 AND p.tipo_inventario = 'directo'
          ORDER BY p.nombre ASC`
@@ -1484,6 +1484,382 @@ async function generarReporteExcel(cajaId = null, filtros = {}) {
     return await workbook.xlsx.writeBuffer();
 }
 
+/**
+ * Consulta unificada de compras y egresos facturados para el Registro de Compras y Ventas (RCV)
+ * según el estándar de 22 columnas requerido por el SIAT (Bolivia).
+ * Une mediante UNION ALL:
+ *  1. Compras facturadas de insumos (movimientos_insumos)
+ *  2. Compras facturadas de productos directos (movimientos_productos_directos)
+ *  3. Egresos de caja facturados (movimientos)
+ *
+ * @param {Object} filtros - { desde, hasta, cajaId }
+ * @returns {Promise<Array<Object>>} Registros con las 22 columnas base del SIAT + metadatos
+ */
+async function obtenerComprasFacturadasRCV({ desde, hasta, cajaId } = {}) {
+    const condIns = [
+        `mi.tipo = 'compra'`,
+        `COALESCE(mi.con_factura, 0) = 1`,
+        `(mi.movimiento_id IS NULL OR m.estado = 'completado')`
+    ];
+    const paramsIns = [];
+
+    const condPrd = [
+        `mpd.tipo = 'compra'`,
+        `COALESCE(mpd.con_factura, 0) = 1`,
+        `(mpd.movimiento_id IS NULL OR m.estado = 'completado')`
+    ];
+    const paramsPrd = [];
+
+    const condEgr = [
+        `m.tipo = 'egreso'`,
+        `m.tipo_comprobante = 'factura'`,
+        `m.estado = 'completado'`,
+        `NOT EXISTS (SELECT 1 FROM movimientos_insumos mi WHERE mi.movimiento_id = m.id AND COALESCE(mi.con_factura, 0) = 1)`,
+        `NOT EXISTS (SELECT 1 FROM movimientos_productos_directos mpd WHERE mpd.movimiento_id = m.id AND COALESCE(mpd.con_factura, 0) = 1)`
+    ];
+    const paramsEgr = [];
+
+    if (desde && /^\d{4}-\d{2}-\d{2}$/.test(String(desde).trim())) {
+        const d = String(desde).trim();
+        condIns.push(`date(mi.fecha_hora, 'localtime') >= ?`);
+        paramsIns.push(d);
+        condPrd.push(`date(mpd.fecha_hora, 'localtime') >= ?`);
+        paramsPrd.push(d);
+        condEgr.push(`date(m.fecha_hora, 'localtime') >= ?`);
+        paramsEgr.push(d);
+    }
+
+    if (hasta && /^\d{4}-\d{2}-\d{2}$/.test(String(hasta).trim())) {
+        const h = String(hasta).trim();
+        condIns.push(`date(mi.fecha_hora, 'localtime') <= ?`);
+        paramsIns.push(h);
+        condPrd.push(`date(mpd.fecha_hora, 'localtime') <= ?`);
+        paramsPrd.push(h);
+        condEgr.push(`date(m.fecha_hora, 'localtime') <= ?`);
+        paramsEgr.push(h);
+    }
+
+    if (cajaId !== undefined && cajaId !== null && String(cajaId).trim() !== '') {
+        const cid = Number(cajaId);
+        condIns.push(`m.caja_id = ?`);
+        paramsIns.push(cid);
+        condPrd.push(`m.caja_id = ?`);
+        paramsPrd.push(cid);
+        condEgr.push(`m.caja_id = ?`);
+        paramsEgr.push(cid);
+    }
+
+    const sql = `
+        SELECT * FROM (
+            SELECT 'INS-' || mi.id AS id,
+                   'insumo' AS origen,
+                   m.caja_id AS caja_id,
+                   mi.movimiento_id AS movimiento_id,
+                   datetime(mi.fecha_hora, 'localtime') AS fecha_hora,
+                   strftime('%d/%m/%Y', datetime(mi.fecha_hora, 'localtime')) AS fecha_factura,
+                   COALESCE(NULLIF(TRIM(mi.proveedor_nit), ''), '0') AS nit_proveedor,
+                   COALESCE(NULLIF(TRIM(mi.proveedor_nombre), ''), 'SIN NOMBRE') AS razon_social_proveedor,
+                   COALESCE(NULLIF(TRIM(mi.nro_factura_compra), ''), '0') AS nro_factura,
+                   '0' AS nro_dui_dim,
+                   COALESCE(NULLIF(TRIM(mi.nro_autorizacion_cuf), ''), '0') AS nro_autorizacion_cuf,
+                   ROUND(COALESCE(NULLIF(mi.monto_total_compra, 0), mi.cantidad * mi.costo_unitario), 2) AS importe_total_compra,
+                   0.0 AS importe_ice,
+                   0.0 AS importe_iehd,
+                   0.0 AS importe_ipj,
+                   0.0 AS tasas,
+                   0.0 AS otro_no_sujeto_credito_fiscal,
+                   0.0 AS importes_exentos,
+                   0.0 AS importe_gravado_tasa_cero,
+                   ROUND(COALESCE(NULLIF(mi.monto_total_compra, 0), mi.cantidad * mi.costo_unitario), 2) AS subtotal,
+                   0.0 AS descuentos,
+                   0.0 AS importe_gift_card,
+                   ROUND(COALESCE(NULLIF(mi.monto_total_compra, 0), mi.cantidad * mi.costo_unitario), 2) AS importe_base_credito_fiscal,
+                   ROUND(ROUND(COALESCE(NULLIF(mi.monto_total_compra, 0), mi.cantidad * mi.costo_unitario), 2) * 0.13, 2) AS credito_fiscal,
+                   COALESCE(mi.tipo_compra, 1) AS tipo_compra,
+                   COALESCE(NULLIF(TRIM(mi.codigo_control), ''), '0') AS codigo_control
+            FROM movimientos_insumos mi
+            LEFT JOIN movimientos m ON mi.movimiento_id = m.id
+            WHERE ${condIns.join(' AND ')}
+
+            UNION ALL
+
+            SELECT 'PRD-' || mpd.id AS id,
+                   'producto_directo' AS origen,
+                   m.caja_id AS caja_id,
+                   mpd.movimiento_id AS movimiento_id,
+                   datetime(mpd.fecha_hora, 'localtime') AS fecha_hora,
+                   strftime('%d/%m/%Y', datetime(mpd.fecha_hora, 'localtime')) AS fecha_factura,
+                   COALESCE(NULLIF(TRIM(mpd.proveedor_nit), ''), '0') AS nit_proveedor,
+                   COALESCE(NULLIF(TRIM(mpd.proveedor_nombre), ''), 'SIN NOMBRE') AS razon_social_proveedor,
+                   COALESCE(NULLIF(TRIM(mpd.nro_factura_compra), ''), '0') AS nro_factura,
+                   '0' AS nro_dui_dim,
+                   COALESCE(NULLIF(TRIM(mpd.nro_autorizacion_cuf), ''), '0') AS nro_autorizacion_cuf,
+                   ROUND(COALESCE(NULLIF(mpd.monto_total, 0), mpd.cantidad * mpd.costo_unitario), 2) AS importe_total_compra,
+                   0.0 AS importe_ice,
+                   0.0 AS importe_iehd,
+                   0.0 AS importe_ipj,
+                   0.0 AS tasas,
+                   0.0 AS otro_no_sujeto_credito_fiscal,
+                   0.0 AS importes_exentos,
+                   0.0 AS importe_gravado_tasa_cero,
+                   ROUND(COALESCE(NULLIF(mpd.monto_total, 0), mpd.cantidad * mpd.costo_unitario), 2) AS subtotal,
+                   0.0 AS descuentos,
+                   0.0 AS importe_gift_card,
+                   ROUND(COALESCE(NULLIF(mpd.monto_total, 0), mpd.cantidad * mpd.costo_unitario), 2) AS importe_base_credito_fiscal,
+                   ROUND(ROUND(COALESCE(NULLIF(mpd.monto_total, 0), mpd.cantidad * mpd.costo_unitario), 2) * 0.13, 2) AS credito_fiscal,
+                   COALESCE(mpd.tipo_compra, 1) AS tipo_compra,
+                   COALESCE(NULLIF(TRIM(mpd.codigo_control), ''), '0') AS codigo_control
+            FROM movimientos_productos_directos mpd
+            LEFT JOIN movimientos m ON mpd.movimiento_id = m.id
+            WHERE ${condPrd.join(' AND ')}
+
+            UNION ALL
+
+            SELECT 'EGR-' || m.id AS id,
+                   'egreso' AS origen,
+                   m.caja_id AS caja_id,
+                   m.id AS movimiento_id,
+                   datetime(m.fecha_hora, 'localtime') AS fecha_hora,
+                   strftime('%d/%m/%Y', datetime(m.fecha_hora, 'localtime')) AS fecha_factura,
+                   COALESCE(NULLIF(TRIM(m.cliente_nit_ci), ''), '0') AS nit_proveedor,
+                   COALESCE(NULLIF(TRIM(m.cliente_razon_social), ''), 'SIN NOMBRE') AS razon_social_proveedor,
+                   COALESCE(NULLIF(TRIM(m.nro_factura), ''), '0') AS nro_factura,
+                   '0' AS nro_dui_dim,
+                   COALESCE(NULLIF(TRIM(m.cuf_autorizacion), ''), '0') AS nro_autorizacion_cuf,
+                   ROUND(m.monto, 2) AS importe_total_compra,
+                   0.0 AS importe_ice,
+                   0.0 AS importe_iehd,
+                   0.0 AS importe_ipj,
+                   0.0 AS tasas,
+                   0.0 AS otro_no_sujeto_credito_fiscal,
+                   0.0 AS importes_exentos,
+                   0.0 AS importe_gravado_tasa_cero,
+                   ROUND(m.monto, 2) AS subtotal,
+                   0.0 AS descuentos,
+                   0.0 AS importe_gift_card,
+                   ROUND(m.monto, 2) AS importe_base_credito_fiscal,
+                   ROUND(COALESCE(NULLIF(m.iva_monto, 0), m.monto * 0.13), 2) AS credito_fiscal,
+                   COALESCE(m.tipo_compra, 1) AS tipo_compra,
+                   COALESCE(NULLIF(TRIM(m.codigo_control), ''), '0') AS codigo_control
+            FROM movimientos m
+            WHERE ${condEgr.join(' AND ')}
+        )
+        ORDER BY fecha_hora ASC, id ASC
+    `;
+
+    const filas = await allQuery(sql, [...paramsIns, ...paramsPrd, ...paramsEgr]);
+
+    return filas.map((fila, index) => ({
+        nro: index + 1,
+        fecha_factura: fila.fecha_factura,
+        nit_proveedor: String(fila.nit_proveedor),
+        razon_social_proveedor: fila.razon_social_proveedor,
+        nro_factura: String(fila.nro_factura),
+        nro_dui_dim: String(fila.nro_dui_dim),
+        nro_autorizacion_cuf: String(fila.nro_autorizacion_cuf),
+        importe_total_compra: redondear2(fila.importe_total_compra),
+        importe_ice: redondear2(fila.importe_ice),
+        importe_iehd: redondear2(fila.importe_iehd),
+        importe_ipj: redondear2(fila.importe_ipj),
+        tasas: redondear2(fila.tasas),
+        otro_no_sujeto_credito_fiscal: redondear2(fila.otro_no_sujeto_credito_fiscal),
+        importes_exentos: redondear2(fila.importes_exentos),
+        importe_gravado_tasa_cero: redondear2(fila.importe_gravado_tasa_cero),
+        subtotal: redondear2(fila.subtotal),
+        descuentos: redondear2(fila.descuentos),
+        importe_gift_card: redondear2(fila.importe_gift_card),
+        importe_base_credito_fiscal: redondear2(fila.importe_base_credito_fiscal),
+        credito_fiscal: redondear2(fila.credito_fiscal),
+        tipo_compra: Number(fila.tipo_compra),
+        codigo_control: String(fila.codigo_control),
+        // Metadatos auxiliares de trazabilidad
+        id: fila.id,
+        origen: fila.origen,
+        caja_id: fila.caja_id,
+        movimiento_id: fila.movimiento_id,
+        fecha_hora: fila.fecha_hora
+    }));
+}
+
+/**
+ * Genera el archivo del Registro de Compras y Ventas (RCV) - Compras en formato plano (.txt)
+ * delimitado por pipes (|) conforme a la especificación técnica oficial del SIAT (Bolivia).
+ * Consta de 22 columnas separadas por 21 caracteres pipe '|', sin cabecera.
+ *
+ * @param {Object} params - { desde, hasta, cajaId, usuarioGenerador }
+ * @returns {Promise<string>} Contenido del archivo TXT en UTF-8
+ */
+async function generarRCVComprasTXT({ desde, hasta, cajaId, usuarioGenerador } = {}) {
+    const compras = await obtenerComprasFacturadasRCV({ desde, hasta, cajaId });
+
+    const sanitizarPipe = (val) => String(val ?? '').replace(/[\r\n|]/g, ' ').trim();
+    const sanitizarCodigoPipe = (val) => String(val ?? '').replace(/[\r\n|\s]/g, '').trim();
+
+    const lineas = compras.map((c, index) => {
+        const correlativo = index + 1;
+
+        let fecha = c.fecha_factura;
+        if (!fecha || !/^\d{2}\/\d{2}\/\d{4}$/.test(fecha)) {
+            if (c.fecha_hora) {
+                const d = new Date(c.fecha_hora);
+                if (!isNaN(d.getTime())) {
+                    const pad = (n) => String(n).padStart(2, '0');
+                    fecha = `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()}`;
+                }
+            }
+        }
+        if (!fecha) fecha = '01/01/2000';
+
+        const nitProveedor = sanitizarCodigoPipe(c.nit_proveedor) || '0';
+        const razonSocial = sanitizarPipe(c.razon_social_proveedor) || 'SIN NOMBRE';
+        const nroFactura = sanitizarCodigoPipe(c.nro_factura) || '0';
+        const nroDuiDim = sanitizarCodigoPipe(c.nro_dui_dim) || '0';
+        const nroAutorizacionCuf = sanitizarCodigoPipe(c.nro_autorizacion_cuf) || '0';
+
+        const importeTotal = redondear2(c.importe_total_compra).toFixed(2);
+        const ice = redondear2(c.importe_ice).toFixed(2);
+        const iehd = redondear2(c.importe_iehd).toFixed(2);
+        const ipj = redondear2(c.importe_ipj).toFixed(2);
+        const tasas = redondear2(c.tasas).toFixed(2);
+        const noSujeto = redondear2(c.otro_no_sujeto_credito_fiscal).toFixed(2);
+        const exentas = redondear2(c.importes_exentos).toFixed(2);
+        const tasaCero = redondear2(c.importe_gravado_tasa_cero).toFixed(2);
+        const subtotal = redondear2(c.subtotal).toFixed(2);
+        const descuentos = redondear2(c.descuentos).toFixed(2);
+        const giftCard = redondear2(c.importe_gift_card).toFixed(2);
+        const baseCreditoFiscal = redondear2(c.importe_base_credito_fiscal).toFixed(2);
+        const creditoFiscal = redondear2(c.credito_fiscal).toFixed(2);
+        const tipoCompra = Number(c.tipo_compra) || 1;
+        const codigoControl = sanitizarCodigoPipe(c.codigo_control) || '0';
+
+        const columnas = [
+            correlativo,
+            fecha,
+            nitProveedor,
+            razonSocial,
+            nroFactura,
+            nroDuiDim,
+            nroAutorizacionCuf,
+            importeTotal,
+            ice,
+            iehd,
+            ipj,
+            tasas,
+            noSujeto,
+            exentas,
+            tasaCero,
+            subtotal,
+            descuentos,
+            giftCard,
+            baseCreditoFiscal,
+            creditoFiscal,
+            tipoCompra,
+            codigoControl
+        ];
+
+        return columnas.join('|');
+    });
+
+    return lineas.join('\r\n');
+}
+
+/**
+ * Genera el archivo oficial RCV Compras en formato Excel (.xlsx) estructurado
+ * con las 22 columnas normativas del SIAT y tipos numéricos exactos para importación / auditoría.
+ *
+ * @param {Object} params - { desde, hasta, cajaId, usuarioGenerador }
+ * @returns {Promise<Buffer>} Buffer binario del archivo Excel
+ */
+async function generarRCVComprasExcel({ desde, hasta, cajaId, usuarioGenerador } = {}) {
+    const negocio = await obtenerConfiguracionNegocio();
+    const compras = await obtenerComprasFacturadasRCV({ desde, hasta, cajaId });
+
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = `Sistema POS - ${negocio?.nombre_negocio || 'Mi Negocio'}`;
+    workbook.lastModifiedBy = usuarioGenerador || 'Administrador / Sistema';
+    workbook.created = new Date();
+    workbook.modified = new Date();
+
+    const hoja = workbook.addWorksheet('RCV Compras');
+    hoja.columns = [
+        { header: 'Nº', key: 'nro', width: 8 },
+        { header: 'Fecha de la Factura', key: 'fecha_factura', width: 16 },
+        { header: 'NIT Proveedor', key: 'nit_proveedor', width: 18 },
+        { header: 'Razón Social Proveedor', key: 'razon_social_proveedor', width: 32 },
+        { header: 'N° Factura', key: 'nro_factura', width: 16 },
+        { header: 'N° DUI/DIM', key: 'nro_dui_dim', width: 14 },
+        { header: 'N° Autorización / CUF', key: 'nro_autorizacion_cuf', width: 36 },
+        { header: 'Importe Total Compra', key: 'importe_total_compra', width: 22 },
+        { header: 'Importe ICE', key: 'importe_ice', width: 16 },
+        { header: 'Importe IEHD', key: 'importe_iehd', width: 16 },
+        { header: 'Importe IPJ', key: 'importe_ipj', width: 16 },
+        { header: 'Tasas', key: 'tasas', width: 14 },
+        { header: 'Otro No Sujeto a Crédito Fiscal', key: 'otro_no_sujeto_credito_fiscal', width: 26 },
+        { header: 'Importes Exentos', key: 'importes_exentos', width: 18 },
+        { header: 'Importe Compras Gravadas a Tasa Cero', key: 'importe_gravado_tasa_cero', width: 30 },
+        { header: 'Subtotal', key: 'subtotal', width: 18 },
+        { header: 'Descuentos / Bonificaciones / Rebajas Sujetas al IVA', key: 'descuentos', width: 28 },
+        { header: 'Importe Gift Card', key: 'importe_gift_card', width: 18 },
+        { header: 'Importe Base Crédito Fiscal', key: 'importe_base_credito_fiscal', width: 24 },
+        { header: 'Crédito Fiscal', key: 'credito_fiscal', width: 18 },
+        { header: 'Tipo Compra', key: 'tipo_compra', width: 14 },
+        { header: 'Código de Control', key: 'codigo_control', width: 20 }
+    ];
+
+    const filaCabecera = hoja.getRow(1);
+    filaCabecera.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    filaCabecera.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E293B' } };
+    filaCabecera.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+    filaCabecera.height = 28;
+
+    for (const c of compras) {
+        hoja.addRow({
+            nro: Number(c.nro),
+            fecha_factura: c.fecha_factura,
+            nit_proveedor: String(c.nit_proveedor),
+            razon_social_proveedor: c.razon_social_proveedor,
+            nro_factura: String(c.nro_factura),
+            nro_dui_dim: String(c.nro_dui_dim),
+            nro_autorizacion_cuf: String(c.nro_autorizacion_cuf),
+            importe_total_compra: redondear2(c.importe_total_compra),
+            importe_ice: redondear2(c.importe_ice),
+            importe_iehd: redondear2(c.importe_iehd),
+            importe_ipj: redondear2(c.importe_ipj),
+            tasas: redondear2(c.tasas),
+            otro_no_sujeto_credito_fiscal: redondear2(c.otro_no_sujeto_credito_fiscal),
+            importes_exentos: redondear2(c.importes_exentos),
+            importe_gravado_tasa_cero: redondear2(c.importe_gravado_tasa_cero),
+            subtotal: redondear2(c.subtotal),
+            descuentos: redondear2(c.descuentos),
+            importe_gift_card: redondear2(c.importe_gift_card),
+            importe_base_credito_fiscal: redondear2(c.importe_base_credito_fiscal),
+            credito_fiscal: redondear2(c.credito_fiscal),
+            tipo_compra: Number(c.tipo_compra),
+            codigo_control: String(c.codigo_control)
+        });
+    }
+
+    hoja.getColumn('A').alignment = { vertical: 'middle', horizontal: 'center' };
+    hoja.getColumn('B').alignment = { vertical: 'middle', horizontal: 'center' };
+    hoja.getColumn('C').alignment = { vertical: 'middle', horizontal: 'center' };
+    hoja.getColumn('E').alignment = { vertical: 'middle', horizontal: 'center' };
+    hoja.getColumn('F').alignment = { vertical: 'middle', horizontal: 'center' };
+    hoja.getColumn('G').alignment = { vertical: 'middle', horizontal: 'left' };
+    hoja.getColumn('U').alignment = { vertical: 'middle', horizontal: 'center' };
+    hoja.getColumn('V').alignment = { vertical: 'middle', horizontal: 'center' };
+
+    hoja.getColumn('A').numFmt = '0';
+    hoja.getColumn('U').numFmt = '0';
+
+    ['H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T'].forEach((col) => {
+        const colInst = hoja.getColumn(col);
+        colInst.numFmt = '#,##0.00';
+        colInst.alignment = { vertical: 'middle', horizontal: 'right' };
+    });
+
+    return await workbook.xlsx.writeBuffer();
+}
+
 module.exports = {
     obtenerEstadisticasCaja,
     obtenerDesgloseMetodosPago,
@@ -1491,5 +1867,8 @@ module.exports = {
     sanitizarTextoCSV,
     construirClausulaFiltroMovimientos,
     generarReporteCSV,
-    generarReporteExcel
+    generarReporteExcel,
+    obtenerComprasFacturadasRCV,
+    generarRCVComprasTXT,
+    generarRCVComprasExcel
 };

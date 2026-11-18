@@ -99,6 +99,12 @@ async function registrarCompraInsumo(insumoId, cantidadComprada, costoTotalCompr
         const provNit = datosFiscales?.proveedorNit ? String(datosFiscales.proveedorNit).trim() : null;
         const nroFac = datosFiscales?.nroFacturaCompra ? String(datosFiscales.nroFacturaCompra).trim() : null;
         const conFac = datosFiscales?.conFactura || nroFac ? 1 : 0;
+        const nroAutCuf = conFac && (datosFiscales?.nroAutorizacionCuf || datosFiscales?.cufAutorizacion)
+            ? String(datosFiscales.nroAutorizacionCuf || datosFiscales.cufAutorizacion).trim()
+            : '';
+        const codControl = conFac && datosFiscales?.codigoControl
+            ? String(datosFiscales.codigoControl).trim()
+            : '0';
         const usuarioId = datosFiscales?.usuarioId ? Number(datosFiscales.usuarioId) : null;
 
         let motivoFinal = provNombre
@@ -111,9 +117,9 @@ async function registrarCompraInsumo(insumoId, cantidadComprada, costoTotalCompr
         await runQuery(
             `INSERT INTO movimientos_insumos (
                 insumo_id, tipo, cantidad, stock_resultante, costo_unitario, costo_promedio_resultante, motivo,
-                proveedor_nombre, proveedor_nit, nro_factura_compra, con_factura, monto_total_compra, usuario_id
+                proveedor_nombre, proveedor_nit, nro_factura_compra, con_factura, nro_autorizacion_cuf, codigo_control, monto_total_compra, usuario_id
              )
-             VALUES (?, 'compra', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             VALUES (?, 'compra', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
                 insumoId,
                 cantValidada,
@@ -125,6 +131,8 @@ async function registrarCompraInsumo(insumoId, cantidadComprada, costoTotalCompr
                 provNit,
                 nroFac,
                 conFac,
+                nroAutCuf,
+                codControl,
                 costoValidado,
                 usuarioId
             ]
@@ -314,6 +322,12 @@ async function registrarCompraProductoDirecto(productoId, cantidadComprada, cost
         const provNit = datosFiscales?.proveedorNit ? String(datosFiscales.proveedorNit).trim() : null;
         const nroFac = datosFiscales?.nroFacturaCompra ? String(datosFiscales.nroFacturaCompra).trim() : null;
         const conFac = datosFiscales?.conFactura || nroFac ? 1 : 0;
+        const nroAutCuf = conFac && (datosFiscales?.nroAutorizacionCuf || datosFiscales?.cufAutorizacion)
+            ? String(datosFiscales.nroAutorizacionCuf || datosFiscales.cufAutorizacion).trim()
+            : '';
+        const codControl = conFac && datosFiscales?.codigoControl
+            ? String(datosFiscales.codigoControl).trim()
+            : '0';
         const usuarioId = datosFiscales?.usuarioId ? Number(datosFiscales.usuarioId) : null;
 
         let motivoKardex = provNombre ? `Compra directo a: ${provNombre}` : 'Compra de stock directo (CPP)';
@@ -323,8 +337,8 @@ async function registrarCompraProductoDirecto(productoId, cantidadComprada, cost
         await runQuery(
             `INSERT INTO movimientos_productos_directos (
                 producto_id, usuario_id, tipo, cantidad, stock_resultante, costo_unitario, costo_promedio_resultante, monto_total,
-                proveedor_nombre, proveedor_nit, nro_factura_compra, con_factura, motivo
-             ) VALUES (?, ?, 'compra', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                proveedor_nombre, proveedor_nit, nro_factura_compra, con_factura, nro_autorizacion_cuf, codigo_control, motivo
+             ) VALUES (?, ?, 'compra', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
                 productoId,
                 usuarioId,
@@ -337,6 +351,8 @@ async function registrarCompraProductoDirecto(productoId, cantidadComprada, cost
                 provNit,
                 nroFac,
                 conFac,
+                nroAutCuf,
+                codControl,
                 motivoKardex
             ]
         );
@@ -374,6 +390,24 @@ async function registrarMermaProductoDirecto(productoId, cantidadPerdida, motivo
             throw new Error(
                 `Stock insuficiente para descontar ${cantValidada} ${prod.unidad_medida || 'unidades'} de "${prod.nombre}". Stock actual: ${Number(prod.stock || 0)}`
             );
+        }
+
+        // Descontar de lotes por política PEPS si existen lotes activos
+        const lotes = await allQuery(
+            `SELECT id, stock FROM producto_lotes WHERE producto_id = ? AND activo = 1 AND stock > 0 ORDER BY fecha_vencimiento ASC, id ASC`,
+            [productoId]
+        );
+        if (lotes.length > 0) {
+            let remMerma = cantValidada;
+            for (const lot of lotes) {
+                if (remMerma <= 0) break;
+                const desc = Math.min(Number(lot.stock), remMerma);
+                await runQuery(
+                    `UPDATE producto_lotes SET stock = ROUND(stock - ?, 4) WHERE id = ? AND stock >= ?`,
+                    [desc, lot.id, desc]
+                );
+                remMerma = Number((remMerma - desc).toFixed(4));
+            }
         }
 
         const prodActualizado = await getQuery(`SELECT stock, costo FROM productos WHERE id = ?`, [productoId]);
@@ -590,6 +624,9 @@ async function obtenerKardexDetallado({ productoId = null, insumoId = null, desd
                     COALESCE(mpd.monto_total, ROUND(mpd.cantidad * mpd.costo_unitario, 2)) as monto_total,
                     COALESCE(mpd.proveedor_nombre, '') as proveedor_nombre,
                     COALESCE(mpd.nro_factura_compra, '') as nro_factura_compra,
+                    COALESCE(mpd.nro_autorizacion_cuf, '') as nro_autorizacion_cuf,
+                    COALESCE(mpd.codigo_control, '0') as codigo_control,
+                    COALESCE(mpd.con_factura, 0) as con_factura,
                     mpd.motivo
              FROM movimientos_productos_directos mpd
              INNER JOIN productos p ON mpd.producto_id = p.id
@@ -615,6 +652,9 @@ async function obtenerKardexDetallado({ productoId = null, insumoId = null, desd
                     COALESCE(mi.monto_total_compra, ROUND(mi.cantidad * mi.costo_unitario, 2)) as monto_total,
                     COALESCE(mi.proveedor_nombre, '') as proveedor_nombre,
                     COALESCE(mi.nro_factura_compra, '') as nro_factura_compra,
+                    COALESCE(mi.nro_autorizacion_cuf, '') as nro_autorizacion_cuf,
+                    COALESCE(mi.codigo_control, '0') as codigo_control,
+                    COALESCE(mi.con_factura, 0) as con_factura,
                     mi.motivo
              FROM movimientos_insumos mi
              INNER JOIN insumos i ON mi.insumo_id = i.id

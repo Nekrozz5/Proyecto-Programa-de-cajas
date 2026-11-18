@@ -19,6 +19,7 @@ export function CajaProvider({ children }) {
     const [movimientos, setMovimientos] = useState([]);
     const [configuracionNegocio, setConfiguracionNegocio] = useState(null);
     const [usuarioActual, setUsuarioActual] = useState(null);
+    const [siguienteNumeroFactura, setSiguienteNumeroFactura] = useState(1);
 
     // Estados de modales
     const [mostrarModalCobro, setMostrarModalCobro] = useState(false);
@@ -77,6 +78,7 @@ export function CajaProvider({ children }) {
             setUsuarios(data.usuarios || []);
             setMovimientos(data.cajaAbierta ? (data.movimientos || []) : []);
             setUsuarioActual(data.usuarioSesion || null);
+            setSiguienteNumeroFactura(data.siguienteNumeroFactura || 1);
         } catch (err) {
             setError(err.message);
         } finally {
@@ -243,6 +245,8 @@ export function CajaProvider({ children }) {
         handleCierreExitoso,
         handleMovimientoExitoso,
         handleTurnoAbierto,
+        siguienteNumeroFactura,
+        setSiguienteNumeroFactura,
         // Estado y métodos del carrito
         ...carritoHook
     };

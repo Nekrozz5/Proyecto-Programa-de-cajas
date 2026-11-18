@@ -23,7 +23,7 @@ import {
     enviarNotificacionCierreCaja
 } from '../lib/mailer';
 
-const ROLES_ADMIN = ['admin', 'superadmin', 'developer'];
+const ROLES_ADMIN = ['admin', 'propietario', 'developer'];
 const ROLES_DEVELOPER = ['developer'];
 
 /**

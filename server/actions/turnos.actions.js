@@ -8,9 +8,10 @@ import {
     reabrirCajaConPermiso
 } from '../repositories/cajas.repo';
 import { enviarNotificacionCierreCaja } from '../lib/mailer';
+import { registrarEgresoAction as registrarEgresoActionVentas } from './ventas.actions';
 
-const ROLES_OPERADORES = ['user', 'admin', 'superadmin', 'developer'];
-const ROLES_ADMIN = ['admin', 'superadmin', 'developer'];
+const ROLES_OPERADORES = ['user', 'admin', 'propietario', 'developer'];
+const ROLES_ADMIN = ['admin', 'propietario', 'developer'];
 
 /**
  * Abre un nuevo turno de operación en una estación física de caja.
@@ -72,4 +73,11 @@ export async function reabrirTurnoAction(datos) {
         revalidatePath('/admin');
         return { reabierto: true, cajaId: cajaIdNum };
     });
+}
+
+/**
+ * Registra un egreso de efectivo o QR vinculado al turno, con respaldo fiscal opcional (factura, CUF, código de control).
+ */
+export async function registrarEgresoAction(datos) {
+    return registrarEgresoActionVentas(datos);
 }

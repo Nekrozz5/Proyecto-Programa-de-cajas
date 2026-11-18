@@ -25,7 +25,37 @@ const {
     calcularSnapshotFiscalEgreso
 } = require('../domain/fiscal');
 
-async function registrarVentaCompleta(cajaId, items, metodoPago, montoRecibido = null, descripcion = 'Venta en mostrador', usuarioId = null, cambioEntregado = null, opcionesExtra = {}) {
+async function registrarVentaCompleta(
+    cajaId,
+    items,
+    metodoPago,
+    montoRecibido = null,
+    descripcion = 'Venta en mostrador',
+    usuarioId = null,
+    cambioEntregado = null,
+    opcionesExtra = {},
+    canalVentaParam = null,
+    datosEntregaParam = null,
+    referenciaExternaParam = null
+) {
+    // Soporte para invocación mediante objeto único de parámetros
+    if (typeof cajaId === 'object' && cajaId !== null && !Array.isArray(cajaId)) {
+        const obj = cajaId;
+        return await registrarVentaCompleta(
+            obj.cajaId ?? obj.caja_id,
+            obj.items,
+            obj.metodoPago ?? obj.metodo_pago,
+            obj.montoRecibido ?? obj.monto_recibido ?? null,
+            obj.descripcion ?? 'Venta en mostrador',
+            obj.usuarioId ?? obj.usuario_id ?? null,
+            obj.cambioEntregado ?? obj.cambio ?? null,
+            obj.opcionesExtra ?? obj,
+            obj.canalVenta ?? obj.canal_venta ?? null,
+            obj.datosEntrega ?? obj.datos_entrega ?? null,
+            obj.referenciaExterna ?? obj.referencia_externa ?? null
+        );
+    }
+
     if (!items || !Array.isArray(items) || items.length === 0) {
         throw new Error('La venta debe incluir al menos un producto.');
     }
@@ -34,9 +64,32 @@ async function registrarVentaCompleta(cajaId, items, metodoPago, montoRecibido =
         throw new Error('El usuario que registra la venta es obligatorio.');
     }
 
-    if (!['efectivo', 'qr', 'mixto'].includes(metodoPago)) {
-        throw new Error("Método de pago inválido. Debe ser 'efectivo', 'qr' o 'mixto'.");
+    const METODOS_PAGO_VALIDOS = ['efectivo', 'qr', 'mixto', 'pedidos_ya', 'yango'];
+    if (!METODOS_PAGO_VALIDOS.includes(metodoPago)) {
+        throw new Error("Método de pago inválido. Debe ser 'efectivo', 'qr', 'mixto', 'pedidos_ya' o 'yango'.");
     }
+
+    const CANALES_VENTA_VALIDOS = ['local', 'mototaxi', 'pedidos_ya', 'yango'];
+    let canalVenta = canalVentaParam
+        || opcionesExtra?.canalVenta
+        || opcionesExtra?.canal_venta
+        || (metodoPago === 'pedidos_ya' ? 'pedidos_ya' : (metodoPago === 'yango' ? 'yango' : 'local'));
+
+    if (!CANALES_VENTA_VALIDOS.includes(canalVenta)) {
+        throw new Error(`Canal de venta inválido: "${canalVenta}". Debe ser 'local', 'mototaxi', 'pedidos_ya' o 'yango'.`);
+    }
+
+    const datosEntregaRaw = datosEntregaParam !== null && datosEntregaParam !== undefined
+        ? datosEntregaParam
+        : (opcionesExtra?.datosEntrega ?? opcionesExtra?.datos_entrega ?? null);
+    const datosEntrega = typeof datosEntregaRaw === 'object' && datosEntregaRaw !== null
+        ? JSON.stringify(datosEntregaRaw)
+        : (datosEntregaRaw ? String(datosEntregaRaw).trim() : null);
+
+    const refExtRaw = referenciaExternaParam !== null && referenciaExternaParam !== undefined
+        ? referenciaExternaParam
+        : (opcionesExtra?.referenciaExterna ?? opcionesExtra?.referencia_externa ?? null);
+    const referenciaExterna = refExtRaw ? String(refExtRaw).trim() : null;
 
     // 1. Validar ítems y agrupar por (productoId + modificadores) sumando cantidades
     const mapaItemsAgrupados = new Map();
@@ -434,7 +487,9 @@ async function registrarVentaCompleta(cajaId, items, metodoPago, montoRecibido =
         // 4. Calcular descuentos y total a pagar
         const descuentoTotal = opcionesExtra?.descuentoTotal !== undefined
             ? redondear2(numeroNoNegativo(opcionesExtra.descuentoTotal, 'El descuento total'))
-            : 0;
+            : (opcionesExtra?.descuento !== undefined
+                ? redondear2(numeroNoNegativo(opcionesExtra.descuento, 'El descuento'))
+                : 0);
         if (descuentoTotal > subtotalBruto) {
             throw new Error(`El descuento (Bs ${descuentoTotal}) no puede superar el subtotal de la venta (Bs ${subtotalBruto}).`);
         }
@@ -468,8 +523,31 @@ async function registrarVentaCompleta(cajaId, items, metodoPago, montoRecibido =
             montoQr = montoNeto;
             recibidoEfectivo = null;
             cambioCalculado = 0;
+        } else if (metodoPago === 'pedidos_ya' || metodoPago === 'yango') {
+            montoEfectivo = 0;
+            montoQr = 0;
+            recibidoEfectivo = null;
+            cambioCalculado = 0;
+            if (!canalVenta || canalVenta === 'local') {
+                canalVenta = metodoPago;
+            }
         } else if (metodoPago === 'mixto') {
-            const desgloses = Array.isArray(opcionesExtra?.pagos) ? opcionesExtra.pagos : [];
+            let desgloses = Array.isArray(opcionesExtra?.pagos) ? opcionesExtra.pagos : [];
+            if (desgloses.length === 0 && (opcionesExtra?.montoEfectivo !== undefined || opcionesExtra?.montoQr !== undefined)) {
+                desgloses = [
+                    {
+                        metodo: 'efectivo',
+                        monto: opcionesExtra?.montoEfectivo !== undefined ? Number(opcionesExtra.montoEfectivo) : 0,
+                        recibido: montoRecibido !== null && montoRecibido !== undefined ? Number(montoRecibido) : (opcionesExtra?.montoEfectivo || 0)
+                    },
+                    {
+                        metodo: 'qr',
+                        monto: opcionesExtra?.montoQr !== undefined ? Number(opcionesExtra.montoQr) : 0,
+                        referencia: opcionesExtra?.referenciaQr || null
+                    }
+                ];
+            }
+
             const pagoEf = desgloses.find((p) => p && p.metodo === 'efectivo');
             const pagoQr = desgloses.find((p) => p && p.metodo === 'qr');
 
@@ -507,7 +585,7 @@ async function registrarVentaCompleta(cajaId, items, metodoPago, montoRecibido =
         const clienteRazonSocial = opcionesExtra?.clienteRazonSocial && String(opcionesExtra.clienteRazonSocial).trim() !== ''
             ? String(opcionesExtra.clienteRazonSocial).trim()
             : null;
-        const nroFactura = opcionesExtra?.nroFactura && String(opcionesExtra.nroFactura).trim() !== ''
+        let nroFactura = opcionesExtra?.nroFactura && String(opcionesExtra.nroFactura).trim() !== ''
             ? String(opcionesExtra.nroFactura).trim()
             : null;
 
@@ -520,6 +598,17 @@ async function registrarVentaCompleta(cajaId, items, metodoPago, montoRecibido =
             }
             if (Number(caja.habilita_respaldo_fiscal ?? 1) !== 1) {
                 throw new Error(`Operación no permitida: La estación "${caja.caja_fisica_nombre}" tiene deshabilitada la emisión de facturas fiscales.`);
+            }
+
+            // Asignación correlativa automática si no se proporcionó número manual
+            if (!nroFactura) {
+                const filaMax = await getQuery(
+                    `SELECT COALESCE(MAX(CAST(nro_factura AS INTEGER)), 0) + 1 AS siguiente_nro
+                     FROM movimientos
+                     WHERE tipo_comprobante = 'factura'
+                       AND CAST(nro_factura AS INTEGER) > 0`
+                );
+                nroFactura = String(filaMax?.siguiente_nro || 1);
             }
         }
 
@@ -545,6 +634,7 @@ async function registrarVentaCompleta(cajaId, items, metodoPago, montoRecibido =
         }
 
         // 7. Insertar cabecera de movimiento
+        const metodoPagoCabecera = (metodoPago === 'pedidos_ya' || metodoPago === 'yango') ? 'qr' : metodoPago;
         const resMov = await runQuery(
             `INSERT INTO movimientos (
                 caja_id, usuario_id, tipo, categoria_contable,
@@ -553,16 +643,17 @@ async function registrarVentaCompleta(cajaId, items, metodoPago, montoRecibido =
                 monto_recibido, cambio,
                 tipo_comprobante, nro_factura, cliente_nit_ci, cliente_razon_social,
                 regimen_tributario, iva_porcentaje, it_porcentaje, iva_monto, it_monto,
-                descripcion, estado
+                descripcion, estado,
+                canal_venta, datos_entrega, referencia_externa
              )
-             VALUES (?, ?, 'ingreso', 'venta', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'completado')`,
+             VALUES (?, ?, 'ingreso', 'venta', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'completado', ?, ?, ?)`,
             [
                 cajaId,
                 operador.id,
                 subtotalBruto,
                 descuentoTotal,
                 montoNeto,
-                metodoPago,
+                metodoPagoCabecera,
                 montoEfectivo,
                 montoQr,
                 referenciaQr,
@@ -577,7 +668,10 @@ async function registrarVentaCompleta(cajaId, items, metodoPago, montoRecibido =
                 itPorcSnapshot,
                 ivaMontoSnapshot,
                 itMontoSnapshot,
-                descripcion.trim()
+                descripcion.trim(),
+                canalVenta,
+                datosEntrega,
+                referenciaExterna
             ]
         );
         const movimientoId = resMov.lastID;
@@ -592,6 +686,11 @@ async function registrarVentaCompleta(cajaId, items, metodoPago, montoRecibido =
             await runQuery(
                 `INSERT INTO movimientos_pagos (movimiento_id, metodo_pago, monto, referencia) VALUES (?, 'qr', ?, ?)`,
                 [movimientoId, montoQr, referenciaQr]
+            );
+        } else if (metodoPago === 'pedidos_ya' || metodoPago === 'yango') {
+            await runQuery(
+                `INSERT INTO movimientos_pagos (movimiento_id, metodo_pago, monto, referencia) VALUES (?, ?, ?, ?)`,
+                [movimientoId, canalVenta, montoNeto, referenciaExterna]
             );
         } else if (metodoPago === 'mixto') {
             if (montoEfectivo > 0) {
@@ -777,6 +876,9 @@ async function registrarVentaCompleta(cajaId, items, metodoPago, montoRecibido =
             cambio: cambioCalculado,
             tipoComprobante,
             nroFactura,
+            canalVenta,
+            datosEntrega,
+            referenciaExterna,
             items: itemsProcesados
         };
     });
@@ -855,6 +957,12 @@ async function registrarEgreso(cajaId, monto, descripcion, metodoPago = 'efectiv
         const nroFactura = opcionesFiscales?.nroFactura && String(opcionesFiscales.nroFactura).trim() !== ''
             ? String(opcionesFiscales.nroFactura).trim()
             : null;
+        const cufAutorizacion = conFactura && (opcionesFiscales?.cufAutorizacion || opcionesFiscales?.nroAutorizacionCuf)
+            ? String(opcionesFiscales.cufAutorizacion || opcionesFiscales.nroAutorizacionCuf).trim()
+            : '';
+        const codigoControl = conFactura && opcionesFiscales?.codigoControl
+            ? String(opcionesFiscales.codigoControl).trim()
+            : '0';
         const proveedorNit = opcionesFiscales?.proveedorNit && String(opcionesFiscales.proveedorNit).trim() !== ''
             ? String(opcionesFiscales.proveedorNit).trim()
             : null;
@@ -881,11 +989,11 @@ async function registrarEgreso(cajaId, monto, descripcion, metodoPago = 'efectiv
                 caja_id, usuario_id, tipo, categoria_contable,
                 subtotal_bruto, descuento_total, monto,
                 metodo_pago, monto_efectivo, monto_qr, referencia_qr,
-                tipo_comprobante, nro_factura, cliente_nit_ci, cliente_razon_social,
+                tipo_comprobante, nro_factura, cuf_autorizacion, codigo_control, cliente_nit_ci, cliente_razon_social,
                 regimen_tributario, iva_porcentaje, it_porcentaje, iva_monto, it_monto,
                 descripcion, estado
              )
-             VALUES (?, ?, 'egreso', ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 0, ?, 'completado')`,
+             VALUES (?, ?, 'egreso', ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 0, ?, 'completado')`,
             [
                 cajaId,
                 ejecutor.id,
@@ -898,6 +1006,8 @@ async function registrarEgreso(cajaId, monto, descripcion, metodoPago = 'efectiv
                 referenciaQr,
                 tipoComprobante,
                 nroFactura,
+                cufAutorizacion,
+                codigoControl,
                 proveedorNit,
                 proveedorNombre,
                 regimenSnapshot,
@@ -1008,6 +1118,16 @@ async function anularMovimientoConPermiso(adminId, movimientoId, motivoAnulacion
         for (const det of detalles) {
             if (det.tipo_inventario === 'directo') {
                 await runQuery(`UPDATE productos SET stock = ROUND(stock + ?, 4) WHERE id = ?`, [det.cantidad, det.producto_id]);
+
+                // Restituir en lotes si el producto usa lotes
+                const loteDestino = await getQuery(
+                    `SELECT id FROM producto_lotes WHERE producto_id = ? AND activo = 1 ORDER BY fecha_vencimiento ASC, id ASC LIMIT 1`,
+                    [det.producto_id]
+                );
+                if (loteDestino) {
+                    await runQuery(`UPDATE producto_lotes SET stock = ROUND(stock + ?, 4) WHERE id = ?`, [det.cantidad, loteDestino.id]);
+                }
+
                 const prodAct = await getQuery(`SELECT stock, costo FROM productos WHERE id = ?`, [det.producto_id]);
                 await runQuery(
                     `INSERT INTO movimientos_productos_directos (
@@ -1210,10 +1330,26 @@ async function obtenerMovimientosCaja(cajaId) {
     );
 }
 
+/**
+ * Obtiene el siguiente número correlativo para facturas de venta.
+ * @returns {Promise<number>}
+ */
+async function obtenerSiguienteNumeroFactura() {
+    const fila = await getQuery(
+        `SELECT COALESCE(MAX(CAST(nro_factura AS INTEGER)), 0) + 1 AS siguiente_nro
+         FROM movimientos
+         WHERE tipo_comprobante = 'factura'
+           AND CAST(nro_factura AS INTEGER) > 0`
+    );
+    return Number(fila?.siguiente_nro || 1);
+}
+
 module.exports = {
+    registrarVenta: registrarVentaCompleta,
     registrarVentaCompleta,
     registrarEgreso,
     registrarIngresoEfectivo,
     anularMovimientoConPermiso,
-    obtenerMovimientosCaja
+    obtenerMovimientosCaja,
+    obtenerSiguienteNumeroFactura
 };

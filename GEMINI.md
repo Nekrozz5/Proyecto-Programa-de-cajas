@@ -4,7 +4,7 @@
 - **Entorno:** Node.js con Next.js (App Router), Tailwind CSS, Shadcn UI y SQLite3 local (`caja.db`).
 - **Autenticación y Seguridad:** JWT con cookies HttpOnly gestionadas desde el servidor (`jose`), contraseñas hasheadas con `bcryptjs` (salt rounds = 10), control de intentos fallidos en memoria con rate limiting dual (por IP con `TRUST_PROXY` y por cuenta de usuario) y sincronización automática de credenciales técnicas (`DEVELOPER_PASSWORD` en `.env.local`).
 - **Control de Sesiones Avanzado (`server/sesion.js`):**
-  - TTL diferenciado por rol: `developer` (15 min), `superadmin` / `admin` (30 min), `user` (8 horas).
+  - TTL diferenciado por rol: `developer` (15 min), `propietario` / `admin` (30 min), `user` (8 horas).
   - `INSTANCE_BOOT_ID`: Identificador de arranque del proceso que invalida de inmediato tokens administrativos/técnicos al reiniciar el servidor (`npm run dev`), eliminando sesiones zombis.
   - Cookies de sesión estrictas (Session Cookies destruidas al cerrar ventana) para perfiles administrativos y cierre por inactividad en frontend (15 min).
 - **Infraestructura y Preparación para Producción Local / Híbrida:**
@@ -27,19 +27,25 @@
   - `database/database.js`: Inicialización de SQLite, activación de claves foráneas (`PRAGMA foreign_keys = ON`), modo WAL, timeout y ejecución automática de migraciones.
   - `database/schema.js`: Definición centralizada del esquema tipado con Drizzle ORM (20 tablas y relaciones completas, incluyendo `producto_lotes`).
   - `database/drizzle.js`: Cliente Drizzle singleton sobre `better-sqlite3` con modo WAL y timeout de 5000ms.
-  - `database/migraciones.js`: Sistema de migraciones versionado con `PRAGMA user_version` y respaldo automático previo a toda migración (`VACUUM INTO backups/caja-pre-migracion-vX-a-vY-*.db`). Toda mutación al esquema se aplica de forma transaccional e idempotente (migraciones v1 a v12).
-  - `server/actions/`: Capa de mutaciones protegidas mediante Server Actions (`'use server'`) validadas con `_wrapper.js`: `turnos.actions.js`, `ventas.actions.js`, `catalogo.actions.js`, `inventario.actions.js`, `admin.actions.js`.
+  - `database/migraciones.js`: Sistema de migraciones versionado con `PRAGMA user_version` y respaldo automático previo a toda migración (`VACUUM INTO backups/caja-pre-migracion-vX-a-vY-*.db`). Toda mutación al esquema se aplica de forma transaccional e idempotente (migraciones v1 a v16).
+  - `server/actions/`: Capa de mutaciones protegidas mediante Server Actions (`'use server'`) validadas con `_wrapper.js`: `turnos.actions.js`, `ventas.actions.js`, `catalogo.actions.js`, `inventario.actions.js`, `notificaciones.actions.js`, `admin.actions.js`.
   - `server/domain/`: Lógica pura de negocio y reglas desacopladas: `costos.js` (CPP NIC 2, cascada de recetas/combos) y `fiscal.js` (snapshot tributario, bases IVA/IT).
   - `server/repositories/`: Módulos de persistencia SQL parametrizada (`db.js`, `auth.repo.js`, `cajas.repo.js`, `catalogo.repo.js`, `configuracion.repo.js`, `inventario.repo.js`, `ventas.repo.js`, `reportes.repo.js`, `index.js`).
-  - `server/lib/`: Infraestructura y servicios técnicos (`sesion.js`, `secretos.js`, `mailer.js`).
+  - `server/lib/`: Infraestructura y servicios técnicos (`sesion.js`, `secretos.js`, `mailer.js`, `licencia.js`).
   - `server/queries.js`: Fachada central y barrel que re-exporta los repositorios para retrocompatibilidad.
   - `instrumentation.js`: Gancho de arranque de Next.js para validación temprana de seguridad (`server/lib/secretos.js`).
-  - `scripts/backup.js`: Script de copia de seguridad atómica con retención configurable (`VACUUM INTO`).
-  - `scripts/update.js`: Script de actualización segura automatizada (`npm run update`: backup previo + `git pull` + `npm ci` + `build`).
+  - `scripts/`: Scripts utilitarios del sistema:
+    - `backup.js`: Respaldo atómico en caliente con `VACUUM INTO`.
+    - `update.js`: Actualización segura automatizada (`npm run update`).
+    - `seed_cafeteria.js`: Carga integral de datos realistas (lotes PEPS, combos, Kardex dual).
+    - `generar-clave.js`: Utilidad CLI para emitir y verificar licencias criptográficas Ed25519.
+    - `preparar-dist.js`: Recolector y empaquetador para la distribución en `dist/`.
+    - `iniciar-pos.bat`, `detener-pos.bat`, `lanzar-silencioso.vbs`: Scripts de control del servicio en Windows.
+  - `installer/`: Script de Inno Setup (`pos-cajas.iss`) para generar el instalador de escritorio de Windows.
   - `app/api/caja/route.js`: Endpoint exclusivo `GET` con `Cache-Control: no-store` para lectura de estado inicial, catálogo y sincronización/polling de turnos.
   - `app/api/auth/route.js`: Endpoint `POST` para `login`, `logout` e `instalacion_inicial` con gestión de cookies `HttpOnly` (`pos_session`).
   - `app/api/reportes/route.js`: Endpoint administrativo `GET` para tendencias JSON, exportación CSV (`?formato=csv`) y exportación Excel (`?formato=xlsx` con 10 hojas contables).
-  - `app/admin/`: Panel de administración modular con `layout.js` y contexto global (`_context/AdminContext.js`) desacoplado en subrutas (`resumen/`, `catalogo/`, `insumos/`, `arqueos/`, `usuarios/`, `configuracion/`, `exportacion/`) con subcomponentes en `_components/` (`TabCatalogo.js`, `TabTurnosArqueos.js`, `TabUsuariosCajas.js`, `TabKardex.js`, `TabConfigFiscal.js`, `TabExportacion.js`, `TabResumen.js`, `GraficosFinancieros.js`, `exportarPDF.js`).
+  - `app/admin/`: Panel de administración modular con `layout.js` y contexto global (`_context/AdminContext.js`) desacoplado en subrutas (`resumen/`, `catalogo/`, `insumos/`, `arqueos/`, `usuarios/`, `configuracion/`, `exportacion/`) con subcomponentes en `_components/` (`TabCatalogo.js`, `TabTurnosArqueos.js`, `TabUsuariosCajas.js`, `TabKardex.js`, `TabConfigFiscal.js`, `TabConfiguracionCorreos.js`, `ModalVerificarEmail.js`, `TabExportacion.js`, `TabResumen.js`, `GraficosFinancieros.js`, `exportarPDF.js`).
   - `app/caja/`: Terminal POS modular con `layout.js` y contexto global (`_context/CajaContext.js`) desacoplado en subrutas (`pos/`, `movimientos/`) con subcomponentes atómicos en `_components/` (`CatalogoProductos.js`, `CarritoVenta.js`, `ModalCobro.js`, `ModalModificadores.js`, `ModalArqueoCiego.js`, `ModalMovimientosEfectivo.js`, `HistorialTurno.js`, `AperturaTurno.js`, `LoginCaja.js`) y hooks en `_hooks/` (`useCarrito.js`, `useInactividad.js`).
   - `components/ui/`: Componentes UI reutilizables de Shadcn (`badge.jsx`, `button.jsx`, `card.jsx`, `dialog.jsx`, `input.jsx`, `password-input.jsx`, `separator.jsx`, `table.jsx`, `tabs.jsx`).
   - `lib/utils.js`: Utilidad central `cn` (`clsx` + `tailwind-merge`) para combinación dinámica de clases Tailwind.
@@ -49,7 +55,7 @@
 - **Roles y Permisos:**
   - `user` (Cajero): Abre/cierra turnos, selecciona productos mediante pestañas de categorías, cobra en efectivo (con cálculo reactivo de cambio) o QR, registra egresos menores e ingresos de sencillo/cambio con motivo obligatorio.
   - `admin` (Administrador): Todo lo del cajero + crear/borrar usuarios con baja lógica (`activo = 0`), anular ventas reintegrando stock o insumos automáticamente, gestión integral de catálogo (modalidades unitario, receta, libre), compras con CPP, acceso a estadísticas financieras y reportes.
-  - `superadmin`: Acceso ampliado de administración y auditoría del sistema de negocio.
+  - `propietario`: Acceso ampliado de administración y auditoría del sistema de negocio. En la interfaz se presenta como "Propietario(a)".
   - `developer` (Oculto): Rol técnico especial reservado para tareas de diagnóstico, migraciones de datos y mantenimiento profundo. No se expone en listados estándar de creación de usuarios de caja.
 - **Configuración del Negocio (`configuracion_negocio`):**
   - Tabla singleton (`id = 1`) que define el nombre del establecimiento, la modalidad operativa y las banderas funcionales activas: `usa_stock_directo`, `usa_vencimiento` y `usa_recetas_ensamblaje`.
@@ -108,6 +114,24 @@
     - Entrada por lote en compras y mermas imputadas a lotes específicos.
     - Descuento en ventas con selección manual de lote o política automática PEPS (Primero en Expirar, Primero en Salir / FIFO: `ORDER BY fecha_vencimiento ASC, id ASC`).
     - Actualización atómica con validación de concurrencia (`WHERE stock >= ?`) impidiendo existencias negativas.
+  - **Respaldo Fiscal RCV SIAT en Compras (v13):**
+    - Inclusión de columnas `nro_autorizacion_cuf`, `codigo_control` y `tipo_compra` en `movimientos_insumos`, `movimientos_productos_directos` y `movimientos`.
+    - Cumplimiento formal para exportación de libros de compras homologados con Impuestos Nacionales.
+  - **Soporte de Canales de Delivery y Apps de Comida (v14):**
+    - Bandera `habilita_apps_comida` en `configuracion_negocio`.
+    - Registro de `canal_venta` ('local', 'delivery_propio', 'pedidos_ya', 'yango'), `datos_entrega` y `referencia_externa` en `movimientos`.
+    - Métodos de pago dedicados `pedidos_ya` y `yango` en `movimientos_pagos`, desacoplados del arqueo de efectivo de caja física.
+  - **Servidor SMTP Dinámico y Destinatarios Verificados (v15):**
+    - Tabla `configuracion_smtp` para edición de parámetros de correo en caliente desde la interfaz sin reiniciar Node ni alterar archivos `.env`.
+    - Tabla `notificacion_destinatarios` con verificación obligatoria mediante código de seguridad de 6 dígitos enviado por correo.
+  - **Jerarquía de Roles y Propietario(a) (v16):**
+    - Consolidación del rol `propietario` (sustituyendo superadmin) con acceso completo a auditoría y configuración.
+  - **Motor de Licenciamiento Criptográfico Offline (Ed25519):**
+    - Validación matemática asimétrica local mediante `server/lib/licencia.js` con clave pública embebida (`POS-ACT-...`).
+    - Emisión segura de claves exclusivamente por el desarrollador mediante `scripts/generar-clave.js` (`npm run licencia`).
+  - **Distribución de Escritorio Windows e Instalador:**
+    - Empaquetador nativo con Inno Setup (`installer/pos-cajas.iss`) que genera `Setup-POS-Cajas-v1.0.exe`.
+    - Lanzador silencioso `lanzar-silencioso.vbs` y modo ventana aislada (Kiosco) con Microsoft Edge sin consola CMD.
 
 ## 3. Reglas Técnicas Obligatorias
 - **Compatibilidad y Reseteo de Base de Datos:** Si un rediseño del esquema de base de datos no es compatible con versiones anteriores locales, está autorizado reiniciar o eliminar la base de datos local (`caja.db`) y sus copias de seguridad para inicializar el proyecto con un esquema limpio.
@@ -156,9 +180,30 @@
   ```bash
   npm run update
   ```
-- **Cargar datos de prueba integrales (Seed v11 con Régimen Fiscal, Kardex Dual, Combos y Modificadores):**
+- **Cargar datos de prueba integrales (Seed con Lotes PEPS, Régimen Fiscal, Kardex Dual, Combos y Modificadores):**
   ```bash
   npm run seed
+  ```
+- **Ejecutar simulación integral automatizada E2E:**
+  ```bash
+  npm run simular
+  ```
+- **Gestión de licencias criptográficas Ed25519 (CLI):**
+  ```bash
+  npm run licencia -- emitir --negocio "Nombre Negocio" --vence "2028-12-31" --cajas 2
+  npm run licencia -- verificar --clave "POS-ACT-..."
+  ```
+- **Empaquetar archivos de distribución para instalador Windows:**
+  ```bash
+  npm run dist:prepare
+  ```
+- **Iniciar servidor en Windows (Segundo Plano):**
+  ```bash
+  npm run app:start
+  ```
+- **Detener servidor en Windows y liberar puerto 3000:**
+  ```bash
+  npm run app:stop
   ```
 - **Despliegue con PM2:**
   ```bash
@@ -257,7 +302,7 @@ Cuando se clona o actualiza este repositorio en un equipo nuevo, el agente y el 
   - **Panel visual de estadísticas financieras (`app/admin/GraficosFinancieros.js`):**
     - Gráficos interactivos con `recharts` integrados en `/admin`: comparativa semanal Ingresos vs Egresos (7 días), flujo de ventas por hora, top productos por ingresos/ganancia y distribución por método de pago.
   - **Endurecimiento de Seguridad y Soporte de Acceso Remoto (Cloudflare Tunnel / Híbrido):**
-    - Protección estricta de `instalacion_inicial`: exigencia de `SETUP_TOKEN` validado con `crypto.timingSafeEqual` y transacción atómica unificada para configuración y alta del Super Admin.
+    - Protección estricta de `instalacion_inicial`: exigencia de `SETUP_TOKEN` validado con `crypto.timingSafeEqual` y transacción atómica unificada para configuración y alta del o la Propietario(a).
     - Rate limiting avanzado de autenticación: soporte de `TRUST_PROXY` (lectura de `cf-connecting-ip` para Cloudflare Tunnel y `x-real-ip` para proxies) y contador secundario independiente por cuenta de usuario (20 intentos en 15 min con caducidad autónoma).
     - Cookie `Secure` adaptativa por protocolo en `server/sesion.js`: permite operación simultánea por `http://localhost:3000` (o LAN sin internet) para el cajero local y por `https://` para acceso móvil remoto del dueño/administrador.
     - Política de fortaleza de claves/PIN: mínimo 8 caracteres para administradores/developers y 4 para cajeros en creación y cambio de contraseñas.
@@ -277,7 +322,12 @@ Cuando se clona o actualiza este repositorio en un equipo nuevo, el agente y el 
     - Creación de `.vscode/extensions.json` con recomendaciones (SQLite Viewer, ESLint, Prettier).
     - Creación de `.vscode/settings.json` optimizando observadores de archivos, exclusión de logs/backups y formateo.
     - Documentación de pautas de sincronización entre PC y laptop.
-  - **Migración a arquitectura contable y de auditoría versionada (`database/migraciones.js`, PRAGMA `user_version` hasta v11):**
+  - **Migración a arquitectura contable y de auditoría versionada (`database/migraciones.js`, PRAGMA `user_version` hasta v16):**
+    - **Migración v16**: Actualización del rol administrativo de `superadmin` a `propietario` en la tabla `usuarios` y normalización del CHECK constraint.
+    - **Migración v15**: Configuración SMTP dinámica en base de datos (`configuracion_smtp`) y gestión de destinatarios autorizados con código de verificación numérico temporal (`notificacion_destinatarios`).
+    - **Migración v14**: Soporte de apps de comida y delivery (`habilita_apps_comida`, `canal_venta`, `datos_entrega`, `referencia_externa` y métodos de pago `pedidos_ya` y `yango`).
+    - **Migración v13**: Columnas fiscales de respaldo RCV SIAT (`nro_autorizacion_cuf`, `codigo_control`, `tipo_compra`) en `movimientos_insumos`, `movimientos_productos_directos` y `movimientos`.
+    - **Migración v12**: Trazabilidad de vencimientos por lote en `producto_lotes`, migración de stock previo y política automática de salida PEPS (Primero en Expirar, Primero en Salir / FIFO).
     - **Migración v11**: Índice único parcial `una_caja_abierta_por_estacion` en `cajas`, Kardex cronológico completo para `movimientos_insumos` (`stock_resultante`, `costo_promedio_resultante`, tipos `inventario_inicial` y `ajuste`), preservación de hasta 6 decimales en costos unitarios métricos de insumos y reconciliación integral de `movimientos_pagos`.
     - **Migración v10**: Snapshot fiscal inmutable por movimiento (`regimen_tributario`, `iva_porcentaje`, `it_porcentaje`, `iva_monto`, `it_monto`), parámetro configurable `it_base` (`'todas_las_ventas'` vs `'solo_facturadas'`), `costo_promedio_resultante` en `movimientos_productos_directos`, siembra de saldos de apertura de Kardex y respaldo automático previo a toda migración (`VACUUM INTO backups/`).
     - **Migración v9**: Régimen tributario modular, pagos mixtos (`movimientos_pagos`), permisos fiscales por usuario y por estación física, compras con respaldo fiscal y tabla `movimientos_productos_directos`.
@@ -285,6 +335,16 @@ Cuando se clona o actualiza este repositorio en un equipo nuevo, el agente y el 
     - **Migración v7**: Tablas `grupos_modificadores`, `modificadores_opciones`, `producto_grupos_modificadores` y `detalle_movimientos_modificadores`. Soporte integral de complementos y reemplazos de recetas con selección única/múltiple, obligatoriedad, recargos de precio, descuento atómico en `movimientos_insumos` y congelación de costos/precios en auditoría de ventas.
     - **Migración v6**: Tabla `cajas_fisicas` para gestión multicaja de terminales/estaciones con "Caja 1 - Principal" por defecto, vinculación `caja_fisica_id` en `cajas`, soporte de múltiples cajas abiertas en simultáneo y reformulación de terminología de `Caja #` a `N° Turno` en UI, Excel (.xlsx) y PDF.
     - **Migraciones v4 y v5**: Tabla `categorias` para catálogo interactivo por pestañas, normalización multicategoría y limpieza de categoría 'General'.
+  - **Empaquetado de Escritorio para Windows y Modo Kiosco:**
+    - Script de compilación Inno Setup (`installer/pos-cajas.iss`) que genera el instalador nativo de Windows (`Setup-POS-Cajas-v1.0.exe`).
+    - Script recolector `scripts/preparar-dist.js` (`npm run dist:prepare`).
+    - Scripts de arranque silencioso (`scripts/lanzar-silencioso.vbs`) e inicio/detención en lote (`iniciar-pos.bat`, `detener-pos.bat`).
+    - Modo Kiosco automático para terminales táctiles en Microsoft Edge aislado (`--app=http://localhost:3000/caja/pos`).
+  - **Licenciamiento Criptográfico Offline Asimétrico (Ed25519):**
+    - Motor en `server/lib/licencia.js` para validación instantánea y offline de claves maestras (`POS-ACT-...`).
+    - Utilidad CLI para el desarrollador `scripts/generar-clave.js` (`npm run licencia`) para emitir licencias por cliente, fecha de expiración y límite de cajas.
+  - **Simulación Integral Automatizada (E2E):**
+    - Script de verificación de ciclo comercial completo `tests/simulador_integral.js` (`npm run simular`).
   - **Seguridad de cuentas y sesiones:**
     - Sincronización automática y segura de la cuenta `developer` vinculada a `DEVELOPER_PASSWORD` en `.env.local` con hash bcrypt.
     - Módulo de sesiones seguras (`server/sesion.js`) con `INSTANCE_BOOT_ID` (invalidación automática al reiniciar servidor), TTL por rol (15 min dev, 30 min admin, 8 h cajero) y session cookies para roles administrativos.

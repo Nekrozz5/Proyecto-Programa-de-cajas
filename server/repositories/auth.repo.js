@@ -154,12 +154,13 @@ async function compararYActualizarPassword(pinPlano, passwordGuardado, usuarioId
 const NIVEL_ROL = {
     user: 1,
     admin: 2,
-    superadmin: 3,
+    propietario: 3,
+    superadmin: 3, // Compatibilidad retroactiva
     developer: 4
 };
 
 function esRolAdministrativo(rol) {
-    return rol === 'admin' || rol === 'superadmin' || rol === 'developer';
+    return rol === 'admin' || rol === 'propietario' || rol === 'superadmin' || rol === 'developer';
 }
 
 async function verificarUsuario(nombre, pin, ip = 'local') {
@@ -240,7 +241,7 @@ async function obtenerUsuarios() {
     return await allQuery(
         `SELECT id, nombre, rol, COALESCE(puede_registrar_respaldo_fiscal, 1) as puede_registrar_respaldo_fiscal
          FROM usuarios WHERE activo = 1 AND rol != 'developer'
-         ORDER BY CASE rol WHEN 'superadmin' THEN 1 WHEN 'admin' THEN 2 ELSE 3 END, id ASC`
+         ORDER BY CASE rol WHEN 'propietario' THEN 1 WHEN 'superadmin' THEN 1 WHEN 'admin' THEN 2 ELSE 3 END, id ASC`
     );
 }
 
@@ -270,6 +271,7 @@ async function obtenerCajerosParaLogin() {
 const LONGITUD_MINIMA_PIN_POR_ROL = {
     user: 4,
     admin: 8,
+    propietario: 8,
     superadmin: 8,
     developer: 8
 };
@@ -280,7 +282,7 @@ function validarPoliticaPin(pin, rol) {
     if (pinStr.length < minimo) {
         const etiqueta = rol === 'user'
             ? 'el PIN de un Cajero'
-            : `la contraseña de un perfil ${rol === 'superadmin' ? 'Propietario' : rol === 'developer' ? 'Desarrollador' : 'Administrador'}`;
+            : `la contraseña de un perfil ${rol === 'propietario' || rol === 'superadmin' ? 'Propietario(a)' : rol === 'developer' ? 'Desarrollador' : 'Administrador'}`;
         throw new Error(`Contraseña / PIN demasiado corto: ${etiqueta} debe tener al menos ${minimo} caracteres.`);
     }
     return pinStr;
@@ -314,27 +316,28 @@ async function crearUsuario(nombre, pin, rol) {
 async function crearUsuarioConPermiso(adminId, nuevoNombre, pin, nuevoRol) {
     const ejecutor = await obtenerUsuarioPorId(adminId);
     if (!ejecutor || !esRolAdministrativo(ejecutor.rol)) {
-        throw new Error('Permiso denegado: solo un Administrador, Super Admin o Developer puede registrar usuarios.');
+        throw new Error('Permiso denegado: solo un Administrador, Propietario(a) o Developer puede registrar usuarios.');
     }
-    if (!['superadmin', 'admin', 'user'].includes(nuevoRol)) {
-        throw new Error("Rol inválido. Debe ser 'user', 'admin' o 'superadmin'.");
+    const rolNormalizado = nuevoRol === 'superadmin' ? 'propietario' : nuevoRol;
+    if (!['propietario', 'admin', 'user'].includes(rolNormalizado)) {
+        throw new Error("Rol inválido. Debe ser 'user', 'admin' o 'propietario'.");
     }
-    if (NIVEL_ROL[ejecutor.rol] <= NIVEL_ROL[nuevoRol]) {
-        if (nuevoRol === 'superadmin') {
-            throw new Error('Permiso denegado: solo el rol Developer puede crear cuentas de Super Admin.');
+    if (NIVEL_ROL[ejecutor.rol] <= NIVEL_ROL[rolNormalizado]) {
+        if (rolNormalizado === 'propietario') {
+            throw new Error('Permiso denegado: solo el rol Developer puede crear cuentas de Propietario(a).');
         }
         if (ejecutor.rol === 'admin') {
-            throw new Error("Permiso denegado: un Administrador solo puede crear usuarios de rango inferior (Cajeros). Solo el Super Admin o Developer puede crear otros Administradores.");
+            throw new Error("Permiso denegado: un Administrador solo puede crear usuarios de rango inferior (Cajeros). Solo el o la Propietario(a) o Developer puede crear otros Administradores.");
         }
         throw new Error(`Permiso denegado: tu rol (${ejecutor.rol}) solo puede crear usuarios de rango estrictamente inferior.`);
     }
-    return await crearUsuario(nuevoNombre, pin, nuevoRol);
+    return await crearUsuario(nuevoNombre, pin, rolNormalizado);
 }
 
 async function borrarUsuarioConPermiso(adminId, usuarioABorrarId) {
     const ejecutor = await obtenerUsuarioPorId(adminId);
     if (!ejecutor || !esRolAdministrativo(ejecutor.rol)) {
-        throw new Error('Permiso denegado: solo un Administrador o Super Admin puede eliminar usuarios.');
+        throw new Error('Permiso denegado: solo un Administrador o Propietario(a) puede eliminar usuarios.');
     }
     if (Number(adminId) === Number(usuarioABorrarId)) {
         throw new Error('Operación no permitida: no puedes eliminar tu propio usuario.');
@@ -394,6 +397,11 @@ async function cambiarPasswordConPermiso(ejecutorId, usuarioObjetivoId, nuevoPin
     return true;
 }
 
+async function inicializarSistemaPrimeraVez(datos = {}) {
+    const configuracionRepo = require('./configuracion.repo');
+    return await configuracionRepo.inicializarSistemaPrimeraVez(datos);
+}
+
 module.exports = {
     BCRYPT_ROUNDS,
     NIVEL_ROL,
@@ -409,5 +417,6 @@ module.exports = {
     crearUsuario,
     crearUsuarioConPermiso,
     borrarUsuarioConPermiso,
-    cambiarPasswordConPermiso
+    cambiarPasswordConPermiso,
+    inicializarSistemaPrimeraVez
 };

@@ -20,7 +20,8 @@ import {
     BarChart3,
     Clock,
     ChevronLeft,
-    ChevronRight 
+    ChevronRight,
+    QrCode
 } from 'lucide-react';
 import {
     crearInsumoAction,
@@ -77,8 +78,53 @@ export default function TabKardex({
     const [compraNitProveedor, setCompraNitProveedor] = useState('');
     const [compraNroFactura, setCompraNroFactura] = useState('');
     const [compraConFactura, setCompraConFactura] = useState(false);
+    const [compraNroAutorizacionCuf, setCompraNroAutorizacionCuf] = useState('');
+    const [compraCodigoControl, setCompraCodigoControl] = useState('0');
     const [compraCantidad, setCompraCantidad] = useState('');
     const [compraCostoTotal, setCompraCostoTotal] = useState('');
+    const [textoQrEscaneado, setTextoQrEscaneado] = useState('');
+
+    function procesarLecturaQR(texto) {
+        if (!texto) return false;
+        const limpia = texto.trim();
+        // Caso 1: URL de SIAT en línea (ej. https://siat.impuestos.gob.bo/consulta/QR?nit=...&cuf=...&numero=...)
+        if (limpia.includes('siat.impuestos.gob.bo') || (limpia.includes('?') && limpia.includes('nit='))) {
+            try {
+                const url = new URL(limpia);
+                const nit = url.searchParams.get('nit');
+                const cuf = url.searchParams.get('cuf');
+                const numero = url.searchParams.get('numero');
+                const t = url.searchParams.get('t');
+                if (nit) setCompraNitProveedor(nit);
+                if (numero) setCompraNroFactura(numero);
+                if (cuf) setCompraNroAutorizacionCuf(cuf);
+                if (t && !isNaN(Number(t))) setCompraCostoTotal(Number(t).toFixed(2));
+                setCompraConFactura(true);
+                setCompraCodigoControl('0');
+                return true;
+            } catch (_) {}
+        }
+        // Caso 2: Cadena separada por pipes (formato estándar de factura boliviana):
+        // NIT|NRO_FACTURA|AUTORIZACION_O_CUF|FECHA|TOTAL|TOTAL_BASE|CODIGO_CONTROL|NIT_COMPRADOR|...
+        if (limpia.includes('|')) {
+            const partes = limpia.split('|');
+            if (partes.length >= 4) {
+                const nit = partes[0]?.trim();
+                const nroFac = partes[1]?.trim();
+                const cuf = partes[2]?.trim();
+                const monto = partes[4]?.trim().replace(',', '.');
+                const codControl = partes[6]?.trim() || '0';
+                if (nit) setCompraNitProveedor(nit);
+                if (nroFac) setCompraNroFactura(nroFac);
+                if (cuf) setCompraNroAutorizacionCuf(cuf);
+                if (monto && !isNaN(Number(monto))) setCompraCostoTotal(Number(monto).toFixed(2));
+                if (codControl) setCompraCodigoControl(codControl);
+                setCompraConFactura(true);
+                return true;
+            }
+        }
+        return false;
+    }
 
     // Merma de insumo
     const [mermaInsId, setMermaInsId] = useState(datos?.insumos?.[0]?.id || '');
@@ -257,6 +303,8 @@ export default function TabKardex({
                 proveedorNit: compraNitProveedor.trim() || null,
                 nroFacturaCompra: compraNroFactura.trim() || null,
                 conFactura: compraConFactura,
+                nroAutorizacionCuf: compraConFactura && compraNroAutorizacionCuf.trim() !== '' ? compraNroAutorizacionCuf.trim() : null,
+                codigoControl: compraConFactura && compraCodigoControl.trim() !== '' ? compraCodigoControl.trim() : '0',
                 motivo: motivoCompra
             });
 
@@ -269,6 +317,9 @@ export default function TabKardex({
             setCompraNitProveedor('');
             setCompraNroFactura('');
             setCompraConFactura(false);
+            setCompraNroAutorizacionCuf('');
+            setCompraCodigoControl('0');
+            setTextoQrEscaneado('');
             await cargarTodo?.();
         } catch (err) {
             setError?.(err.message);
@@ -535,6 +586,28 @@ export default function TabKardex({
                                 ))}
                             </select>
                         </label>
+                        {/* Lector / Autocompletado de Factura por QR */}
+                        <div className="bg-amber-50/70 border border-amber-200 rounded-lg p-2.5">
+                            <div className="flex items-center justify-between pb-1">
+                                <span className="text-[11px] font-bold text-amber-900 flex items-center gap-1.5">
+                                    <QrCode className="w-3.5 h-3.5 text-amber-700" />
+                                    <span>Autocompletar con Lector QR de Factura (Pistola o Pegar texto)</span>
+                                </span>
+                                <span className="text-[10px] text-amber-700 font-semibold">SIAT / Bolivia</span>
+                            </div>
+                            <Input
+                                type="text"
+                                placeholder="Apunta la pistola lectora al QR o pega el texto del QR aquí..."
+                                value={textoQrEscaneado}
+                                onChange={(e) => {
+                                    const val = e.target.value;
+                                    setTextoQrEscaneado(val);
+                                    procesarLecturaQR(val);
+                                }}
+                                className="bg-white text-xs placeholder:text-slate-400 h-8 border-amber-300 focus:ring-amber-500"
+                            />
+                        </div>
+
                         <label className="text-xs font-semibold text-slate-700 flex flex-col gap-1">
                             Nombre de la distribuidora:
                             <Input
@@ -579,6 +652,30 @@ export default function TabKardex({
                             />
                             <span>Compra con Factura Fiscal (Genera Crédito Fiscal IVA)</span>
                         </label>
+                        {compraConFactura && (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 bg-sky-50/50 border border-sky-100 rounded-lg">
+                                <label className="text-xs font-semibold text-slate-700 flex flex-col gap-1">
+                                    N° Autorización / CUF (Opcional):
+                                    <Input
+                                        type="text"
+                                        placeholder="Ej. 4A5B6C7D... o N° autorización"
+                                        value={compraNroAutorizacionCuf}
+                                        onChange={(e) => setCompraNroAutorizacionCuf(e.target.value)}
+                                        className="bg-white"
+                                    />
+                                </label>
+                                <label className="text-xs font-semibold text-slate-700 flex flex-col gap-1">
+                                    Código de Control:
+                                    <Input
+                                        type="text"
+                                        placeholder="0"
+                                        value={compraCodigoControl}
+                                        onChange={(e) => setCompraCodigoControl(e.target.value)}
+                                        className="bg-white"
+                                    />
+                                </label>
+                            </div>
+                        )}
                         <label className="text-xs font-semibold text-slate-700 flex flex-col gap-1">
                             Cantidad Comprada (según su unidad de medida):
                             <Input type="number" step="0.01" placeholder="Ej. 10" required value={compraCantidad} onChange={(e) => setCompraCantidad(e.target.value)} className="bg-white" />
@@ -939,7 +1036,7 @@ export default function TabKardex({
                                                     <TableCell className="text-right">Bs {Number(k.costo_total || 0).toFixed(2)}</TableCell>
                                                     <TableCell>
                                                         {k.motivo}
-                                                        {k.nro_factura_compra ? ` (Fact. #${k.nro_factura_compra})` : ''}
+                                                        {k.nro_factura_compra ? ` (Fact. #${k.nro_factura_compra}${k.nro_autorizacion_cuf ? ` | Aut: ${k.nro_autorizacion_cuf}` : ''})` : ''}
                                                     </TableCell>
                                                 </TableRow>
                                             ))}
@@ -1006,7 +1103,7 @@ export default function TabKardex({
                                                     <TableCell className="text-right">Bs {Number(k.costo_total || 0).toFixed(2)}</TableCell>
                                                     <TableCell>
                                                         {k.motivo}
-                                                        {k.nro_factura_compra ? ` (Fact. #${k.nro_factura_compra})` : ''}
+                                                        {k.nro_factura_compra ? ` (Fact. #${k.nro_factura_compra}${k.nro_autorizacion_cuf ? ` | Aut: ${k.nro_autorizacion_cuf}` : ''})` : ''}
                                                     </TableCell>
                                                 </TableRow>
                                             ))}

@@ -16,7 +16,7 @@ import {
     actualizarPermisoFiscalCajaAction
 } from '../../../server/actions/admin.actions';
 
-const NIVEL_ROL = { user: 1, admin: 2, superadmin: 3, developer: 4 };
+const NIVEL_ROL = { user: 1, admin: 2, propietario: 3, superadmin: 3, developer: 4 };
 
 export default function TabUsuariosCajas({
     datos,
@@ -172,7 +172,7 @@ export default function TabUsuariosCajas({
                 <section className="bg-white p-5 rounded-lg border border-slate-200 shadow-sm">
                     <h3 className="text-lg font-bold text-slate-900 mt-0 mb-1">Registrar Nuevo Usuario</h3>
                     <p className="text-xs text-slate-600 mb-4">
-                        Jerarquía activa: <strong>Propietario</strong> &gt; <strong>Administrador</strong> &gt; <strong>Cajero</strong>.
+                        Jerarquía activa: <strong>Propietario(a)</strong> &gt; <strong>Administrador</strong> &gt; <strong>Cajero</strong>.
                     </p>
                     <form onSubmit={handleCrearUsuario} className="flex flex-col gap-3">
                         <Input
@@ -195,11 +195,11 @@ export default function TabUsuariosCajas({
                             className="w-full h-9 rounded-md border border-slate-300 bg-white px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-slate-950"
                         >
                             <option value="user">Cajero</option>
-                            {(adminAutenticado?.rol === 'superadmin' || adminAutenticado?.rol === 'developer') && (
-                                <option value="admin">Administrador — Exclusivo Propietario</option>
+                            {(adminAutenticado?.rol === 'propietario' || adminAutenticado?.rol === 'superadmin' || adminAutenticado?.rol === 'developer') && (
+                                <option value="admin">Administrador — Exclusivo Propietario(a)</option>
                             )}
                             {adminAutenticado?.rol === 'developer' && (
-                                <option value="superadmin">Propietario — Exclusivo Desarrollador</option>
+                                <option value="propietario">Propietario(a) — Exclusivo Desarrollador</option>
                             )}
                         </select>
                         <Button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white font-bold mt-1">
@@ -231,9 +231,9 @@ export default function TabUsuariosCajas({
                         {(datos?.usuarios || []).map((u) => {
                             const esMismoUsuario = Number(u.id) === Number(adminAutenticado?.id);
                             const esInferior = NIVEL_ROL[adminAutenticado?.rol || 'user'] > NIVEL_ROL[u.rol || 'user'];
-                            const rolBadge = u.rol === 'superadmin' ? (
+                            const rolBadge = (u.rol === 'propietario' || u.rol === 'superadmin') ? (
                                 <Badge className="bg-amber-100 text-amber-900 border border-amber-300 hover:bg-amber-100 font-bold text-[11px]">
-                                    PROPIETARIO
+                                    PROPIETARIO(A)
                                 </Badge>
                             ) : u.rol === 'admin' ? (
                                 <Badge className="bg-blue-100 text-blue-800 border border-blue-300 hover:bg-blue-100 font-bold text-[11px]">

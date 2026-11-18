@@ -7,7 +7,7 @@ const { exigirUsuarioSesionAction } = require('../lib/sesion');
  * - Captura excepciones y retorna invariablemente una estructura plana serializable para el cliente:
  *     { ok: true, data, error: null } | { ok: false, data: null, error, status }
  *
- * @param {Array<string>|null|Function} rolesPermitidos - Lista de roles permitidos (ej. ['admin', 'superadmin']), null para cualquier usuario autenticado, o la función directamente si no se especifican roles.
+ * @param {Array<string>|null|Function} rolesPermitidos - Lista de roles permitidos (ej. ['admin', 'propietario']), null para cualquier usuario autenticado, o la función directamente si no se especifican roles.
  * @param {Function} [fn] - Función asíncrona de negocio `async (usuario) => resultado`
  * @returns {Promise<{ ok: true, data: any, error: null } | { ok: false, data: null, error: string, status: number }>}
  */
@@ -42,5 +42,6 @@ async function ejecutarAction(rolesPermitidos, fn) {
 }
 
 module.exports = {
-    ejecutarAction
+    ejecutarAction,
+    validarSesionAccion: ejecutarAction
 };

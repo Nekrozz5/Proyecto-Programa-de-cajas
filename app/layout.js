@@ -3,9 +3,23 @@ import './globals.css';
 export const metadata = {
   title: 'Control de Cajas',
   description: 'Sistema de punto de venta y control de caja',
+  manifest: '/manifest.json',
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'default',
+    title: 'POS Cajas',
+  },
+  icons: {
+    icon: '/icons/icon-192.svg',
+    apple: '/icons/icon-192.svg',
+  },
   other: {
     google: 'notranslate',
   },
+};
+
+export const viewport = {
+  themeColor: '#0f172a',
 };
 
 export default function RootLayout({ children }) {

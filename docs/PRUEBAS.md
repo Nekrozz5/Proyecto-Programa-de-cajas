@@ -125,3 +125,37 @@ Lista de verificación manual para validar arranque, seguridad, control de caja,
 - [ ] **Control de Concurrencia y Sobreventas por Lote:** Intenta vender una cantidad que exceda el stock disponible del lote específico seleccionado: el servidor debe rechazar la transacción con un mensaje descriptivo indicando el stock restante en dicho lote.
 - [ ] **Mermas por Lote Vencido:** Registra una merma seleccionando un lote vencido o dañado: verifica que se descuenten las unidades del lote en `producto_lotes`, del stock global de `productos` y que quede debidamente asentado en el Kardex con motivo obligatorio.
 - [ ] **Navegación Modular por Subrutas y Contextos Compartidos:** Navega entre `/admin/resumen`, `/admin/catalogo`, `/admin/insumos`, `/admin/arqueos` y `/caja/pos`, `/caja/movimientos`: confirma que la navegación sea instantánea, que el estado de sesión y contexto se preserve de forma fluida a través de `AdminContext` y `CajaContext`, y que el componente `password-input` funcione correctamente con toggle de visibilidad.
+
+## 18. Respaldo Fiscal RCV SIAT en Compras (v13)
+- [ ] **Registro de Compra de Mercadería con Datos RCV:** Registra una compra de insumos o productos directos completando los campos fiscales de respaldo: N° Autorización / CUF, Código de Control y Tipo de Compra (ej. 1 = Compra estándar para mercado interno).
+- [ ] **Persistencia en Kardex y Movimientos:** Comprueba en la base de datos o en la hoja de auditoría de compras que las columnas `nro_autorizacion_cuf`, `codigo_control` y `tipo_compra` se encuentren correctamente registradas.
+- [ ] **Cálculo de Crédito Fiscal en Reportes:** Confirma que las compras con respaldo computen automáticamente el 13% de Crédito Fiscal IVA en la hoja *Resumen Contable* del libro Excel y en el reporte PDF de auditoría.
+
+## 19. Delivery y Canales de Venta con Apps de Comida (v14)
+- [ ] **Habilitación en Configuración del Negocio:** En `/admin/configuracion`, activa la bandera "Habilitar Apps de Comida y Delivery".
+- [ ] **Venta por PedidosYa / Yango en POS:** En `/caja/pos`, realiza un cobro seleccionando el canal "PedidosYa" o "Yango": ingresa el número de pedido externo y los datos de entrega del cliente.
+- [ ] **Métodos de Pago de Plataforma:** Verifica que el pago se registre en `movimientos_pagos` bajo el método correspondiente (`pedidos_ya` o `yango`) y no se compute en el arqueo físico de efectivo en el cajón.
+- [ ] **Auditoría de Canales:** Revisa el historial de turnos y comprueba que las ventas por delivery reflejen claramente su canal, datos del cliente y referencia externa.
+
+## 20. Configuración SMTP Dinámica y Verificación de Destinatarios (v15)
+- [ ] **Configuración de Servidor de Correo en Pantalla:** En `/admin/configuracion`, abre la pestaña de correos y completa los datos del servidor SMTP (Host, Puerto, Usuario, Contraseña, Seguridad SSL/TLS). Guarda los cambios sin reiniciar el servidor.
+- [ ] **Alta de Destinatario y Envío de Código de Seguridad:** Agrega una nueva dirección de correo electrónico a la lista de destinatarios. El sistema debe enviar inmediatamente un código numérico temporal de verificación de 6 dígitos.
+- [ ] **Validación del Código Temporal:** En el modal de verificación, ingresa el código recibido. Verifica que el estado del destinatario cambie a "Verificado" y quede habilitado para recibir los reportes de turno.
+- [ ] **Protección contra Intentos Inválidos:** Ingresa un código erróneo: comprueba que el sistema incremente el contador de intentos fallidos y rechace la activación.
+
+## 21. Jerarquía de Roles y Propietario (v16)
+- [ ] **Identidad del Propietario:** Inicia sesión con la cuenta principal del negocio: verifica que en la barra de navegación se identifique con el rol "Propietario(a)".
+- [ ] **Diferenciación de Permisos:** Comprueba que el usuario con rol `propietario` cuente con acceso total a todas las funciones contables, de configuración fiscal y gestión de licencias.
+- [ ] **Restricción de Perfil Developer:** Confirma que el perfil `developer` continúe protegido y no pueda ser creado ni modificado desde el formulario estándar de creación de usuarios de caja.
+
+## 22. Licenciamiento Criptográfico Asimétrico Offline (Ed25519)
+- [ ] **Generación de Clave de Activación:** Ejecuta `npm run licencia -- emitir --negocio "Mi Cafetería" --vence "2028-12-31" --cajas 2`. Verifica que se genere una clave válida con el prefijo `POS-ACT-`.
+- [ ] **Validación Matemática Offline:** Ejecuta la verificación de la clave generada con `npm run licencia -- verificar --clave "<clave_generada>"`. Debe reportar firma válida, coincidencia de negocio y fecha de expiración correcta.
+- [ ] **Rechazo de Clave Manipulada:** Altera un único carácter del payload o la firma: comprueba que la verificación matemática falle de inmediato rechazando la licencia por manipulación criptográfica.
+
+## 23. Instalador de Escritorio Windows y Despliegue Silencioso
+- [ ] **Preparación de Distribución:** Ejecuta `npm run dist:prepare` y comprueba que la carpeta `dist/` contenga todos los artefactos requeridos (Next compilado, scripts, base de datos y recursos públicos).
+- [ ] **Instalación en Windows:** Ejecuta el instalador generado con Inno Setup (`Setup-POS-Cajas-v1.0.exe`): comprueba que cree los accesos directos en Escritorio y Menú Inicio.
+- [ ] **Arranque en Segundo Plano:** Haz doble clic en el acceso directo del Escritorio: verifica que el servidor arranque silenciosamente vía `lanzar-silencioso.vbs` y se abra la ventana de cobro en modo app de Microsoft Edge sin mostrar ventanas de consola negras.
+- [ ] **Detención Ordenada:** Ejecuta el acceso directo "Detener Servidor POS": confirma que el proceso Node.js se termine limpiamente liberando el puerto 3000.
+

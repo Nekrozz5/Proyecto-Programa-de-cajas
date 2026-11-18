@@ -1,8 +1,14 @@
 import { NextResponse } from 'next/server';
-import { generarReporteCSV, generarReporteExcel, obtenerTendenciasVentas } from '../../../server/queries';
+import {
+    generarReporteCSV,
+    generarReporteExcel,
+    obtenerTendenciasVentas,
+    generarRCVComprasTXT,
+    generarRCVComprasExcel
+} from '../../../server/queries';
 import { exigirUsuarioSesion } from '../../../server/sesion';
 
-const ROLES_ADMIN = ['admin', 'superadmin', 'developer'];
+const ROLES_ADMIN = ['admin', 'propietario', 'developer'];
 
 export async function GET(request) {
     try {
@@ -48,6 +54,46 @@ export async function GET(request) {
                 headers: {
                     'Content-Type': 'text/csv; charset=utf-8',
                     'Content-Disposition': `attachment; filename="reporte_contable_${sufijo}.csv"`
+                }
+            });
+        }
+
+        if (formato === 'rcv_compras_txt') {
+            const txt = await generarRCVComprasTXT({
+                desde: filtros.desde,
+                hasta: filtros.hasta,
+                cajaId: cajaId ? Number(cajaId) : null,
+                usuarioGenerador: filtros.usuarioGenerador
+            });
+            const sufijo = cajaId
+                ? `turno_${Number(cajaId)}`
+                : (desde || hasta ? `${desde || 'inicio'}_a_${hasta || 'hoy'}` : 'completo');
+            const nombreArchivo = `rcv_compras_${sufijo}.txt`;
+            return new NextResponse(txt, {
+                status: 200,
+                headers: {
+                    'Content-Type': 'text/plain; charset=utf-8',
+                    'Content-Disposition': `attachment; filename="${nombreArchivo}"`
+                }
+            });
+        }
+
+        if (formato === 'rcv_compras_xlsx') {
+            const buffer = await generarRCVComprasExcel({
+                desde: filtros.desde,
+                hasta: filtros.hasta,
+                cajaId: cajaId ? Number(cajaId) : null,
+                usuarioGenerador: filtros.usuarioGenerador
+            });
+            const sufijo = cajaId
+                ? `turno_${Number(cajaId)}`
+                : (desde || hasta ? `${desde || 'inicio'}_a_${hasta || 'hoy'}` : 'completo');
+            const nombreArchivo = `rcv_compras_${sufijo}.xlsx`;
+            return new NextResponse(buffer, {
+                status: 200,
+                headers: {
+                    'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                    'Content-Disposition': `attachment; filename="${nombreArchivo}"`
                 }
             });
         }

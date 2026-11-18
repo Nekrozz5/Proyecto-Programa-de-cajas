@@ -49,6 +49,11 @@ function AdminShell({ children }) {
     const [sidebarFijado, setSidebarFijado] = useState(false);
     const timerCierreSidebarRef = useRef(null);
 
+    // Referencias y Estado para el Botón de Menú Secundario Semicircular Flotante
+    const botonMenuPrincipalRef = useRef(null);
+    const mainContenedorRef = useRef(null);
+    const [mostrarBotonFlotante, setMostrarBotonFlotante] = useState(false);
+
     const reiniciarTimerCierreAuto = () => {
         if (timerCierreSidebarRef.current) {
             clearTimeout(timerCierreSidebarRef.current);
@@ -94,6 +99,50 @@ function AdminShell({ children }) {
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, [sidebarAbierto]);
 
+    // Detección reactiva de visibilidad del botón principal de menú
+    // Muestra el botón semicircular flotante en el lateral derecho SOLO cuando el botón principal no se ve en pantalla
+    useEffect(() => {
+        const el = botonMenuPrincipalRef.current;
+        if (!el) return;
+
+        const verificarVisibilidad = () => {
+            if (!botonMenuPrincipalRef.current) return;
+            const rect = botonMenuPrincipalRef.current.getBoundingClientRect();
+            // Si el botón principal salió por arriba o por abajo de la ventana visible
+            const fueraDePantalla = rect.bottom <= 8 || rect.top >= window.innerHeight;
+            setMostrarBotonFlotante(fueraDePantalla);
+        };
+
+        let observer = null;
+        if (typeof IntersectionObserver !== 'undefined') {
+            observer = new IntersectionObserver(
+                ([entry]) => {
+                    // Si entry.isIntersecting es true, el primer botón es visible -> no mostrar flotante
+                    setMostrarBotonFlotante(!entry.isIntersecting);
+                },
+                { threshold: 0.1 }
+            );
+            observer.observe(el);
+        }
+
+        const mainEl = mainContenedorRef.current;
+        window.addEventListener('scroll', verificarVisibilidad, { passive: true });
+        if (mainEl) {
+            mainEl.addEventListener('scroll', verificarVisibilidad, { passive: true });
+        }
+
+        // Chequeo inicial
+        verificarVisibilidad();
+
+        return () => {
+            if (observer) observer.disconnect();
+            window.removeEventListener('scroll', verificarVisibilidad);
+            if (mainEl) {
+                mainEl.removeEventListener('scroll', verificarVisibilidad);
+            }
+        };
+    }, [pathname, adminAutenticado]);
+
     async function handleLoginAdmin(e) {
         e.preventDefault();
         limpiarAlertas();
@@ -111,7 +160,7 @@ function AdminShell({ children }) {
             });
             const data = await res.json();
             if (!res.ok) throw new Error(data.error);
-            if (!['admin', 'superadmin', 'developer'].includes(data.usuario.rol)) {
+            if (!['admin', 'propietario', 'superadmin', 'developer'].includes(data.usuario.rol)) {
                 await fetch('/api/auth', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -119,7 +168,7 @@ function AdminShell({ children }) {
                 }).catch((logoutErr) => {
                     console.error('Error al revocar sesión no autorizada:', logoutErr);
                 });
-                throw new Error('Acceso denegado: este panel es exclusivo para Administradores y Propietarios.');
+                throw new Error('Acceso denegado: este panel es exclusivo para Administradores y Propietarios(as).');
             }
             setAdminAutenticado(data.usuario);
             setLoginAdminPin('');
@@ -215,6 +264,7 @@ function AdminShell({ children }) {
         configurado: 0
     };
     const esDeveloper = adminAutenticado?.rol === 'developer';
+    const esPrivilegiado = ['propietario', 'superadmin', 'developer'].includes(adminAutenticado?.rol);
     const usaRecetas = Boolean(configActual.usa_recetas_ensamblaje);
 
     // Lista de Pestañas y Enlaces para Navegación
@@ -225,7 +275,7 @@ function AdminShell({ children }) {
         ...(usaRecetas ? [{ id: 'insumos', href: '/admin/insumos', label: '4. Materiales / Insumos', Icon: Layers, titulo: 'Kardex de Materiales e Insumos' }] : []),
         { id: 'usuarios', href: '/admin/usuarios', label: `${usaRecetas ? '5' : '4'}. Usuarios y Roles`, Icon: Users, titulo: 'Gestión de Cuentas y Permisos' },
         { id: 'exportacion', href: '/admin/exportacion', label: `${usaRecetas ? '6' : '5'}. Exportar Reportes`, Icon: Download, titulo: 'Exportación de Libros Contables (Excel/PDF/CSV)' },
-        ...(esDeveloper ? [{ id: 'configuracion', href: '/admin/configuracion', label: 'Modalidad', Icon: Settings, titulo: 'Configuración de Modalidad' }] : [])
+        ...(esPrivilegiado ? [{ id: 'configuracion', href: '/admin/configuracion', label: 'Configuración', Icon: Settings, titulo: 'Configuración del Negocio y Notificaciones' }] : [])
     ];
 
     const pestanaActiva = pestanas.find((p) => pathname === p.href || pathname.startsWith(p.href + '/')) || pestanas[0];
@@ -326,7 +376,7 @@ function AdminShell({ children }) {
                             <span className="truncate">{adminAutenticado.nombre}</span>
                         </div>
                         <div className="text-[10px] uppercase font-semibold text-slate-400 tracking-wider mt-0.5">
-                            Rango: {adminAutenticado.rol === 'superadmin' ? 'Propietario' : adminAutenticado.rol === 'admin' ? 'Administrador' : adminAutenticado.rol === 'developer' ? 'Desarrollador' : 'Cajero'}
+                            Rango: {adminAutenticado.rol === 'propietario' || adminAutenticado.rol === 'superadmin' ? 'Propietario(a)' : adminAutenticado.rol === 'admin' ? 'Administrador' : adminAutenticado.rol === 'developer' ? 'Desarrollador' : 'Cajero'}
                         </div>
                         <button
                             onClick={handleLogout}
@@ -383,12 +433,13 @@ function AdminShell({ children }) {
             </aside>
 
             {/* ÁREA PRINCIPAL DERECHA */}
-            <main className="flex-1 flex flex-col min-w-0 w-full overflow-y-auto">
+            <main ref={mainContenedorRef} className="flex-1 flex flex-col min-w-0 w-full overflow-y-auto">
                 {/* BARRA SUPERIOR LIMPIA CON BOTÓN DE MENÚ (3 LÍNEAS) */}
                 <header className="bg-white border-b border-slate-200 px-4 sm:px-6 py-2.5 sticky top-0 z-30 shadow-xs">
                     <div className="flex items-center justify-between gap-3">
                         <div className="flex items-center gap-3 min-w-0">
                             <button
+                                ref={botonMenuPrincipalRef}
                                 type="button"
                                 onClick={abrirSidebar}
                                 aria-label="Abrir menú de navegación"
@@ -464,6 +515,26 @@ function AdminShell({ children }) {
                     {children}
                 </div>
             </main>
+
+            {/* BOTÓN SECUNDARIO: SEMICÍRCULO ESTÁTICO EN EL COSTADO DERECHO */}
+            {/* Se muestra únicamente cuando el usuario hace scroll hacia abajo y el primer botón deja de verse */}
+            <button
+                type="button"
+                onClick={abrirSidebar}
+                aria-label="Abrir menú de navegación de pantallas"
+                title="Abrir menú de pantallas"
+                className={`fixed right-0 top-1/2 -translate-y-1/2 z-40 h-14 w-8 sm:h-16 sm:w-10 rounded-l-full bg-slate-900/90 hover:bg-slate-900 active:scale-95 text-white border-y border-l border-slate-700/80 shadow-2xl backdrop-blur-xs flex items-center justify-center pl-1 cursor-pointer transition-all duration-300 ease-out group ${
+                    mostrarBotonFlotante && !sidebarAbierto
+                        ? 'translate-x-0 opacity-100 pointer-events-auto'
+                        : 'translate-x-full opacity-0 pointer-events-none'
+                }`}
+            >
+                <span className="flex flex-col gap-1 w-3.5 h-3 justify-center items-center">
+                    <span className="w-3.5 h-0.5 bg-slate-200 rounded-full group-hover:bg-amber-400 group-hover:w-4 transition-all" />
+                    <span className="w-3.5 h-0.5 bg-slate-200 rounded-full group-hover:bg-amber-400 group-hover:w-4 transition-all" />
+                    <span className="w-3.5 h-0.5 bg-slate-200 rounded-full group-hover:bg-amber-400 group-hover:w-4 transition-all" />
+                </span>
+            </button>
         </div>
     );
 }

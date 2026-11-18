@@ -2,7 +2,8 @@
 
 import { useState } from 'react';
 import { cerrarTurnoAction } from '../../../server/actions/turnos.actions';
-import { Lock, Banknote, QrCode, X } from 'lucide-react';
+import { useCaja } from '../_context/CajaContext';
+import { Lock, Banknote, QrCode, Smartphone, X } from 'lucide-react';
 
 export default function ModalArqueoCiego({
     isOpen = true,
@@ -18,6 +19,27 @@ export default function ModalArqueoCiego({
     const [qrRealCierre, setQrRealCierre] = useState('');
     const [observacionesCierre, setObservacionesCierre] = useState('');
     const [guardando, setGuardando] = useState(false);
+
+    let movimientos = [];
+    try {
+        const cajaCtx = useCaja();
+        if (cajaCtx?.movimientos) movimientos = cajaCtx.movimientos;
+    } catch (_) {}
+
+    const totalAppsDesdeCaja = Number(cajaAbierta?.ventas_apps_total ?? 0) > 0
+        ? Number(cajaAbierta.ventas_apps_total)
+        : (Number(cajaAbierta?.ventas_pedidos_ya || 0) + Number(cajaAbierta?.ventas_yango || 0));
+
+    const totalAppsDesdeMovimientos = (movimientos || [])
+        .filter((m) => m.tipo === 'ingreso' && m.estado !== 'anulado' && (
+            m.canal_venta === 'pedidos_ya' ||
+            m.metodo_pago === 'pedidos_ya' ||
+            m.canal_venta === 'yango' ||
+            m.metodo_pago === 'yango'
+        ))
+        .reduce((acc, m) => acc + Number(m.monto || 0), 0);
+
+    const totalVentasApps = totalAppsDesdeCaja > 0 ? totalAppsDesdeCaja : totalAppsDesdeMovimientos;
 
     if (!isOpen) return null;
 
@@ -110,6 +132,20 @@ export default function ModalArqueoCiego({
                     className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-sm text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-sky-400"
                 />
             </label>
+
+            {/* Tarjeta informativa diferenciada de ventas por plataformas externas */}
+            <div className="p-3 bg-purple-50 border border-purple-200 rounded-lg flex items-start gap-2.5">
+                <Smartphone className="w-4 h-4 text-purple-600 shrink-0 mt-0.5" />
+                <div className="text-xs text-purple-900 flex-1">
+                    <div className="flex justify-between items-center flex-wrap gap-1">
+                        <span className="font-bold text-purple-950">Ventas por Apps (PedidosYa / Yango):</span>
+                        <span className="font-extrabold text-sm text-purple-900">Bs {totalVentasApps.toFixed(2)}</span>
+                    </div>
+                    <div className="text-[11px] text-purple-700 mt-0.5">
+                        Cobro liquidado externamente (no afecta arqueo en efectivo).
+                    </div>
+                </div>
+            </div>
 
             <label className="text-xs font-bold text-slate-700 flex flex-col gap-1">
                 <span>Observaciones de Cierre (Opcional):</span>

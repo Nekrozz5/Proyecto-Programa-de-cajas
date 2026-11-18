@@ -103,7 +103,7 @@ const MIGRACIONES = [
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     nombre TEXT NOT NULL,
                     pin_o_password TEXT NOT NULL,
-                    rol TEXT CHECK(rol IN ('user', 'admin', 'superadmin', 'developper', 'developer')) NOT NULL,
+                    rol TEXT CHECK(rol IN ('user', 'admin', 'propietario', 'superadmin', 'developper', 'developer')) NOT NULL,
                     activo INTEGER DEFAULT 1
                 )
             `);
@@ -364,7 +364,7 @@ const MIGRACIONES = [
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     nombre TEXT NOT NULL,
                     pin_o_password TEXT NOT NULL,
-                    rol TEXT CHECK(rol IN ('user', 'admin', 'superadmin', 'developer')) NOT NULL,
+                    rol TEXT CHECK(rol IN ('user', 'admin', 'propietario', 'superadmin', 'developer')) NOT NULL,
                     activo INTEGER DEFAULT 1
                 )
             `);
@@ -385,12 +385,12 @@ const MIGRACIONES = [
 
             await runRaw(conn, `CREATE UNIQUE INDEX IF NOT EXISTS idx_usuarios_nombre_nocase ON usuarios(nombre COLLATE NOCASE)`);
 
-            // Asegurar que exista al menos un superadmin si había un admin previo
-            const existeSuper = await getRaw(conn, `SELECT id FROM usuarios WHERE rol = 'superadmin' AND activo = 1 LIMIT 1`);
+            // Asegurar que exista al menos un propietario/superadmin si había un admin previo
+            const existeSuper = await getRaw(conn, `SELECT id FROM usuarios WHERE rol IN ('propietario', 'superadmin') AND activo = 1 LIMIT 1`);
             if (!existeSuper) {
                 const primerAdmin = await getRaw(conn, `SELECT id FROM usuarios WHERE rol = 'admin' AND activo = 1 ORDER BY id ASC LIMIT 1`);
                 if (primerAdmin) {
-                    await runRaw(conn, `UPDATE usuarios SET rol = 'superadmin' WHERE id = ?`, [primerAdmin.id]);
+                    await runRaw(conn, `UPDATE usuarios SET rol = 'propietario' WHERE id = ?`, [primerAdmin.id]);
                 }
             }
 
@@ -1250,6 +1250,128 @@ const MIGRACIONES = [
                     );
                 }
             }
+        }
+    },
+    {
+        version: 13,
+        descripcion: 'Añadir columnas fiscales de respaldo RCV SIAT (nro_autorizacion_cuf, codigo_control, tipo_compra) a movimientos_insumos, movimientos_productos_directos y movimientos',
+        up: async (conn) => {
+            // 1. Columnas fiscales en movimientos_insumos
+            await agregarColumnaSiNoExiste(conn, 'movimientos_insumos', 'nro_autorizacion_cuf', `TEXT DEFAULT ''`);
+            await agregarColumnaSiNoExiste(conn, 'movimientos_insumos', 'codigo_control', `TEXT DEFAULT '0'`);
+            await agregarColumnaSiNoExiste(conn, 'movimientos_insumos', 'tipo_compra', `INTEGER DEFAULT 1`);
+
+            // 2. Columnas fiscales en movimientos_productos_directos
+            await agregarColumnaSiNoExiste(conn, 'movimientos_productos_directos', 'nro_autorizacion_cuf', `TEXT DEFAULT ''`);
+            await agregarColumnaSiNoExiste(conn, 'movimientos_productos_directos', 'codigo_control', `TEXT DEFAULT '0'`);
+            await agregarColumnaSiNoExiste(conn, 'movimientos_productos_directos', 'tipo_compra', `INTEGER DEFAULT 1`);
+
+            // 3. Columnas fiscales en movimientos (si no existiesen)
+            await agregarColumnaSiNoExiste(conn, 'movimientos', 'cuf_autorizacion', `TEXT DEFAULT ''`);
+            await agregarColumnaSiNoExiste(conn, 'movimientos', 'codigo_control', `TEXT DEFAULT '0'`);
+            await agregarColumnaSiNoExiste(conn, 'movimientos', 'tipo_compra', `INTEGER DEFAULT 1`);
+        }
+    },
+    {
+        version: 14,
+        descripcion: 'Soporte para apps de comida y delivery: bandera habilita_apps_comida en configuracion_negocio, trazabilidad de canal_venta, datos_entrega y referencia_externa en movimientos, y métodos pedidos_ya y yango en movimientos_pagos',
+        up: async (conn) => {
+            // 1. Bandera de apps de comida en configuracion_negocio
+            await agregarColumnaSiNoExiste(conn, 'configuracion_negocio', 'habilita_apps_comida', `INTEGER DEFAULT 0`);
+
+            // 2. Columnas de canal de venta y entrega en movimientos
+            await agregarColumnaSiNoExiste(conn, 'movimientos', 'canal_venta', `TEXT DEFAULT 'local'`);
+            await agregarColumnaSiNoExiste(conn, 'movimientos', 'datos_entrega', `TEXT DEFAULT ''`);
+            await agregarColumnaSiNoExiste(conn, 'movimientos', 'referencia_externa', `TEXT DEFAULT ''`);
+
+            // 3. Recrear movimientos_pagos para permitir métodos pedidos_ya y yango
+            await runRaw(conn, `
+                CREATE TABLE IF NOT EXISTS movimientos_pagos_v14 (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    movimiento_id INTEGER NOT NULL,
+                    metodo_pago TEXT CHECK(metodo_pago IN ('efectivo', 'qr', 'pedidos_ya', 'yango')) NOT NULL,
+                    monto REAL NOT NULL CHECK(monto > 0),
+                    referencia TEXT DEFAULT NULL,
+                    FOREIGN KEY (movimiento_id) REFERENCES movimientos(id) ON DELETE CASCADE
+                )
+            `);
+            await runRaw(conn, `
+                INSERT INTO movimientos_pagos_v14 (id, movimiento_id, metodo_pago, monto, referencia)
+                SELECT id, movimiento_id, metodo_pago, monto, referencia FROM movimientos_pagos
+            `);
+            await runRaw(conn, `DROP TABLE movimientos_pagos`);
+            await runRaw(conn, `ALTER TABLE movimientos_pagos_v14 RENAME TO movimientos_pagos`);
+            await runRaw(conn, `CREATE INDEX IF NOT EXISTS idx_mov_pagos_movimiento ON movimientos_pagos(movimiento_id)`);
+        }
+    },
+    {
+        version: 15,
+        descripcion: 'Configuración SMTP dinámica (configuracion_smtp) y destinatarios de notificaciones por correo con verificación (notificacion_destinatarios)',
+        up: async (conn) => {
+            await runRaw(conn, `
+                CREATE TABLE IF NOT EXISTS configuracion_smtp (
+                    id INTEGER PRIMARY KEY CHECK(id = 1),
+                    host TEXT,
+                    puerto INTEGER,
+                    secure INTEGER,
+                    usuario TEXT,
+                    password TEXT,
+                    remitente_nombre TEXT,
+                    activo INTEGER DEFAULT 0,
+                    actualizado_en TEXT
+                )
+            `);
+
+            await runRaw(conn, `
+                CREATE TABLE IF NOT EXISTS notificacion_destinatarios (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    email TEXT UNIQUE,
+                    nombre TEXT,
+                    verificado INTEGER DEFAULT 0,
+                    codigo_verificacion TEXT,
+                    codigo_expira TEXT,
+                    intentos_fallidos INTEGER DEFAULT 0,
+                    activo INTEGER DEFAULT 1,
+                    creado_por INTEGER,
+                    creado_en TEXT,
+                    verificado_en TEXT,
+                    FOREIGN KEY (creado_por) REFERENCES usuarios(id) ON DELETE SET NULL
+                )
+            `);
+
+            await runRaw(conn, `CREATE INDEX IF NOT EXISTS idx_notif_dest_email ON notificacion_destinatarios(email)`);
+        }
+    },
+    {
+        version: 16,
+        descripcion: 'Migración del rol superadmin a propietario en tabla usuarios y actualización del CHECK constraint',
+        up: async (conn) => {
+            await runRaw(conn, `
+                CREATE TABLE usuarios_v16 (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    nombre TEXT NOT NULL,
+                    pin_o_password TEXT NOT NULL,
+                    rol TEXT CHECK(rol IN ('user', 'admin', 'propietario', 'developer')) NOT NULL,
+                    activo INTEGER DEFAULT 1,
+                    puede_registrar_respaldo_fiscal INTEGER DEFAULT 1
+                )
+            `);
+
+            await runRaw(conn, `
+                INSERT INTO usuarios_v16 (id, nombre, pin_o_password, rol, activo, puede_registrar_respaldo_fiscal)
+                SELECT
+                    id,
+                    nombre,
+                    pin_o_password,
+                    CASE WHEN rol = 'superadmin' THEN 'propietario' ELSE rol END,
+                    activo,
+                    COALESCE(puede_registrar_respaldo_fiscal, 1)
+                FROM usuarios
+            `);
+
+            await runRaw(conn, `DROP TABLE usuarios`);
+            await runRaw(conn, `ALTER TABLE usuarios_v16 RENAME TO usuarios`);
+            await runRaw(conn, `CREATE UNIQUE INDEX IF NOT EXISTS idx_usuarios_nombre_nocase ON usuarios(nombre COLLATE NOCASE)`);
         }
     }
 ];

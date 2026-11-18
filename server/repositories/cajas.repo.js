@@ -333,13 +333,18 @@ async function cerrarCaja(cajaId, efectivoRealFisico, usuarioId = null, qrRealCo
         const resumen = await allQuery(
             `SELECT
                 m.tipo,
+                COALESCE(m.canal_venta, 'local') as canal_venta,
+                m.metodo_pago,
                 COALESCE(m.categoria_contable, CASE WHEN m.tipo = 'egreso' THEN 'gasto_operativo' ELSE 'venta' END) as cat,
                 COALESCE(SUM(CASE WHEN mp.metodo_pago = 'efectivo' THEN mp.monto ELSE 0 END), 0) as total_efectivo,
-                COALESCE(SUM(CASE WHEN mp.metodo_pago = 'qr' THEN mp.monto ELSE 0 END), 0) as total_qr
+                COALESCE(SUM(CASE WHEN mp.metodo_pago = 'qr' THEN mp.monto ELSE 0 END), 0) as total_qr,
+                COALESCE(SUM(CASE WHEN mp.metodo_pago = 'pedidos_ya' THEN mp.monto ELSE 0 END), 0) as total_pedidos_ya,
+                COALESCE(SUM(CASE WHEN mp.metodo_pago = 'yango' THEN mp.monto ELSE 0 END), 0) as total_yango,
+                COALESCE(SUM(m.monto), 0) as monto_grupo
              FROM movimientos m
              INNER JOIN movimientos_pagos mp ON mp.movimiento_id = m.id
              WHERE m.caja_id = ? AND m.estado = 'completado'
-             GROUP BY m.tipo, cat`,
+             GROUP BY m.tipo, canal_venta, m.metodo_pago, cat`,
             [cajaId]
         );
 
@@ -348,12 +353,20 @@ async function cerrarCaja(cajaId, efectivoRealFisico, usuarioId = null, qrRealCo
         let egresosEfectivo = 0;
         let ingresosQR = 0;
         let egresosQR = 0;
+        let ventasPedidosYa = 0;
+        let ventasYango = 0;
 
         for (const fila of resumen) {
+            const canal = fila.canal_venta || 'local';
             if (fila.tipo === 'ingreso') {
                 if (fila.cat === 'aporte_cambio') {
                     reposicionesEfectivo = redondear2(reposicionesEfectivo + fila.total_efectivo);
+                } else if (canal === 'pedidos_ya' || fila.metodo_pago === 'pedidos_ya') {
+                    ventasPedidosYa = redondear2(ventasPedidosYa + (fila.total_pedidos_ya > 0 ? fila.total_pedidos_ya : fila.monto_grupo));
+                } else if (canal === 'yango' || fila.metodo_pago === 'yango') {
+                    ventasYango = redondear2(ventasYango + (fila.total_yango > 0 ? fila.total_yango : fila.monto_grupo));
                 } else {
+                    // Ventas físicas locales o mototaxi que impactan arqueo de efectivo o QR
                     ventasEfectivo = redondear2(ventasEfectivo + fila.total_efectivo);
                     ingresosQR = redondear2(ingresosQR + fila.total_qr);
                 }
@@ -363,6 +376,7 @@ async function cerrarCaja(cajaId, efectivoRealFisico, usuarioId = null, qrRealCo
             }
         }
 
+        const ventasAppsTotal = redondear2(ventasPedidosYa + ventasYango);
         const ingresosEfectivo = redondear2(ventasEfectivo + reposicionesEfectivo);
         const fondoInicial = redondear2(caja.monto_inicial);
         const efectivoEsperado = redondear2(fondoInicial + ingresosEfectivo - egresosEfectivo);
@@ -409,9 +423,136 @@ async function cerrarCaja(cajaId, efectivoRealFisico, usuarioId = null, qrRealCo
             qrEsperado,
             qrReal: qrRealValidado,
             diferenciaQr,
-            ventasTotalesTurno: redondear2(ventasEfectivo + ingresosQR)
+            ventas_pedidos_ya: ventasPedidosYa,
+            ventas_yango: ventasYango,
+            ventas_apps_total: ventasAppsTotal,
+            ventasTotalesTurno: redondear2(ventasEfectivo + ingresosQR + ventasAppsTotal)
         };
     });
+}
+
+async function obtenerResumenCaja(cajaId) {
+    const caja = await getQuery(
+        `SELECT c.*,
+                datetime(c.fecha_apertura, 'localtime') as fecha_apertura,
+                datetime(c.fecha_cierre, 'localtime') as fecha_cierre,
+                COALESCE(cf.nombre, 'Caja Principal') as caja_fisica_nombre,
+                COALESCE(cf.habilita_respaldo_fiscal, 1) as habilita_respaldo_fiscal,
+                COALESCE(u.nombre, '—') as usuario_nombre,
+                COALESCE(u.rol, 'user') as usuario_rol
+         FROM cajas c
+         LEFT JOIN cajas_fisicas cf ON c.caja_fisica_id = cf.id
+         LEFT JOIN usuarios u ON c.usuario_id = u.id
+         WHERE c.id = ?`,
+        [cajaId]
+    );
+    if (!caja) throw new Error('Caja no encontrada.');
+
+    const movimientos = await allQuery(
+        `SELECT m.id, m.tipo, m.categoria_contable, m.metodo_pago, m.monto,
+                COALESCE(m.canal_venta, 'local') as canal_venta,
+                COALESCE(m.descuento_total, 0) as descuento_total,
+                m.monto_efectivo, m.monto_qr,
+                COALESCE((SELECT SUM(mp.monto) FROM movimientos_pagos mp WHERE mp.movimiento_id = m.id AND mp.metodo_pago = 'efectivo'), m.monto_efectivo, 0) as pagado_efectivo,
+                COALESCE((SELECT SUM(mp.monto) FROM movimientos_pagos mp WHERE mp.movimiento_id = m.id AND mp.metodo_pago = 'qr'), m.monto_qr, 0) as pagado_qr,
+                COALESCE((SELECT SUM(mp.monto) FROM movimientos_pagos mp WHERE mp.movimiento_id = m.id AND mp.metodo_pago = 'pedidos_ya'), 0) as pagado_pedidos_ya,
+                COALESCE((SELECT SUM(mp.monto) FROM movimientos_pagos mp WHERE mp.movimiento_id = m.id AND mp.metodo_pago = 'yango'), 0) as pagado_yango,
+                m.descripcion, datetime(m.fecha_hora, 'localtime') as fecha_hora
+         FROM movimientos m
+         WHERE m.caja_id = ? AND m.estado = 'completado'
+         ORDER BY m.id ASC`,
+        [cajaId]
+    );
+
+    let ventasEfectivo = 0;
+    let ventasQr = 0;
+    let ventasPedidosYa = 0;
+    let ventasYango = 0;
+    let ventasLocales = 0;
+    let ventasMototaxi = 0;
+    let reposicionesEfectivo = 0;
+    let egresosEfectivo = 0;
+    let egresosQr = 0;
+    let totalEgresos = 0;
+    let totalDescuentos = 0;
+    let cantidadVentas = 0;
+    let cantidadEgresos = 0;
+
+    for (const m of movimientos) {
+        const monto = Number(m.monto || 0);
+        const ef = Number(m.pagado_efectivo || 0);
+        const qr = Number(m.pagado_qr || 0);
+        const canal = m.canal_venta || 'local';
+
+        if (m.tipo === 'ingreso') {
+            const desc = (m.descripcion || '').toLowerCase();
+            const esAporteCambio = m.categoria_contable === 'aporte_cambio'
+                || desc.startsWith('inyección')
+                || desc.startsWith('[reposición');
+
+            if (esAporteCambio) {
+                reposicionesEfectivo = redondear2(reposicionesEfectivo + ef);
+            } else {
+                cantidadVentas++;
+                totalDescuentos = redondear2(totalDescuentos + Number(m.descuento_total || 0));
+
+                if (canal === 'pedidos_ya' || m.metodo_pago === 'pedidos_ya') {
+                    ventasPedidosYa = redondear2(ventasPedidosYa + monto);
+                } else if (canal === 'yango' || m.metodo_pago === 'yango') {
+                    ventasYango = redondear2(ventasYango + monto);
+                } else if (canal === 'mototaxi') {
+                    ventasMototaxi = redondear2(ventasMototaxi + monto);
+                    ventasEfectivo = redondear2(ventasEfectivo + ef);
+                    ventasQr = redondear2(ventasQr + qr);
+                } else {
+                    ventasLocales = redondear2(ventasLocales + monto);
+                    ventasEfectivo = redondear2(ventasEfectivo + ef);
+                    ventasQr = redondear2(ventasQr + qr);
+                }
+            }
+        } else if (m.tipo === 'egreso') {
+            cantidadEgresos++;
+            egresosEfectivo = redondear2(egresosEfectivo + ef);
+            egresosQr = redondear2(egresosQr + qr);
+            totalEgresos = redondear2(totalEgresos + monto);
+        }
+    }
+
+    const ventasAppsTotal = redondear2(ventasPedidosYa + ventasYango);
+    const fondoInicial = redondear2(caja.monto_inicial || 0);
+    const ingresosEfectivo = redondear2(ventasEfectivo + reposicionesEfectivo);
+    const efectivoEsperado = redondear2(fondoInicial + ingresosEfectivo - egresosEfectivo);
+    const qrEsperado = redondear2(ventasQr - egresosQr);
+
+    return {
+        cajaId: caja.id,
+        caja,
+        estado: caja.estado,
+        fondo_inicial: fondoInicial,
+        monto_inicial: fondoInicial,
+        ventas_efectivo: ventasEfectivo,
+        ventas_qr: ventasQr,
+        ventas_pedidos_ya: ventasPedidosYa,
+        ventas_yango: ventasYango,
+        ventas_apps_total: ventasAppsTotal,
+        ventas_locales: ventasLocales,
+        ventas_mototaxi: ventasMototaxi,
+        reposiciones_efectivo: reposicionesEfectivo,
+        ingresos_efectivo: ingresosEfectivo,
+        egresos_efectivo: egresosEfectivo,
+        egresos_qr: egresosQr,
+        total_egresos: totalEgresos,
+        efectivo_esperado: efectivoEsperado,
+        efectivo_real: caja.efectivo_real !== null ? Number(caja.efectivo_real) : null,
+        diferencia_efectivo: caja.diferencia_efectivo !== null ? Number(caja.diferencia_efectivo) : null,
+        qr_esperado: qrEsperado,
+        qr_real: caja.qr_real !== null ? Number(caja.qr_real) : null,
+        diferencia_qr: caja.diferencia_qr !== null ? Number(caja.diferencia_qr) : null,
+        total_ventas: redondear2(ventasEfectivo + ventasQr + ventasAppsTotal),
+        total_descuentos: totalDescuentos,
+        cantidad_ventas: cantidadVentas,
+        cantidad_egresos: cantidadEgresos
+    };
 }
 
 async function obtenerDatosCierreParaNotificacion(cajaId) {
@@ -437,9 +578,12 @@ async function obtenerDatosCierreParaNotificacion(cajaId) {
 
     const movimientos = await allQuery(
         `SELECT m.id, m.tipo, m.categoria_contable, m.metodo_pago, m.monto,
+                COALESCE(m.canal_venta, 'local') as canal_venta,
                 COALESCE(m.descuento_total, 0) as descuento_total,
                 COALESCE((SELECT SUM(mp.monto) FROM movimientos_pagos mp WHERE mp.movimiento_id = m.id AND mp.metodo_pago = 'efectivo'), m.monto_efectivo, 0) as pagado_efectivo,
                 COALESCE((SELECT SUM(mp.monto) FROM movimientos_pagos mp WHERE mp.movimiento_id = m.id AND mp.metodo_pago = 'qr'), m.monto_qr, 0) as pagado_qr,
+                COALESCE((SELECT SUM(mp.monto) FROM movimientos_pagos mp WHERE mp.movimiento_id = m.id AND mp.metodo_pago = 'pedidos_ya'), 0) as pagado_pedidos_ya,
+                COALESCE((SELECT SUM(mp.monto) FROM movimientos_pagos mp WHERE mp.movimiento_id = m.id AND mp.metodo_pago = 'yango'), 0) as pagado_yango,
                 m.descripcion, datetime(m.fecha_hora, 'localtime') as fecha_hora
          FROM movimientos m
          WHERE m.caja_id = ? AND m.estado = 'completado'
@@ -449,6 +593,8 @@ async function obtenerDatosCierreParaNotificacion(cajaId) {
 
     let totalVentasEfectivo = 0;
     let totalVentasQR = 0;
+    let totalVentasPedidosYa = 0;
+    let totalVentasYango = 0;
     let totalDescuentos = 0;
     let totalInyeccionSencillo = 0;
     let totalEgresosEfectivo = 0;
@@ -462,6 +608,7 @@ async function obtenerDatosCierreParaNotificacion(cajaId) {
         const monto = Number(m.monto || 0);
         const ef = Number(m.pagado_efectivo || 0);
         const qr = Number(m.pagado_qr || 0);
+        const canal = m.canal_venta || 'local';
 
         if (m.tipo === 'ingreso') {
             const desc = (m.descripcion || '').toLowerCase();
@@ -473,9 +620,16 @@ async function obtenerDatosCierreParaNotificacion(cajaId) {
             } else {
                 cantidadVentas++;
                 if (m.metodo_pago === 'mixto') cantidadVentasMixtas++;
-                totalVentasEfectivo = redondear2(totalVentasEfectivo + ef);
-                totalVentasQR = redondear2(totalVentasQR + qr);
                 totalDescuentos = redondear2(totalDescuentos + Number(m.descuento_total || 0));
+
+                if (canal === 'pedidos_ya' || m.metodo_pago === 'pedidos_ya') {
+                    totalVentasPedidosYa = redondear2(totalVentasPedidosYa + monto);
+                } else if (canal === 'yango' || m.metodo_pago === 'yango') {
+                    totalVentasYango = redondear2(totalVentasYango + monto);
+                } else {
+                    totalVentasEfectivo = redondear2(totalVentasEfectivo + ef);
+                    totalVentasQR = redondear2(totalVentasQR + qr);
+                }
             }
         } else if (m.tipo === 'egreso') {
             cantidadEgresos++;
@@ -485,14 +639,19 @@ async function obtenerDatosCierreParaNotificacion(cajaId) {
         }
     }
 
+    const totalVentasApps = redondear2(totalVentasPedidosYa + totalVentasYango);
+
     return {
         caja,
         negocio,
         metricas: {
             fondoInicial: Number(caja.monto_inicial || 0),
-            totalVentas: redondear2(totalVentasEfectivo + totalVentasQR),
+            totalVentas: redondear2(totalVentasEfectivo + totalVentasQR + totalVentasApps),
             totalVentasEfectivo: redondear2(totalVentasEfectivo),
             totalVentasQR: redondear2(totalVentasQR),
+            ventas_pedidos_ya: totalVentasPedidosYa,
+            ventas_yango: totalVentasYango,
+            ventas_apps_total: totalVentasApps,
             totalDescuentos: redondear2(totalDescuentos),
             totalInyeccionSencillo: redondear2(totalInyeccionSencillo),
             totalEgresosEfectivo: redondear2(totalEgresosEfectivo),
@@ -524,5 +683,6 @@ module.exports = {
     abrirCaja,
     reabrirCajaConPermiso,
     cerrarCaja,
+    obtenerResumenCaja,
     obtenerDatosCierreParaNotificacion
 };

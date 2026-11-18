@@ -9,8 +9,8 @@ import {
     registrarIngresoEfectivo
 } from '../repositories/ventas.repo';
 
-const ROLES_OPERADORES = ['user', 'admin', 'superadmin', 'developer'];
-const ROLES_ADMIN = ['admin', 'superadmin', 'developer'];
+const ROLES_OPERADORES = ['user', 'admin', 'propietario', 'developer'];
+const ROLES_ADMIN = ['admin', 'propietario', 'developer'];
 
 /**
  * Registra una venta completa con descuento atómico de inventario, soporte mixto (efectivo/QR) y snapshot fiscal.
@@ -83,6 +83,8 @@ export async function registrarEgresoAction(datos) {
             conFactura: Boolean(datos.conFactura),
             tipoComprobante: datos.tipoComprobante || (datos.conFactura ? 'factura' : 'recibo'),
             nroFactura: datos.nroFactura || null,
+            cufAutorizacion: datos.cufAutorizacion || datos.nroAutorizacionCuf || '',
+            codigoControl: datos.codigoControl || '0',
             proveedorNit: datos.proveedorNit || null,
             proveedorNombre: datos.proveedorNombre || null,
             referenciaQr: datos.referenciaQr || null

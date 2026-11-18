@@ -8,8 +8,13 @@
     "build": "next build --webpack",
     "start": "next start",
     "seed": "node scripts/seed_cafeteria.js",
+    "simular": "node tests/simulador_integral.js",
+    "licencia": "node scripts/generar-clave.js",
     "backup": "node scripts/backup.js",
-    "update": "node scripts/update.js"
+    "update": "node scripts/update.js",
+    "app:start": "scripts\\iniciar-pos.bat",
+    "app:stop": "scripts\\detener-pos.bat",
+    "dist:prepare": "node scripts/preparar-dist.js"
   },
   "keywords": [],
   "author": "",

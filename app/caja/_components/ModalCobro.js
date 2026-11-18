@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { registrarVentaAction } from '../../../server/actions/ventas.actions';
+import { useCaja } from '../_context/CajaContext';
 import {
     Banknote,
     QrCode,
@@ -12,7 +13,12 @@ import {
     AlertCircle,
     Tag,
     Receipt,
-    CreditCard
+    CreditCard,
+    Smartphone,
+    Bike,
+    User,
+    MapPin,
+    Phone
 } from 'lucide-react';
 import { PasswordInput } from '@/components/ui/password-input';
 
@@ -29,11 +35,26 @@ export default function ModalCobro({
     descuentoAplicadoNum = 0,
     descuentoInvalido = false,
     totalCarrito = 0,
+    siguienteNumeroFactura = 1,
     onVentaExitosa,
     onError,
     onLimpiarAlertas
 }) {
+    let contextCaja = null;
+    try {
+        contextCaja = useCaja();
+    } catch {
+        // En caso de montaje sin provider
+    }
+    const config = configuracionNegocio || contextCaja?.configuracionNegocio;
+    const habilitaAppsComida = Number(config?.habilita_apps_comida ?? 0) === 1 || Boolean(config?.habilita_apps_comida);
+
     const [metodoPago, setMetodoPago] = useState('efectivo');
+    const [referenciaExterna, setReferenciaExterna] = useState('');
+    const [esEnvioMototaxi, setEsEnvioMototaxi] = useState(false);
+    const [clienteEntrega, setClienteEntrega] = useState('');
+    const [direccionEntrega, setDireccionEntrega] = useState('');
+    const [telefonoEntrega, setTelefonoEntrega] = useState('');
     const [montoMixtoEfectivo, setMontoMixtoEfectivo] = useState('');
     const [montoMixtoQr, setMontoMixtoQr] = useState('');
     const [referenciaQr, setReferenciaQr] = useState('');
@@ -55,16 +76,22 @@ export default function ModalCobro({
             setErrorLocal(null);
             setSesionExpirada(false);
             setPinReconexion('');
+            setMetodoPago('efectivo');
+            setReferenciaExterna('');
+            setEsEnvioMototaxi(false);
+            setClienteEntrega('');
+            setDireccionEntrega('');
+            setTelefonoEntrega('');
         }
     }, [isOpen]);
 
     // Cálculos para Efectivo, QR y Pagos Mixtos
     const montoEfectivoRequerido = metodoPago === 'mixto'
         ? (montoMixtoEfectivo !== '' ? Number(montoMixtoEfectivo) : 0)
-        : totalCarrito;
+        : (metodoPago === 'efectivo' ? totalCarrito : 0);
     const montoQrRequerido = metodoPago === 'mixto'
         ? (montoMixtoQr !== '' ? Number(montoMixtoQr) : 0)
-        : totalCarrito;
+        : (metodoPago === 'qr' ? totalCarrito : 0);
 
     const mixtoDescuadrado = metodoPago === 'mixto' && (
         montoEfectivoRequerido <= 0 ||
@@ -81,7 +108,9 @@ export default function ModalCobro({
             ? Number((montoRecibidoNum - montoEfectivoRequerido).toFixed(2))
             : 0;
     const cambioQueSaleDeCaja =
-        cambioManual !== '' ? Number(cambioManual) : cambioCalculadoAuto;
+        (metodoPago === 'efectivo' || metodoPago === 'mixto')
+            ? (cambioManual !== '' ? Number(cambioManual) : cambioCalculadoAuto)
+            : 0;
 
     // Recalcular cambio automáticamente en tiempo real
     useEffect(() => {
@@ -127,15 +156,45 @@ export default function ModalCobro({
             const mitadQr = Number((totalCarrito - mitadEf).toFixed(2));
             setMontoMixtoEfectivo(String(mitadEf));
             setMontoMixtoQr(String(mitadQr));
+        } else if (nuevoMetodo === 'pedidos_ya' || nuevoMetodo === 'yango') {
+            setMontoRecibido('');
+            setCambioManual('');
+            setEsEnvioMototaxi(false);
+            if (descripcionVenta === 'Venta en mostrador' || descripcionVenta === 'Despacho por mototaxi') {
+                setDescripcionVenta(nuevoMetodo === 'pedidos_ya' ? 'Pedido por PedidosYa' : 'Pedido por Yango');
+            }
+        } else if (nuevoMetodo === 'efectivo' || nuevoMetodo === 'qr') {
+            if (descripcionVenta === 'Pedido por PedidosYa' || descripcionVenta === 'Pedido por Yango') {
+                setDescripcionVenta('Venta en mostrador');
+            }
+        }
+    }
+
+    function handleToggleMototaxi(activar) {
+        setEsEnvioMototaxi(activar);
+        if (activar) {
+            if (descripcionVenta === 'Venta en mostrador') {
+                setDescripcionVenta('Despacho por mototaxi');
+            }
+        } else {
+            if (descripcionVenta === 'Despacho por mototaxi') {
+                setDescripcionVenta('Venta en mostrador');
+            }
         }
     }
 
     function resetearFormularioCobro() {
+        setMetodoPago('efectivo');
         setMontoRecibido('');
         setCambioManual('');
         setMontoMixtoEfectivo('');
         setMontoMixtoQr('');
         setReferenciaQr('');
+        setReferenciaExterna('');
+        setEsEnvioMototaxi(false);
+        setClienteEntrega('');
+        setDireccionEntrega('');
+        setTelefonoEntrega('');
         setConFacturaVenta(false);
         setNroFacturaVenta('');
         setNitClienteVenta('');
@@ -169,6 +228,23 @@ export default function ModalCobro({
             setErrorLocal(null);
             setSesionExpirada(false);
             setGuardando(true);
+
+            const canalVentaCalculado = (metodoPago === 'pedidos_ya' || metodoPago === 'yango')
+                ? metodoPago
+                : (esEnvioMototaxi ? 'mototaxi' : 'local');
+
+            const datosEntregaPayload = esEnvioMototaxi
+                ? {
+                    cliente: clienteEntrega.trim(),
+                    direccion: direccionEntrega.trim(),
+                    telefono: telefonoEntrega.trim()
+                }
+                : null;
+
+            const referenciaExternaPayload = (metodoPago === 'pedidos_ya' || metodoPago === 'yango')
+                ? (referenciaExterna.trim() || null)
+                : null;
+
             const payload = {
                 cajaId: cajaAbierta?.id,
                 items: carrito.map((i) => ({
@@ -189,7 +265,10 @@ export default function ModalCobro({
                 nroFactura: conFacturaVenta && nroFacturaVenta.trim() !== '' ? nroFacturaVenta.trim() : null,
                 clienteNitCi: conFacturaVenta && nitClienteVenta.trim() !== '' ? nitClienteVenta.trim() : null,
                 clienteRazonSocial: conFacturaVenta && razonSocialVenta.trim() !== '' ? razonSocialVenta.trim() : null,
-                descripcion: `${descripcionVenta} (Operador: ${usuarioActual?.nombre || 'Cajero'})`
+                descripcion: `${descripcionVenta} (Operador: ${usuarioActual?.nombre || 'Cajero'})`,
+                canalVenta: canalVentaCalculado,
+                datosEntrega: datosEntregaPayload,
+                referenciaExterna: referenciaExternaPayload
             };
 
             const res = await registrarVentaAction(payload);
@@ -353,7 +432,9 @@ export default function ModalCobro({
                                     ? (faltaDineroRecibido ? 'text-rose-700' : 'text-emerald-700')
                                     : 'text-slate-500'
                             }`}>
-                                {(metodoPago === 'efectivo' || metodoPago === 'mixto') ? 'Cambio que Sale de Caja (Bs)' : 'Pago QR (Sin Cambio)'}
+                                {(metodoPago === 'efectivo' || metodoPago === 'mixto')
+                                    ? 'Cambio que Sale de Caja (Bs)'
+                                    : (metodoPago === 'qr' ? 'Pago QR (Sin Cambio)' : 'Pago App (Sin Cambio)')}
                             </div>
                             {(metodoPago === 'efectivo' || metodoPago === 'mixto') ? (
                                 <input
@@ -419,48 +500,85 @@ export default function ModalCobro({
                         </div>
                     </div>
 
-                    {/* Selector de Método de Pago con Pestañas / Tabs */}
+                    {/* Selector de Canal / Método de Pago */}
                     <div className="space-y-1.5">
-                        <span className="text-xs font-bold text-slate-700 block">
-                            Método de Pago:
-                        </span>
-                        <div className="grid grid-cols-3 gap-1.5 p-1 bg-slate-100 rounded-lg border border-slate-200">
+                        <div className="flex items-center justify-between">
+                            <span className="text-xs font-bold text-slate-700 block">
+                                Canal y Método de Pago:
+                            </span>
+                            {habilitaAppsComida && (
+                                <span className="text-[10px] bg-amber-100 text-amber-800 font-semibold px-1.5 py-0.5 rounded">
+                                    Apps de Comida Habilitadas
+                                </span>
+                            )}
+                        </div>
+                        <div className={`grid gap-1.5 p-1 bg-slate-100 rounded-lg border border-slate-200 ${
+                            habilitaAppsComida ? 'grid-cols-2 sm:grid-cols-5' : 'grid-cols-3'
+                        }`}>
                             <button
                                 type="button"
                                 onClick={() => handleSeleccionarMetodoPago('efectivo')}
-                                className={`py-2 px-2 text-xs sm:text-sm font-bold rounded-md transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                                className={`py-2 px-1.5 text-xs sm:text-sm font-bold rounded-md transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
                                     metodoPago === 'efectivo'
                                         ? 'bg-white shadow-xs text-sky-700 border border-slate-200/80'
                                         : 'text-slate-600 hover:text-slate-900'
                                 }`}
                             >
-                                <Banknote className="w-4 h-4" />
+                                <Banknote className="w-4 h-4 shrink-0" />
                                 <span>Efectivo</span>
                             </button>
                             <button
                                 type="button"
                                 onClick={() => handleSeleccionarMetodoPago('qr')}
-                                className={`py-2 px-2 text-xs sm:text-sm font-bold rounded-md transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                                className={`py-2 px-1.5 text-xs sm:text-sm font-bold rounded-md transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
                                     metodoPago === 'qr'
                                         ? 'bg-white shadow-xs text-sky-700 border border-slate-200/80'
                                         : 'text-slate-600 hover:text-slate-900'
                                 }`}
                             >
-                                <QrCode className="w-4 h-4" />
+                                <QrCode className="w-4 h-4 shrink-0" />
                                 <span>QR</span>
                             </button>
                             <button
                                 type="button"
                                 onClick={() => handleSeleccionarMetodoPago('mixto')}
-                                className={`py-2 px-2 text-xs sm:text-sm font-bold rounded-md transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                                className={`py-2 px-1.5 text-xs sm:text-sm font-bold rounded-md transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
                                     metodoPago === 'mixto'
                                         ? 'bg-white shadow-xs text-sky-700 border border-slate-200/80'
                                         : 'text-slate-600 hover:text-slate-900'
                                 }`}
                             >
-                                <Split className="w-4 h-4" />
+                                <Split className="w-4 h-4 shrink-0" />
                                 <span>Mixto</span>
                             </button>
+                            {habilitaAppsComida && (
+                                <>
+                                    <button
+                                        type="button"
+                                        onClick={() => handleSeleccionarMetodoPago('pedidos_ya')}
+                                        className={`py-2 px-1.5 text-xs sm:text-sm font-bold rounded-md transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                                            metodoPago === 'pedidos_ya'
+                                                ? 'bg-red-500 shadow-xs text-white border border-red-600'
+                                                : 'text-red-700 hover:text-red-900 hover:bg-red-50'
+                                        }`}
+                                    >
+                                        <Smartphone className="w-4 h-4 shrink-0" />
+                                        <span>PedidosYa</span>
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => handleSeleccionarMetodoPago('yango')}
+                                        className={`py-2 px-1.5 text-xs sm:text-sm font-bold rounded-md transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                                            metodoPago === 'yango'
+                                                ? 'bg-rose-600 shadow-xs text-white border border-rose-700'
+                                                : 'text-rose-700 hover:text-rose-900 hover:bg-rose-50'
+                                        }`}
+                                    >
+                                        <Bike className="w-4 h-4 shrink-0" />
+                                        <span>Yango</span>
+                                    </button>
+                                </>
+                            )}
                         </div>
                     </div>
 
@@ -489,6 +607,22 @@ export default function ModalCobro({
                                     value={referenciaQr}
                                     onChange={(e) => setReferenciaQr(e.target.value)}
                                     className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-sm text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-sky-400"
+                                />
+                            </label>
+                        )}
+
+                        {(metodoPago === 'pedidos_ya' || metodoPago === 'yango') && (
+                            <label className="text-xs font-bold text-slate-700 flex flex-col gap-1 sm:col-span-2">
+                                <span className="flex items-center gap-1.5 text-slate-800">
+                                    <Smartphone className="w-3.5 h-3.5 text-slate-500" />
+                                    <span>N° de Orden / Pedido de la App ({metodoPago === 'pedidos_ya' ? 'PedidosYa' : 'Yango'}, Opcional):</span>
+                                </span>
+                                <input
+                                    type="text"
+                                    placeholder={`Ej. #${metodoPago === 'pedidos_ya' ? 'PY' : 'YA'}-9481`}
+                                    value={referenciaExterna}
+                                    onChange={(e) => setReferenciaExterna(e.target.value)}
+                                    className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-sm text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-sky-400 font-medium"
                                 />
                             </label>
                         )}
@@ -576,6 +710,75 @@ export default function ModalCobro({
                         </div>
                     )}
 
+                    {/* Opción de Despacho / Envío por Mototaxi (Para cualquier modalidad de negocio) */}
+                    {metodoPago !== 'pedidos_ya' && metodoPago !== 'yango' && (
+                        <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-2.5">
+                            <div className="flex items-center justify-between">
+                                <label className="flex items-center gap-2 text-xs font-bold text-slate-800 cursor-pointer">
+                                    <input
+                                        type="checkbox"
+                                        checked={esEnvioMototaxi}
+                                        onChange={(e) => handleToggleMototaxi(e.target.checked)}
+                                        className="rounded border-slate-300 text-sky-600 focus:ring-sky-500 h-4 w-4"
+                                    />
+                                    <span className="flex items-center gap-1.5">
+                                        <Bike className="w-4 h-4 text-slate-600" />
+                                        <span>Envío / Mototaxi</span>
+                                    </span>
+                                </label>
+                                {esEnvioMototaxi && (
+                                    <span className="text-[10px] bg-sky-100 text-sky-800 font-semibold px-2 py-0.5 rounded-full">
+                                        Canal: Mototaxi
+                                    </span>
+                                )}
+                            </div>
+
+                            {esEnvioMototaxi && (
+                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
+                                    <label className="text-xs text-slate-700 flex flex-col gap-1">
+                                        <span className="flex items-center gap-1 text-[11px] font-semibold text-slate-600">
+                                            <User className="w-3 h-3 text-slate-400" />
+                                            <span>Cliente (Opcional):</span>
+                                        </span>
+                                        <input
+                                            type="text"
+                                            placeholder="Nombre cliente"
+                                            value={clienteEntrega}
+                                            onChange={(e) => setClienteEntrega(e.target.value)}
+                                            className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs bg-white focus:outline-hidden focus:ring-2 focus:ring-sky-400"
+                                        />
+                                    </label>
+                                    <label className="text-xs text-slate-700 flex flex-col gap-1">
+                                        <span className="flex items-center gap-1 text-[11px] font-semibold text-slate-600">
+                                            <MapPin className="w-3 h-3 text-slate-400" />
+                                            <span>Dirección (Opcional):</span>
+                                        </span>
+                                        <input
+                                            type="text"
+                                            placeholder="Dirección o ref."
+                                            value={direccionEntrega}
+                                            onChange={(e) => setDireccionEntrega(e.target.value)}
+                                            className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs bg-white focus:outline-hidden focus:ring-2 focus:ring-sky-400"
+                                        />
+                                    </label>
+                                    <label className="text-xs text-slate-700 flex flex-col gap-1">
+                                        <span className="flex items-center gap-1 text-[11px] font-semibold text-slate-600">
+                                            <Phone className="w-3 h-3 text-slate-400" />
+                                            <span>Teléfono (Opcional):</span>
+                                        </span>
+                                        <input
+                                            type="text"
+                                            placeholder="Ej. 70012345"
+                                            value={telefonoEntrega}
+                                            onChange={(e) => setTelefonoEntrega(e.target.value)}
+                                            className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs bg-white focus:outline-hidden focus:ring-2 focus:ring-sky-400"
+                                        />
+                                    </label>
+                                </div>
+                            )}
+                        </div>
+                    )}
+
                     {/* Respaldo Fiscal / Factura (Régimen General) */}
                     {configuracionNegocio?.regimen_tributario === 'regimen_general' &&
                         Number(configuracionNegocio?.emite_factura) === 1 &&
@@ -586,7 +789,13 @@ export default function ModalCobro({
                                 <input
                                     type="checkbox"
                                     checked={conFacturaVenta}
-                                    onChange={(e) => setConFacturaVenta(e.target.checked)}
+                                    onChange={(e) => {
+                                        const checked = e.target.checked;
+                                        setConFacturaVenta(checked);
+                                        if (checked && !nroFacturaVenta) {
+                                            setNroFacturaVenta(String(siguienteNumeroFactura || 1));
+                                        }
+                                    }}
                                     className="rounded border-slate-300 text-sky-600 focus:ring-sky-500 h-4 w-4"
                                 />
                                 <span className="flex items-center gap-1.5">
@@ -604,14 +813,22 @@ export default function ModalCobro({
                                         onChange={(e) => setNitClienteVenta(e.target.value)}
                                         className="w-full px-3 py-1.5 rounded-lg border border-slate-300 text-xs bg-white focus:outline-hidden focus:ring-2 focus:ring-sky-400"
                                     />
-                                    <input
-                                        type="text"
-                                        required
-                                        placeholder="N° Factura (ej. 104)"
-                                        value={nroFacturaVenta}
-                                        onChange={(e) => setNroFacturaVenta(e.target.value)}
-                                        className="w-full px-3 py-1.5 rounded-lg border border-slate-300 text-xs bg-white focus:outline-hidden focus:ring-2 focus:ring-sky-400"
-                                    />
+                                    <div className="flex flex-col gap-0.5">
+                                        <div className="flex items-center justify-between px-0.5">
+                                            <span className="text-[10px] text-slate-500">N° Factura:</span>
+                                            <span className="text-[9px] bg-emerald-100 text-emerald-800 font-semibold px-1 rounded">
+                                                Correlativo automático
+                                            </span>
+                                        </div>
+                                        <input
+                                            type="text"
+                                            required
+                                            placeholder={`Automático: #${siguienteNumeroFactura || 1}`}
+                                            value={nroFacturaVenta}
+                                            onChange={(e) => setNroFacturaVenta(e.target.value)}
+                                            className="w-full px-3 py-1.5 rounded-lg border border-slate-300 text-xs bg-white focus:outline-hidden focus:ring-2 focus:ring-sky-400 font-semibold text-slate-800"
+                                        />
+                                    </div>
                                     <input
                                         type="text"
                                         placeholder="Nombre / Razón Social del cliente"
@@ -643,7 +860,13 @@ export default function ModalCobro({
                             ) : (
                                 <>
                                     <CheckCircle2 className="w-4 h-4" />
-                                    <span>Confirmar Cobro ({metodoPago.toUpperCase()})</span>
+                                    <span>
+                                        Confirmar Cobro ({
+                                            metodoPago === 'pedidos_ya'
+                                                ? 'PEDIDOSYA'
+                                                : (metodoPago === 'yango' ? 'YANGO' : metodoPago.toUpperCase())
+                                        })
+                                    </span>
                                     <ArrowRight className="w-4 h-4" />
                                 </>
                             )}

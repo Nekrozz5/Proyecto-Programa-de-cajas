@@ -34,6 +34,7 @@ export default function TabConfigFiscal({
     const [cfgUsaStockDirecto, setCfgUsaStockDirecto] = useState(Boolean(configActual.usa_stock_directo ?? true));
     const [cfgUsaVencimiento, setCfgUsaVencimiento] = useState(Boolean(configActual.usa_vencimiento ?? false));
     const [cfgUsaRecetas, setCfgUsaRecetas] = useState(Boolean(configActual.usa_recetas_ensamblaje ?? false));
+    const [cfgHabilitaAppsComida, setCfgHabilitaAppsComida] = useState(Boolean(configActual.habilita_apps_comida ?? false));
 
     // Estado Configuración Contable y Régimen Tributario
     const [cfgNitNegocio, setCfgNitNegocio] = useState(configActual.nit_negocio || '');
@@ -50,21 +51,25 @@ export default function TabConfigFiscal({
             setCfgUsaStockDirecto(true);
             setCfgUsaVencimiento(false);
             setCfgUsaRecetas(false);
+            setCfgHabilitaAppsComida(false);
         } else if (tipo === 'perecedero') {
             setCfgModalidadNombre('Venta de Productos con Fecha de Vencimiento');
             setCfgUsaStockDirecto(true);
             setCfgUsaVencimiento(true);
             setCfgUsaRecetas(false);
+            setCfgHabilitaAppsComida(false);
         } else if (tipo === 'ensamblaje_no_perecedero') {
             setCfgModalidadNombre('Producción / Ensamblaje con Materiales No Perecederos');
             setCfgUsaStockDirecto(true);
             setCfgUsaVencimiento(false);
             setCfgUsaRecetas(true);
+            setCfgHabilitaAppsComida(false);
         } else if (tipo === 'elaboracion_perecedera') {
             setCfgModalidadNombre('Elaboración con Recetas e Insumos Perecederos');
             setCfgUsaStockDirecto(true);
             setCfgUsaVencimiento(true);
             setCfgUsaRecetas(true);
+            setCfgHabilitaAppsComida(true);
         }
     }
 
@@ -77,7 +82,8 @@ export default function TabConfigFiscal({
                 modalidadNombre: cfgModalidadNombre,
                 usaStockDirecto: cfgUsaStockDirecto,
                 usaVencimiento: cfgUsaVencimiento,
-                usaRecetasEnsamblaje: cfgUsaRecetas
+                usaRecetasEnsamblaje: cfgUsaRecetas,
+                habilitaAppsComida: cfgHabilitaAppsComida
             });
 
             if (!res.ok) throw new Error(res.error || 'Error al guardar configuración de modalidad.');
@@ -268,6 +274,18 @@ export default function TabConfigFiscal({
                             />
                             <span>
                                 <strong>Control de Ensamblaje / Recetas de Materiales (BOM):</strong> Habilita la bolsa de materiales/insumos para productos que se fabrican o ensamblan a partir de componentes.
+                            </span>
+                        </label>
+
+                        <label className="flex items-start gap-2.5 cursor-pointer text-xs text-slate-700">
+                            <input
+                                type="checkbox"
+                                checked={cfgHabilitaAppsComida}
+                                onChange={(e) => setCfgHabilitaAppsComida(e.target.checked)}
+                                className="mt-0.5 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
+                            />
+                            <span>
+                                <strong>Canales de Apps de Comida y Delivery (PedidosYa / Yango):</strong> Habilita cobros por aplicaciones de delivery con liquidación externa de fondos sin alterar el arqueo físico en caja.
                             </span>
                         </label>
                     </div>

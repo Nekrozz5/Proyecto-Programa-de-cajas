@@ -22,6 +22,7 @@ const configuracionNegocio = sqliteTable('configuracion_negocio', {
     usaStockDirecto: integer('usa_stock_directo').default(1),
     usaVencimiento: integer('usa_vencimiento').default(0),
     usaRecetasEnsamblaje: integer('usa_recetas_ensamblaje').default(0),
+    habilitaAppsComida: integer('habilita_apps_comida').default(0),
     configurado: integer('configurado').default(0),
     nitNegocio: text('nit_negocio').default(''),
     regimenTributario: text('regimen_tributario').default('simplificado_control_interno'),
@@ -46,7 +47,7 @@ const usuarios = sqliteTable('usuarios', {
     id: integer('id').primaryKey({ autoIncrement: true }),
     nombre: text('nombre').notNull(),
     pinOPassword: text('pin_o_password').notNull(),
-    rol: text('rol').notNull(), // 'user', 'admin', 'superadmin', 'developer'
+    rol: text('rol').notNull(), // 'user', 'admin', 'propietario', 'developer'
     activo: integer('activo').default(1),
     puedeRegistrarRespaldoFiscal: integer('puede_registrar_respaldo_fiscal').default(1)
 });
@@ -176,10 +177,15 @@ const movimientos = sqliteTable('movimientos', {
     cambio: real('cambio').default(0),
     tipoComprobante: text('tipo_comprobante').notNull().default('recibo'),
     nroFactura: text('nro_factura'),
-    cufAutorizacion: text('cuf_autorizacion'),
+    cufAutorizacion: text('cuf_autorizacion').default(''),
+    codigoControl: text('codigo_control').default('0'),
+    tipoCompra: integer('tipo_compra').default(1),
     clienteNitCi: text('cliente_nit_ci'),
     clienteRazonSocial: text('cliente_razon_social'),
     descripcion: text('descripcion').default(''),
+    canalVenta: text('canal_venta').default('local'), // 'local', 'mototaxi', 'pedidos_ya', 'yango'
+    datosEntrega: text('datos_entrega').default(''),
+    referenciaExterna: text('referencia_externa').default(''),
     estado: text('estado').default('completado'), // 'completado', 'anulado'
     fechaHora: text('fecha_hora').default(sql`CURRENT_TIMESTAMP`),
     anuladoPor: integer('anulado_por').references(() => usuarios.id),
@@ -196,7 +202,7 @@ const movimientos = sqliteTable('movimientos', {
 const movimientosPagos = sqliteTable('movimientos_pagos', {
     id: integer('id').primaryKey({ autoIncrement: true }),
     movimientoId: integer('movimiento_id').notNull().references(() => movimientos.id, { onDelete: 'cascade' }),
-    metodoPago: text('metodo_pago').notNull(), // 'efectivo', 'qr'
+    metodoPago: text('metodo_pago').notNull(), // 'efectivo', 'qr', 'pedidos_ya', 'yango'
     monto: real('monto').notNull(),
     referencia: text('referencia')
 });
@@ -250,6 +256,9 @@ const movimientosProductosDirectos = sqliteTable('movimientos_productos_directos
     proveedorNombre: text('proveedor_nombre'),
     proveedorNit: text('proveedor_nit'),
     nroFacturaCompra: text('nro_factura_compra'),
+    nroAutorizacionCuf: text('nro_autorizacion_cuf').default(''),
+    codigoControl: text('codigo_control').default('0'),
+    tipoCompra: integer('tipo_compra').default(1),
     conFactura: integer('con_factura').default(0),
     motivo: text('motivo').default(''),
     fechaHora: text('fecha_hora').default(sql`CURRENT_TIMESTAMP`)
@@ -270,6 +279,9 @@ const movimientosInsumos = sqliteTable('movimientos_insumos', {
     proveedorNombre: text('proveedor_nombre'),
     proveedorNit: text('proveedor_nit'),
     nroFacturaCompra: text('nro_factura_compra'),
+    nroAutorizacionCuf: text('nro_autorizacion_cuf').default(''),
+    codigoControl: text('codigo_control').default('0'),
+    tipoCompra: integer('tipo_compra').default(1),
     conFactura: integer('con_factura').default(0),
     motivo: text('motivo').default(''),
     fechaHora: text('fecha_hora').default(sql`CURRENT_TIMESTAMP`)
@@ -284,6 +296,34 @@ const productoLotes = sqliteTable('producto_lotes', {
     costoUnitario: real('costo_unitario').notNull().default(0),
     activo: integer('activo').notNull().default(1),
     creadoEn: text('creado_en').default(sql`CURRENT_TIMESTAMP`)
+});
+
+// 21. Configuración SMTP Dinámica (Singleton id = 1)
+const configuracionSmtp = sqliteTable('configuracion_smtp', {
+    id: integer('id').primaryKey(),
+    host: text('host'),
+    puerto: integer('puerto'),
+    secure: integer('secure'),
+    usuario: text('usuario'),
+    password: text('password'),
+    remitenteNombre: text('remitente_nombre'),
+    activo: integer('activo').default(0),
+    actualizadoEn: text('actualizado_en')
+});
+
+// 22. Destinatarios de Notificaciones por Correo
+const notificacionDestinatarios = sqliteTable('notificacion_destinatarios', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    email: text('email').unique(),
+    nombre: text('nombre'),
+    verificado: integer('verificado').default(0),
+    codigoVerificacion: text('codigo_verificacion'),
+    codigoExpira: text('codigo_expira'),
+    intentosFallidos: integer('intentos_fallidos').default(0),
+    activo: integer('activo').default(1),
+    creadoPor: integer('creado_por').references(() => usuarios.id),
+    creadoEn: text('creado_en'),
+    verificadoEn: text('verificado_en')
 });
 
 // ==========================================
@@ -360,6 +400,10 @@ const detalleMovimientosRelations = relations(detalleMovimientos, ({ one, many }
     componentesCombo: many(detalleMovimientosCombos)
 }));
 
+const notificacionDestinatariosRelations = relations(notificacionDestinatarios, ({ one }) => ({
+    creador: one(usuarios, { fields: [notificacionDestinatarios.creadoPor], references: [usuarios.id] })
+}));
+
 module.exports = {
     configuracionNegocio,
     cajasFisicas,
@@ -381,6 +425,8 @@ module.exports = {
     movimientosProductosDirectos,
     movimientosInsumos,
     productoLotes,
+    configuracionSmtp,
+    notificacionDestinatarios,
     // Relaciones
     productosRelations,
     insumosRelations,
@@ -393,5 +439,6 @@ module.exports = {
     movimientosRelations,
     movimientosPagosRelations,
     detalleMovimientosRelations,
-    productoLotesRelations
+    productoLotesRelations,
+    notificacionDestinatariosRelations
 };

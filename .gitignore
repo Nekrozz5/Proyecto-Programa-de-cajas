@@ -3,6 +3,8 @@ node_modules/
 .next/
 out/
 build/
+dist/
+installer/output/
 
 # Bases de datos SQLite y archivos temporales WAL/Journal
 caja.db
@@ -43,6 +45,13 @@ pnpm-debug.log*
 
 # Entorno de pruebas y scripts efímeros locales
 scratch/
+tests/tmp/
+tests/reporte_simulacion.*
+
+# Llaves maestras de activación y certificados (exclusivo del desarrollador)
+keys/
+*.key
+*.pem
 
 # Archivos del sistema operativo y editores
 .DS_Store

@@ -17,7 +17,8 @@ import {
     Boxes, 
     Coffee, 
     ArrowLeft, 
-    ArrowRight 
+    ArrowRight,
+    Mail
 } from 'lucide-react';
 
 export default function HomePage() {
@@ -25,8 +26,8 @@ export default function HomePage() {
     const [config, setConfig] = useState(null);
     const [sistemaInstalado, setSistemaInstalado] = useState(false);
 
-    // Estado del Asistente de Primera Ejecución (3 pasos)
-    const [paso, setPaso] = useState(1); // 1: Modalidad | 2: Nombre Empresa | 3: Crear Super Admin
+    // Estado del Asistente de Primera Ejecución (4 pasos)
+    const [paso, setPaso] = useState(1); // 1: Modalidad | 2: Nombre Empresa | 3: Crear Propietario(a) | 4: Notificaciones Correo
     const [modalidadNombre, setModalidadNombre] = useState('Venta Directa de Artículos No Perecederos');
     const [usaStockDirecto, setUsaStockDirecto] = useState(true);
     const [usaVencimiento, setUsaVencimiento] = useState(false);
@@ -36,6 +37,11 @@ export default function HomePage() {
     const [adminNombre, setAdminNombre] = useState('');
     const [adminPin, setAdminPin] = useState('');
     const [setupToken, setSetupToken] = useState('');
+
+    // Configuración opcional de correo (Paso 4)
+    const [correoEmisor, setCorreoEmisor] = useState('');
+    const [passwordApp, setPasswordApp] = useState('');
+    const [correoDestinatario, setCorreoDestinatario] = useState('');
 
     const [error, setError] = useState(null);
     const [guardando, setGuardando] = useState(false);
@@ -84,25 +90,56 @@ export default function HomePage() {
         }
     }
 
-    async function finalizarInstalacion(e) {
-        e.preventDefault();
+    async function finalizarInstalacion(e, omitirCorreo = false) {
+        if (e && e.preventDefault) e.preventDefault();
         setError(null);
         setGuardando(true);
         try {
+            const payload = {
+                accion: 'instalacion_inicial',
+                nombreNegocio,
+                modalidadNombre,
+                usaStockDirecto,
+                usaVencimiento,
+                usaRecetasEnsamblaje: usaRecetas,
+                adminNombre,
+                adminPin,
+                setupToken
+            };
+
+            const emisorLimpio = correoEmisor.trim();
+            const passLimpio = passwordApp.trim();
+            const destLimpio = correoDestinatario.trim();
+
+            if (!omitirCorreo && (emisorLimpio || passLimpio || destLimpio)) {
+                if (emisorLimpio && !passLimpio) {
+                    throw new Error('Debes ingresar la contraseña de aplicación para el correo emisor, o puedes omitir este paso.');
+                }
+                if (!emisorLimpio && passLimpio) {
+                    throw new Error('Debes ingresar el correo emisor para la contraseña provista, o puedes omitir este paso.');
+                }
+                if (emisorLimpio && passLimpio) {
+                    payload.smtp = {
+                        usuario: emisorLimpio,
+                        password: passLimpio,
+                        host: 'smtp.gmail.com',
+                        puerto: 465,
+                        secure: true,
+                        remitenteNombre: nombreNegocio || 'Sistema POS'
+                    };
+                }
+                if (destLimpio) {
+                    payload.destinatarioInicial = {
+                        email: destLimpio,
+                        nombre: adminNombre || 'Propietario(a)'
+                    };
+                }
+            }
+
             const res = await fetch('/api/auth', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    accion: 'instalacion_inicial',
-                    nombreNegocio,
-                    modalidadNombre,
-                    usaStockDirecto,
-                    usaVencimiento,
-                    usaRecetasEnsamblaje: usaRecetas,
-                    adminNombre,
-                    adminPin,
-                    setupToken
-                })
+                body: JSON.stringify(payload)
             });
             const data = await res.json();
             if (!res.ok) throw new Error(data.error || 'Error al inicializar el sistema');
@@ -136,14 +173,14 @@ export default function HomePage() {
                         <div className="flex items-center justify-between flex-wrap gap-4">
                             <div>
                                 <Badge variant="secondary" className="bg-sky-50 text-sky-700 border-sky-200 mb-1">
-                                    Instalación Inicial • Paso {paso} de 3
+                                    Instalación Inicial • Paso {paso} de 4
                                 </Badge>
                                 <CardTitle className="text-2xl font-bold text-slate-900">
                                     Configuración de Primera Ejecución
                                 </CardTitle>
                             </div>
                             <div className="flex items-center gap-2">
-                                {[1, 2, 3].map((num) => (
+                                {[1, 2, 3, 4].map((num) => (
                                     <div
                                         key={num}
                                         className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs transition-colors ${
@@ -347,29 +384,29 @@ export default function HomePage() {
                                             setPaso(3);
                                         }}
                                     >
-                                        <span>Siguiente: Crear Super Admin</span>
+                                        <span>Siguiente: Crear Propietario(a)</span>
                                         <ArrowRight className="w-4 h-4 ml-2" />
                                     </Button>
                                 </div>
                             </div>
                         )}
 
-                        {/* PASO 3: CREAR EL PRIMER SUPER ADMIN */}
+                        {/* PASO 3: CREAR EL PRIMER PROPIETARIO(A) */}
                         {paso === 3 && (
-                            <form onSubmit={finalizarInstalacion} className="space-y-6">
+                            <div className="space-y-6">
                                 <div>
                                     <h2 className="text-lg font-semibold text-slate-800">
-                                        Paso 3: Crear la Cuenta del Primer Super Admin
+                                        Paso 3: Crear la Cuenta de Propietario(a)
                                     </h2>
                                     <p className="text-sm text-slate-500 mt-1">
-                                        El <strong>Super Admin</strong> tiene el rango máximo: puede crear Administradores y Cajeros, auditar arqueos ciegos y cambiar contraseñas.
+                                        El o la <strong>Propietario(a)</strong> tiene el rango máximo del negocio: puede crear Administradores y Cajeros, auditar arqueos ciegos y cambiar contraseñas.
                                     </p>
                                 </div>
 
                                 <div className="space-y-4">
                                     <div className="space-y-1.5">
                                         <label className="text-sm font-semibold text-slate-700">
-                                            Nombre del Propietario / Super Admin:
+                                            Nombre del o la Propietario(a):
                                         </label>
                                         <Input
                                             type="text"
@@ -387,7 +424,7 @@ export default function HomePage() {
                                         </label>
                                         <PasswordInput
                                             required
-                                            placeholder="Crea tu PIN o contraseña secreta"
+                                            placeholder="Crea tu PIN o contraseña secreta (mín. 8 caracteres)"
                                             value={adminPin}
                                             onChange={(e) => setAdminPin(e.target.value)}
                                             className="h-11"
@@ -396,17 +433,17 @@ export default function HomePage() {
 
                                     <div className="space-y-1.5">
                                         <label className="text-sm font-semibold text-slate-700">
-                                            Token de Instalación (SETUP_TOKEN):
+                                            Clave de Activación del Producto:
                                         </label>
                                         <PasswordInput
                                             autoComplete="off"
-                                            placeholder="Valor de SETUP_TOKEN configurado en el servidor"
+                                            placeholder="Pega aquí la clave de activación (POS-ACT-...)"
                                             value={setupToken}
                                             onChange={(e) => setSetupToken(e.target.value)}
-                                            className="h-11"
+                                            className="h-11 font-mono text-xs"
                                         />
                                         <p className="text-xs text-slate-500">
-                                            Lo entrega el responsable técnico del despliegue. Obligatorio en entornos productivos.
+                                            Clave criptográfica única provista por el desarrollador para activar y licenciar el sistema.
                                         </p>
                                     </div>
                                 </div>
@@ -417,13 +454,126 @@ export default function HomePage() {
                                         Volver al Paso 2
                                     </Button>
                                     <Button
-                                        type="submit"
-                                        disabled={guardando}
-                                        className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold"
+                                        type="button"
+                                        onClick={() => {
+                                            if (!adminNombre.trim()) {
+                                                setError('Por favor ingresa el nombre de Propietario(a).');
+                                                return;
+                                            }
+                                            if (!adminPin || adminPin.trim().length < 8) {
+                                                setError('La contraseña de Propietario(a) debe tener al menos 8 caracteres.');
+                                                return;
+                                            }
+                                            setError(null);
+                                            setPaso(4);
+                                        }}
                                     >
-                                        <Check className="w-4 h-4 mr-2" />
-                                        {guardando ? 'Guardando configuración...' : 'Finalizar Configuración e Iniciar'}
+                                        <span>Siguiente: Notificaciones por Correo</span>
+                                        <ArrowRight className="w-4 h-4 ml-2" />
                                     </Button>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* PASO 4: NOTIFICACIONES POR CORREO (OPCIONAL) */}
+                        {paso === 4 && (
+                            <form onSubmit={(e) => finalizarInstalacion(e, false)} className="space-y-6">
+                                <div>
+                                    <div className="flex items-center gap-2">
+                                        <Mail className="w-5 h-5 text-primary" />
+                                        <h2 className="text-lg font-semibold text-slate-800">
+                                            Paso 4: Notificaciones por Correo (Opcional)
+                                        </h2>
+                                    </div>
+                                    <p className="text-sm text-slate-500 mt-1">
+                                        Envía automáticamente el reporte de arqueo y el archivo Excel adjunto cada vez que se cierre un turno de caja. Puedes configurarlo ahora o hacerlo más tarde desde el Panel de Administración.
+                                    </p>
+                                </div>
+
+                                <div className="p-4 rounded-lg bg-sky-50/60 border border-sky-200/80 text-xs text-sky-800 space-y-1">
+                                    <p className="font-semibold flex items-center gap-1.5">
+                                        <span>💡 Recomendación para cuentas Gmail:</span>
+                                    </p>
+                                    <p>
+                                        Usa una <strong>Contraseña de Aplicación de 16 caracteres</strong> generada desde tu Cuenta de Google (Seguridad &gt; Verificación en 2 pasos &gt; Contraseñas de aplicaciones).
+                                    </p>
+                                </div>
+
+                                <div className="space-y-4">
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <div className="space-y-1.5">
+                                            <label className="text-sm font-semibold text-slate-700">
+                                                Correo Emisor (Servidor de Envío):
+                                            </label>
+                                            <Input
+                                                type="email"
+                                                placeholder="ejemplo@gmail.com"
+                                                value={correoEmisor}
+                                                onChange={(e) => setCorreoEmisor(e.target.value)}
+                                                className="h-11"
+                                            />
+                                            <p className="text-[11px] text-slate-500">
+                                                Cuenta desde la cual el sistema enviará los correos.
+                                            </p>
+                                        </div>
+
+                                        <div className="space-y-1.5">
+                                            <label className="text-sm font-semibold text-slate-700">
+                                                Contraseña de Aplicación:
+                                            </label>
+                                            <PasswordInput
+                                                placeholder="Contraseña de 16 caracteres"
+                                                value={passwordApp}
+                                                onChange={(e) => setPasswordApp(e.target.value)}
+                                                className="h-11 font-mono"
+                                            />
+                                            <p className="text-[11px] text-slate-500">
+                                                Clave de aplicación o contraseña SMTP de tu proveedor.
+                                            </p>
+                                        </div>
+                                    </div>
+
+                                    <div className="space-y-1.5 pt-1">
+                                        <label className="text-sm font-semibold text-slate-700">
+                                            Correo del Dueño / Destinatario Principal:
+                                        </label>
+                                        <Input
+                                            type="email"
+                                            placeholder="propietario@negocio.com"
+                                            value={correoDestinatario}
+                                            onChange={(e) => setCorreoDestinatario(e.target.value)}
+                                            className="h-11"
+                                        />
+                                        <p className="text-[11px] text-slate-500">
+                                            Bandeja donde recibirás los reportes de arqueo al cerrar caja (se enviará un código de verificación).
+                                        </p>
+                                    </div>
+                                </div>
+
+                                <div className="flex items-center justify-between pt-4 border-t border-slate-100 flex-wrap gap-2">
+                                    <Button type="button" variant="outline" onClick={() => setPaso(3)}>
+                                        <ArrowLeft className="w-4 h-4 mr-2" />
+                                        Volver al Paso 3
+                                    </Button>
+                                    <div className="flex items-center gap-2">
+                                        <Button
+                                            type="button"
+                                            variant="ghost"
+                                            disabled={guardando}
+                                            onClick={(e) => finalizarInstalacion(e, true)}
+                                            className="text-slate-600 hover:text-slate-900"
+                                        >
+                                            Omitir por ahora y Finalizar
+                                        </Button>
+                                        <Button
+                                            type="submit"
+                                            disabled={guardando}
+                                            className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold"
+                                        >
+                                            <Check className="w-4 h-4 mr-2" />
+                                            {guardando ? 'Guardando configuración...' : 'Finalizar Instalación'}
+                                        </Button>
+                                    </div>
                                 </div>
                             </form>
                         )}

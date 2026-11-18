@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -11,7 +11,11 @@ import {
     Info, 
     FileSpreadsheet, 
     FileText, 
-    FileDown 
+    FileDown,
+    Landmark,
+    Loader2,
+    CheckCircle2,
+    AlertCircle
 } from 'lucide-react';
 import { exportarReportePDF } from '../exportarPDF';
 
@@ -20,13 +24,76 @@ export default function TabExportacion({
     adminAutenticado,
     turnoAuditadoId,
     setTurnoAuditadoId,
-    cargarTodo
+    cargarTodo,
+    setMensaje
 }) {
     // Filtros de Exportación
     const [filtroExportDesde, setFiltroExportDesde] = useState('');
     const [filtroExportHasta, setFiltroExportHasta] = useState('');
     const [filtroExportUsuarioId, setFiltroExportUsuarioId] = useState('');
     const [filtroExportCajaFisicaId, setFiltroExportCajaFisicaId] = useState('');
+
+    // Estado de Carga y Toast de Notificación
+    const [cargandoFormato, setCargandoFormato] = useState(null);
+    const [toast, setToast] = useState(null);
+    const timerToastRef = useRef(null);
+
+    const mostrarToast = (mensaje, tipo = 'exito') => {
+        if (timerToastRef.current) clearTimeout(timerToastRef.current);
+        setToast({ mensaje, tipo });
+        setMensaje?.(mensaje);
+        timerToastRef.current = setTimeout(() => {
+            setToast(null);
+        }, 4500);
+    };
+
+    useEffect(() => {
+        return () => {
+            if (timerToastRef.current) clearTimeout(timerToastRef.current);
+        };
+    }, []);
+
+    const handleDescargarRCV = async (formato, extension) => {
+        try {
+            setCargandoFormato(formato);
+            const params = new URLSearchParams();
+            params.set('formato', formato);
+            if (filtroExportDesde) params.set('desde', filtroExportDesde);
+            if (filtroExportHasta) params.set('hasta', filtroExportHasta);
+            if (filtroExportUsuarioId) params.set('usuarioId', filtroExportUsuarioId);
+            if (filtroExportCajaFisicaId) params.set('cajaFisicaId', filtroExportCajaFisicaId);
+
+            const res = await fetch(`/api/reportes?${params.toString()}`);
+            if (!res.ok) {
+                const errData = await res.json().catch(() => ({}));
+                throw new Error(errData.error || 'Error al generar el archivo');
+            }
+
+            const blob = await res.blob();
+            const disposition = res.headers.get('Content-Disposition');
+            let nombreArchivo = `rcv_compras_${filtroExportDesde || 'inicio'}_a_${filtroExportHasta || 'hoy'}.${extension}`;
+            if (disposition && disposition.includes('filename=')) {
+                const match = disposition.match(/filename="?([^";]+)"?/);
+                if (match && match[1]) nombreArchivo = match[1];
+            }
+
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = nombreArchivo;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            window.URL.revokeObjectURL(url);
+
+            mostrarToast(`Descarga exitosa: ${nombreArchivo}`, 'exito');
+        } catch (err) {
+            console.error('Error al descargar RCV:', err);
+            mostrarToast(err.message || 'Error al descargar el archivo', 'error');
+        } finally {
+            setCargandoFormato(null);
+        }
+    };
 
     const configActual = datos?.configuracionNegocio || {};
     const est = datos?.estadisticas;
@@ -271,6 +338,117 @@ export default function TabExportacion({
                     </a>
                 </section>
             </div>
+
+            {/* Sección de Reportes Fiscales / Tributarios (RCV SIAT) */}
+            <section className="bg-white p-5 rounded-lg border border-slate-200 shadow-sm border-t-4 border-t-indigo-600 flex flex-col gap-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-slate-100">
+                    <div>
+                        <div className="flex items-center gap-2">
+                            <Landmark className="w-5 h-5 text-indigo-600" />
+                            <h3 className="m-0 text-slate-900 font-bold text-lg">
+                                Registro de Compras y Ventas (RCV - SIAT Bolivia)
+                            </h3>
+                        </div>
+                        <p className="text-slate-600 text-xs mt-1.5 m-0 leading-relaxed">
+                            Archivos normalizados con las 22 columnas normativas para importación masiva directa en la plataforma SIAT del SIN.
+                        </p>
+                    </div>
+                    <Badge className="bg-indigo-50 text-indigo-700 hover:bg-indigo-50 border border-indigo-200 font-bold text-xs self-start sm:self-auto shrink-0">
+                        Normativa RND SIAT
+                    </Badge>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    {/* Botón 1: Descargar RCV Compras (.txt SIAT) */}
+                    <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 flex flex-col justify-between gap-3">
+                        <div>
+                            <div className="flex items-center gap-2 font-bold text-slate-800 text-sm mb-1">
+                                <FileText className="w-4 h-4 text-indigo-600" />
+                                <span>Formato Texto Plano (.txt)</span>
+                            </div>
+                            <p className="text-slate-500 text-xs m-0 leading-relaxed">
+                                Archivo delimitado por plecas (|) listo para la importación masiva directa en el módulo RCV de la plataforma SIAT en Línea.
+                            </p>
+                        </div>
+                        <Button
+                            type="button"
+                            disabled={cargandoFormato !== null}
+                            onClick={() => handleDescargarRCV('rcv_compras_txt', 'txt')}
+                            className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm py-2.5 shadow flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                        >
+                            {cargandoFormato === 'rcv_compras_txt' ? (
+                                <>
+                                    <Loader2 className="w-4 h-4 animate-spin" />
+                                    <span>Generando .txt SIAT...</span>
+                                </>
+                            ) : (
+                                <>
+                                    <Download className="w-4 h-4" />
+                                    <span>Descargar RCV Compras (.txt SIAT)</span>
+                                </>
+                            )}
+                        </Button>
+                    </div>
+
+                    {/* Botón 2: Descargar RCV Compras (.xlsx) */}
+                    <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 flex flex-col justify-between gap-3">
+                        <div>
+                            <div className="flex items-center gap-2 font-bold text-slate-800 text-sm mb-1">
+                                <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                                <span>Planilla de Verificación (.xlsx)</span>
+                            </div>
+                            <p className="text-slate-500 text-xs m-0 leading-relaxed">
+                                Planilla Excel con las 22 columnas fiscales normadas por el SIN, cabeceras estructuradas y totales para auditoría contable.
+                            </p>
+                        </div>
+                        <Button
+                            type="button"
+                            disabled={cargandoFormato !== null}
+                            onClick={() => handleDescargarRCV('rcv_compras_xlsx', 'xlsx')}
+                            className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm py-2.5 shadow flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                        >
+                            {cargandoFormato === 'rcv_compras_xlsx' ? (
+                                <>
+                                    <Loader2 className="w-4 h-4 animate-spin" />
+                                    <span>Generando .xlsx...</span>
+                                </>
+                            ) : (
+                                <>
+                                    <FileSpreadsheet className="w-4 h-4" />
+                                    <span>Descargar RCV Compras (.xlsx)</span>
+                                </>
+                            )}
+                        </Button>
+                    </div>
+                </div>
+            </section>
+
+            {/* Toast Flotante de Notificación */}
+            {toast && (
+                <div
+                    role="alert"
+                    className={`fixed bottom-6 right-6 z-50 flex items-center gap-3 px-4 py-3 rounded-lg shadow-xl border text-sm transition-all duration-300 ${
+                        toast.tipo === 'error'
+                            ? 'bg-rose-50 border-rose-200 text-rose-800'
+                            : 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                    }`}
+                >
+                    {toast.tipo === 'error' ? (
+                        <AlertCircle className="w-5 h-5 text-rose-600 shrink-0" />
+                    ) : (
+                        <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+                    )}
+                    <span className="font-semibold">{toast.mensaje}</span>
+                    <button
+                        type="button"
+                        onClick={() => setToast(null)}
+                        className="text-slate-400 hover:text-slate-600 ml-2 p-0.5 rounded cursor-pointer"
+                        title="Cerrar notificación"
+                    >
+                        <X className="w-4 h-4" />
+                    </button>
+                </div>
+            )}
         </div>
     );
 }

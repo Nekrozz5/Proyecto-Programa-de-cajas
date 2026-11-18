@@ -480,6 +480,17 @@ async function crearProducto(nombre, precio, costo = 0, categoria = '', stock = 
         const prodId = res.lastID;
 
         if (tipoInventario === 'directo') {
+            const fechaVencLimpia = fechaVencimiento && String(fechaVencimiento).trim() !== ''
+                ? String(fechaVencimiento).trim()
+                : null;
+            if (fechaVencLimpia && stockValidado > 0) {
+                await runQuery(
+                    `INSERT INTO producto_lotes (producto_id, fecha_vencimiento, stock, costo_unitario, activo)
+                     VALUES (?, ?, ?, ?, 1)`,
+                    [prodId, fechaVencLimpia, stockValidado, costoValidado]
+                );
+            }
+
             await runQuery(
                 `INSERT INTO movimientos_productos_directos (
                     producto_id, usuario_id, tipo, cantidad, stock_resultante, costo_unitario, costo_promedio_resultante, monto_total, motivo

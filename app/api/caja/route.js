@@ -18,7 +18,8 @@ import {
     obtenerKardexDetallado,
     obtenerEstadisticasCaja,
     obtenerMovimientosCaja,
-    obtenerDesgloseMetodosPago
+    obtenerDesgloseMetodosPago,
+    obtenerSiguienteNumeroFactura
 } from '../../../server/queries';
 import {
     NOMBRE_COOKIE_SESION,
@@ -132,14 +133,16 @@ export async function GET(request) {
                 usuarios,
                 categorias,
                 prediccionInsumos,
-                kardexDetallado
+                kardexDetallado,
+                estadoEmail: esAdmin ? verificarEstadoEmail() : null
             }, { headers: HEADERS_SIN_CACHE });
         }
 
-        const [estadisticas, movimientos, desglosePagos] = await Promise.all([
+        const [estadisticas, movimientos, desglosePagos, siguienteNumeroFactura] = await Promise.all([
             esAdmin ? obtenerEstadisticasCaja(cajaReferencia.id) : Promise.resolve(null),
             obtenerMovimientosCaja(cajaReferencia.id),
-            esAdmin ? obtenerDesgloseMetodosPago(cajaReferencia.id) : Promise.resolve([])
+            esAdmin ? obtenerDesgloseMetodosPago(cajaReferencia.id) : Promise.resolve([]),
+            obtenerSiguienteNumeroFactura()
         ]);
 
         const estadoEmail = esAdmin ? verificarEstadoEmail() : null;
@@ -163,7 +166,8 @@ export async function GET(request) {
             categorias,
             prediccionInsumos,
             kardexDetallado,
-            estadoEmail
+            estadoEmail,
+            siguienteNumeroFactura
         }, { headers: HEADERS_SIN_CACHE });
 
         // Si el usuario mantiene actividad en la caja y su token superó la mitad de su vida útil,

@@ -49,7 +49,7 @@ export function AdminProvider({ children }) {
 
             setDatos(dataCaja);
 
-            const sesionAdminValida = dataCaja.usuarioSesion && ['admin', 'superadmin', 'developer'].includes(dataCaja.usuarioSesion.rol);
+            const sesionAdminValida = dataCaja.usuarioSesion && ['admin', 'propietario', 'superadmin', 'developer'].includes(dataCaja.usuarioSesion.rol);
             if (sesionAdminValida) {
                 setAdminAutenticado(dataCaja.usuarioSesion);
                 const resRep = await fetch('/api/reportes');
@@ -90,7 +90,8 @@ export function AdminProvider({ children }) {
                     });
                 } catch (_) {}
                 setAdminAutenticado(null);
-                setError(`Tu sesión de ${adminAutenticado.rol} se ha cerrado automáticamente tras ${MINUTOS_INACTIVIDAD} minutos de inactividad por seguridad.`);
+                const rolLabel = (adminAutenticado.rol === 'propietario' || adminAutenticado.rol === 'superadmin') ? 'Propietario(a)' : adminAutenticado.rol === 'admin' ? 'Administrador' : adminAutenticado.rol === 'developer' ? 'Desarrollador' : adminAutenticado.rol;
+                setError(`Tu sesión de ${rolLabel} se ha cerrado automáticamente tras ${MINUTOS_INACTIVIDAD} minutos de inactividad por seguridad.`);
             }, TIEMPO_LIMITE_MS);
         };
 
