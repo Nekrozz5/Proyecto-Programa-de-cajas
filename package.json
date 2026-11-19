@@ -1,6 +1,6 @@
 {
   "name": "programa-cajas",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Sistema POS y Control de Cajas Híbrido con Next.js y SQLite3",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",

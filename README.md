@@ -8,6 +8,7 @@ Aplicación web integral de Punto de Venta (POS), control de turnos/arqueo ciego
 
 | Documento | Descripción |
 | :--- | :--- |
+| [GUIA_DESARROLLO.md](GUIA_DESARROLLO.md) | **Guía Rápida: Frontend vs Backend.** Mapa visual del proyecto, qué carpetas tocar según lo que quieras programar y reglas clave para colaboradores. |
 | [docs/ARQUITECTURA.md](docs/ARQUITECTURA.md) | Diseño técnico, modelo de seguridad, base de datos relacional, migraciones (v1 a v16), motor fiscal, Kardex dual, lotes PEPS, delivery, SMTP dinámico, licenciamiento Ed25519 y reportes. |
 | [docs/PRUEBAS.md](docs/PRUEBAS.md) | Batería de 23 escenarios de verificación funcional, concurrencia, stock, lotes, arqueo, combos, modificadores, régimen fiscal, pagos mixtos, delivery, SMTP, licencias e instalador. |
 | [docs/GUIA_LANZAMIENTO_INSTALABLE.md](docs/GUIA_LANZAMIENTO_INSTALABLE.md) | Guía técnica para compilación con Inno Setup, generación de instalador (`Setup-POS-Cajas-v1.0.exe`), modo kiosco de escritorio y despliegue PWA en dispositivos móviles. |
