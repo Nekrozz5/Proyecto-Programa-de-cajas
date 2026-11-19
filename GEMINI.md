@@ -71,15 +71,13 @@
 ## 4. Flujo de Trabajo y Modos de Ejecución [ON-DEMAND-ONLY]
 Para maximizar la densidad de información y el ahorro de tokens, las siguientes tareas se rigen por activación estricta bajo demanda:
 - **Git y Control de Versiones [ON-DEMAND-ONLY]:**
-  - La IA **nunca** ejecuta `git add` ni `git commit` de forma automática tras cambios rutinarios. Solo interviene en Git ante solicitud explícita del usuario (ej. *"haz commit"*, *"prepara el repositorio"*).
+  - La IA **nunca** ejecuta `git add` ni `git commit` de forma automática tras cambios rutinarios. Solo interviene en Git ante solicitud explícita del usuario (ej. *"haz commit"*, *"prepara el repositorio"*, *"sube a github"*).
   - Operaciones remotas autenticadas (`git push`, subida de ramas/tags) son **exclusivas del usuario humano**. La IA proporciona únicamente el comando exacto.
-- **Versionamiento Semántico (SemVer) en Releases:**
-  - Al preparar una versión o commit de release, incrementar versión según SemVer (`MAJOR.MINOR.PATCH`).
-  - Sincronización obligatoria simultánea en:
+  - **Versionamiento Semántico (SemVer) Obligatorio en Subidas:** Cada vez que el usuario pida subir cambios a GitHub o preparar el repositorio, la IA debe evaluar e incrementar obligatoriamente la versión según SemVer (`MAJOR.MINOR.PATCH`) sincronizando de forma simultánea:
     1. `package.json` (`"version": "X.Y.Z"`)
     2. `installer/pos-cajas.iss` (`#define MyAppVersion "X.Y.Z"` y `OutputBaseFilename=Setup-POS-Cajas-vX.Y.Z`)
 - **Compilación de Instaladores [ON-DEMAND-ONLY]:**
-  - Actualizar números de versión en archivos fuente; **nunca** compilar el instalador (`npm run installer:build`, `ISCC.exe` o `scripts/preparar-dist.js`) automáticamente. Solo ejecutarlo ante orden expresa (ej. *"compila el instalador"*, *"genera el setup"*).
+  - Actualizar números de versión en archivos fuente; **nunca** compilar el instalador (`npm run installer:build`, `ISCC.exe` o `scripts/preparar-dist.js`) automáticamente. Solo ejecutarlo ante orden expresa del usuario (ej. *"compila el instalador"*, *"genera el setup"*).
 - **Diagnósticos y Suites de Pruebas [ON-DEMAND-ONLY]:**
   - La IA no ejecuta suites de estrés ni compilaciones pesadas de verificación tras cada ajuste menor. Solo se ejecutan cuando el usuario lo solicite (ej. *"ejecuta las pruebas"*, *"busca bugs"*).
 - **Planificación Estructurada (`phase-planner`):**

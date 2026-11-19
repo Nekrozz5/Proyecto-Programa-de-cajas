@@ -5,8 +5,9 @@ import { useRouter } from 'next/navigation';
 import { useAdminContext } from '../_context/AdminContext';
 import TabConfigFiscal from '../_components/TabConfigFiscal';
 import TabConfiguracionCorreos from '../_components/TabConfiguracionCorreos';
+import TabActualizaciones from '../_components/TabActualizaciones';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { Settings, Mail } from 'lucide-react';
+import { Settings, Mail, Sparkles } from 'lucide-react';
 
 export default function ConfiguracionPage() {
     const router = useRouter();
@@ -46,6 +47,14 @@ export default function ConfiguracionPage() {
                         <Mail className="w-4 h-4 text-emerald-600 shrink-0" />
                         <span>Servidor SMTP y Notificaciones</span>
                     </TabsTrigger>
+
+                    <TabsTrigger
+                        value="actualizaciones"
+                        className="rounded-lg text-xs sm:text-sm font-semibold px-4 py-2 flex items-center gap-2 data-[selected]:bg-white data-[selected]:text-slate-900 data-[selected]:shadow-sm text-slate-600 transition-all cursor-pointer"
+                    >
+                        <Sparkles className="w-4 h-4 text-amber-500 shrink-0" />
+                        <span>Actualizaciones</span>
+                    </TabsTrigger>
                 </TabsList>
 
                 {/* CONTENIDO 1: MODALIDAD DE NEGOCIO Y RÉGIMEN FISCAL */}
@@ -68,6 +77,11 @@ export default function ConfiguracionPage() {
                         setMensajeGlobal={setMensaje}
                         setErrorGlobal={setError}
                     />
+                </TabsContent>
+
+                {/* CONTENIDO 3: ACTUALIZACIONES DEL SISTEMA */}
+                <TabsContent value="actualizaciones" className="outline-none focus:outline-none">
+                    <TabActualizaciones />
                 </TabsContent>
             </Tabs>
         </div>

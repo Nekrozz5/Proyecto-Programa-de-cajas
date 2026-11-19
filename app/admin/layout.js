@@ -22,7 +22,8 @@ import {
     AlertCircle, 
     CheckCircle2, 
     Folder,
-    TrendingUp 
+    TrendingUp,
+    Sparkles 
 } from 'lucide-react';
 
 function AdminShell({ children }) {
@@ -54,6 +55,9 @@ function AdminShell({ children }) {
     const botonMenuPrincipalRef = useRef(null);
     const mainContenedorRef = useRef(null);
     const [mostrarBotonFlotante, setMostrarBotonFlotante] = useState(false);
+
+    // Estado para alerta proactiva de actualizaciones disponibles
+    const [actualizacionInfo, setActualizacionInfo] = useState(null);
 
     const reiniciarTimerCierreAuto = () => {
         if (timerCierreSidebarRef.current) {
@@ -143,6 +147,46 @@ function AdminShell({ children }) {
             }
         };
     }, [pathname, adminAutenticado]);
+
+    // Comprobación periódica no invasiva de actualizaciones en segundo plano
+    useEffect(() => {
+        if (!adminAutenticado) return;
+        let cancelado = false;
+
+        const comprobarEnSegundoPlano = async () => {
+            try {
+                const cacheKey = 'pos_check_update';
+                const cacheado = sessionStorage.getItem(cacheKey);
+                if (cacheado) {
+                    const parsed = JSON.parse(cacheado);
+                    // Reutilizar caché si se consultó hace menos de 60 minutos
+                    if (Date.now() - parsed.ts < 60 * 60 * 1000) {
+                        if (!cancelado && parsed.hayActualizacion) {
+                            setActualizacionInfo(parsed);
+                        }
+                        return;
+                    }
+                }
+
+                const res = await fetch('/api/actualizaciones', { method: 'GET', cache: 'no-store' });
+                if (!res.ok) return;
+                const data = await res.json();
+                if (!cancelado && data && data.success) {
+                    sessionStorage.setItem(cacheKey, JSON.stringify({ ...data, ts: Date.now() }));
+                    if (data.hayActualizacion) {
+                        setActualizacionInfo(data);
+                    }
+                }
+            } catch {
+                // Silencioso: no interrumpir la experiencia operativa de caja
+            }
+        };
+
+        comprobarEnSegundoPlano();
+        return () => {
+            cancelado = true;
+        };
+    }, [adminAutenticado]);
 
     async function handleLoginAdmin(e) {
         e.preventDefault();
@@ -411,7 +455,13 @@ function AdminShell({ children }) {
                                     }`}
                                 >
                                     {IconComponent && <IconComponent className={`w-4 h-4 shrink-0 ${activa ? 'text-white' : 'text-slate-400'}`} />}
-                                    <span className="truncate">{p.label}</span>
+                                    <span className="truncate flex-1">{p.label}</span>
+                                    {p.id === 'configuracion' && actualizacionInfo?.hayActualizacion && (
+                                        <span className="flex h-2 w-2 relative shrink-0">
+                                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
+                                            <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500" />
+                                        </span>
+                                    )}
                                 </Link>
                             );
                         })}
@@ -479,6 +529,17 @@ function AdminShell({ children }) {
 
                         {/* Accesos e Indicadores Rápidos */}
                         <div className="flex items-center gap-2 shrink-0">
+                            {actualizacionInfo && actualizacionInfo.hayActualizacion && (
+                                <Link
+                                    href="/admin/configuracion"
+                                    title={`¡Nueva versión v${actualizacionInfo.versionNueva} disponible! Haz clic para actualizar.`}
+                                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-amber-900 text-xs font-bold transition-all shadow-xs cursor-pointer animate-pulse"
+                                >
+                                    <Sparkles className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                                    <span className="hidden md:inline">Nueva versión v{actualizacionInfo.versionNueva}</span>
+                                    <span className="md:hidden">v{actualizacionInfo.versionNueva}</span>
+                                </Link>
+                            )}
                             {turnoAuditadoId && (
                                 <div className="inline-flex items-center gap-1.5 rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-xs text-sky-800 font-medium">
                                     <Crosshair className="w-3.5 h-3.5 text-sky-700" />
