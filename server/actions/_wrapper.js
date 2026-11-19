@@ -27,6 +27,7 @@ async function ejecutarAction(rolesPermitidos, fn) {
 
         return {
             ok: true,
+            success: true,
             data: resultado !== undefined ? resultado : null,
             error: null
         };
@@ -34,6 +35,7 @@ async function ejecutarAction(rolesPermitidos, fn) {
         console.error('[ServerAction Error]:', err && err.message ? err.message : err);
         return {
             ok: false,
+            success: false,
             data: null,
             error: (err && err.message) ? err.message : 'Error interno al procesar la operación.',
             status: (err && typeof err.status === 'number') ? err.status : 500

@@ -1,24 +1,28 @@
 // ==========================================
-// SEED DE PRUEBA INTEGRAL: CAFETERÍA & BAKERY GOURMET (v12)
+// SEED DE PRUEBA INTEGRAL: CAFETERÍA & BAKERY GOURMET (v16)
 // Puebla la base de datos con datos completos y coherentes para pruebas exhaustivas
 // utilizando el 100% de las funcionalidades del sistema:
-// - Régimen General con liquidación fiscal (IVA 13%, IT 3%, base configurable y facturas)
-// - Estaciones multicaja física con permisos fiscales
-// - Usuarios con perfiles diferenciados y permisos fiscales
-// - Materia prima métrica con hasta 6 decimales (NIC 2 CPP) y Kardex de Insumos v11
+// - Régimen General con liquidación fiscal (IVA 13%, IT 3%, base configurable y facturas SIAT)
+// - Respaldo fiscal SIAT RCV (CUF de autorización, código de control, tipo de compra)
+// - Estaciones multicaja física (Barra Principal y Terraza & Take Away) con turnos simultáneos
+// - Usuarios con perfiles diferenciados: Propietario(a), Admin, Cajeros y Developer
+// - Configuración SMTP dinámica y destinatarios de alertas por correo con verificación
+// - Soporte completo de Delivery y Apps de Comida (PedidosYa, Yango, Mototaxi Propio, Local)
+// - Materia prima métrica con hasta 6 decimales (NIC 2 CPP) y Kardex de Insumos
 // - Compras de reposición con factura (crédito fiscal) y mermas registradas en Kardex
-// - Productos directos de reventa con Kardex de Productos Directos
-// - Trazabilidad de Lotes y Vencimiento PEPS / FIFO (v12): multi-lote, selección manual y PEPS automático
+// - Los 4 tipos de catálogo: Libre (servicios), Directo (reventa), Receta (elaborados) y Combo (promociones)
+// - Trazabilidad de Lotes y Vencimiento PEPS / FIFO: multi-lote, selección manual y PEPS automático
 // - Productos elaborados por receta con escandallo multi-insumo
-// - Grupos de modificadores (v7): reemplazos de insumos, adiciones y operativos
-// - Combos y promociones (v8): descomposición atómica, límites de unidades y vigencia
-// - Ventas diversas: Efectivo con cambio, QR conciliado, Pagos Mixtos y Facturas con snapshot
+// - Grupos de modificadores: reemplazos de insumos, adiciones y operativos
+// - Combos y promociones: descomposición atómica, límites de unidades y vigencia temporal
+// - Ventas diversas: Efectivo con cambio, QR conciliado, Pagos Mixtos, Apps de Comida y Facturas SIAT
 // - Descuentos comerciales con prorrateo neto exacto entre líneas
 // - Anulación auditada de venta con rollback completo en inventario y Kardex
-// - Egresos operativos y egresos respaldados con factura
+// - Reapertura auditada de turno de caja (historial_reaperturas y veces_reabierta)
+// - Egresos operativos y egresos respaldados con factura (crédito fiscal)
 // - Inyecciones de sencillo (ingreso_efectivo)
-// - Arqueo ciego cuadrado en Turno #1 (ayer) y Turno #2 ABIERTO (hoy)
-// - Verificación automática de integridad algebraica de Kardex directo, insumos y Lotes PEPS (v12)
+// - Arqueo ciego cuadrado en Turnos Históricos y Turnos ABIERTOS en simultáneo hoy en ambas cajas
+// - Verificación automática de integridad algebraica de Kardex directo, insumos y Lotes PEPS
 // ==========================================
 
 const bcrypt = require('bcryptjs');
@@ -56,11 +60,11 @@ function all(sql, params = []) {
 
 async function sembrarCafeteriaCompleta() {
     console.log('==================================================================');
-    console.log('--- INICIANDO SEED INTEGRAL DE CAFETERÍA & BAKERY (v12) ---');
+    console.log('--- INICIANDO SEED INTEGRAL DE CAFETERÍA & BAKERY (v16) ---');
     console.log('==================================================================');
 
     // 1. Limpieza de tablas operativas
-    console.log('[1/12] Limpiando tablas operativas previas...');
+    console.log('[1/14] Limpiando tablas operativas previas en orden relacional...');
     await run(`DELETE FROM detalle_movimientos_combos`);
     await run(`DELETE FROM detalle_movimientos_modificadores`);
     await run(`DELETE FROM combo_componentes`);
@@ -78,9 +82,11 @@ async function sembrarCafeteriaCompleta() {
     await run(`DELETE FROM insumos`);
     await run(`DELETE FROM cajas`);
     await run(`DELETE FROM categorias`);
+    await run(`DELETE FROM notificacion_destinatarios`);
+    await run(`DELETE FROM configuracion_smtp`);
 
-    // 2. Configuración del negocio y módulo fiscal (Régimen General)
-    console.log('[2/12] Configurando modalidad de negocio y parámetros contables / fiscales...');
+    // 2. Configuración del negocio y módulo fiscal (Régimen General + Apps de Comida v14)
+    console.log('[2/14] Configurando parámetros contables, fiscales y delivery del negocio...');
     await run(
         `UPDATE configuracion_negocio
          SET nombre_negocio = 'Café Gourmet & Bakery Aroma',
@@ -88,6 +94,7 @@ async function sembrarCafeteriaCompleta() {
              usa_stock_directo = 1,
              usa_vencimiento = 1,
              usa_recetas_ensamblaje = 1,
+             habilita_apps_comida = 1,
              configurado = 1,
              nit_negocio = '1029384756',
              regimen_tributario = 'regimen_general',
@@ -99,8 +106,8 @@ async function sembrarCafeteriaCompleta() {
          WHERE id = 1`
     );
 
-    // 3. Estaciones de caja física
-    console.log('[3/12] Configurando estaciones multicaja física...');
+    // 3. Estaciones de caja física multicaja
+    console.log('[3/14] Configurando estaciones multicaja física (Barra y Terraza)...');
     await run(
         `UPDATE cajas_fisicas
          SET nombre = 'Caja 1 - Barra Principal',
@@ -113,12 +120,12 @@ async function sembrarCafeteriaCompleta() {
          VALUES (2, 'Caja 2 - Terraza & Take Away', 1, 1)`
     );
 
-    // 4. Usuarios del sistema con permisos fiscales diferenciados
-    console.log('[4/12] Configurando usuarios y credenciales (Clave universal: 12345678)...');
+    // 4. Usuarios del sistema con perfiles diferenciados (Clave universal: 12345678)
+    console.log('[4/14] Configurando usuarios y credenciales (Clave universal: 12345678)...');
     const PASSWORD_UNIVERSAL = '12345678';
     const hashUniversal = await bcrypt.hash(PASSWORD_UNIVERSAL, BCRYPT_ROUNDS);
 
-    // Propietario(a): carlos
+    // Propietario(a): carlos (v16)
     let carlosId;
     const carlos = await get(`SELECT id FROM usuarios WHERE LOWER(nombre) = 'carlos'`);
     if (!carlos) {
@@ -199,15 +206,47 @@ async function sembrarCafeteriaCompleta() {
     }
 
     // Developer técnico
+    const dev = await get(`SELECT id FROM usuarios WHERE LOWER(nombre) = 'developer'`);
+    if (!dev) {
+        await run(
+            `INSERT INTO usuarios (nombre, pin_o_password, rol, activo, puede_registrar_respaldo_fiscal)
+             VALUES ('developer', ?, 'developer', 1, 1)`,
+            [hashUniversal]
+        );
+    } else {
+        await run(
+            `UPDATE usuarios
+             SET pin_o_password = ?, rol = 'developer', activo = 1, puede_registrar_respaldo_fiscal = 1
+             WHERE id = ?`,
+            [hashUniversal, dev.id]
+        );
+    }
+
+    // 5. Configuración SMTP dinámica y Destinatarios de Alertas de Cierre (v15)
+    console.log('[5/14] Configurando servicio SMTP dinámico y destinatarios verificados...');
     await run(
-        `UPDATE usuarios
-         SET pin_o_password = ?, activo = 1, puede_registrar_respaldo_fiscal = 1
-         WHERE LOWER(nombre) = 'developer'`,
-        [hashUniversal]
+        `INSERT OR REPLACE INTO configuracion_smtp (id, host, puerto, secure, usuario, password, remitente_nombre, activo, actualizado_en)
+         VALUES (1, 'smtp.gmail.com', 465, 1, 'notificaciones@cafearoma.bo', 'demo-app-password-segura', 'Café Gourmet Aroma - Control POS', 1, CURRENT_TIMESTAMP)`
     );
 
-    // 5. Categorías
-    console.log('[5/12] Creando categorías del catálogo...');
+    await run(
+        `INSERT INTO notificacion_destinatarios (email, nombre, verificado, activo, creado_por, creado_en, verificado_en)
+         VALUES ('carlos.propietario@cafearoma.bo', 'Carlos Mendoza (Propietario)', 1, 1, ?, datetime('now', '-2 days'), datetime('now', '-2 days'))`,
+        [carlosId]
+    );
+    await run(
+        `INSERT INTO notificacion_destinatarios (email, nombre, verificado, activo, creado_por, creado_en, verificado_en)
+         VALUES ('sofia.admin@cafearoma.bo', 'Sofía Valenzuela (Administradora)', 1, 1, ?, datetime('now', '-2 days'), datetime('now', '-2 days'))`,
+        [carlosId]
+    );
+    await run(
+        `INSERT INTO notificacion_destinatarios (email, nombre, verificado, codigo_verificacion, codigo_expira, activo, creado_por, creado_en)
+         VALUES ('auditoria@cafearoma.bo', 'Auditoría Fiscal Externa', 0, '582914', datetime('now', '+1 day'), 1, ?, datetime('now'))`,
+        [carlosId]
+    );
+
+    // 6. Categorías del catálogo
+    console.log('[6/14] Creando categorías del catálogo completo...');
     const categorias = [
         'Cafés Calientes',
         'Bebidas Frías & Frappés',
@@ -216,14 +255,15 @@ async function sembrarCafeteriaCompleta() {
         'Sándwiches & Salados',
         'Bebidas Embotelladas',
         'Snacks & Empaquetados',
-        'Combos & Promociones'
+        'Combos & Promociones',
+        'Servicios & Eventos'
     ];
     for (const cat of categorias) {
         await queries.crearCategoria(cat);
     }
 
-    // 6. Insumos (Materia Prima con precisión métrica de hasta 6 decimales NIC 2)
-    console.log('[6/12] Creando insumos de almacén y compras con crédito fiscal...');
+    // 7. Insumos (Materia Prima con precisión métrica de hasta 6 decimales NIC 2 CPP)
+    console.log('[7/14] Creando insumos de almacén y compras con crédito fiscal RCV SIAT...');
     const listaInsumos = [
         // Cafetería base
         { nombre: 'Café en Grano Tostado Especial', unidad: 'gramos', stock: 15000, costo: 0.025, seg: 2000, entrega: 2, venc: '2027-06-30' },
@@ -236,11 +276,11 @@ async function sembrarCafeteriaCompleta() {
         { nombre: 'Jarabe de Caramelo', unidad: 'mililitros', stock: 5000, costo: 0.008, seg: 1000, entrega: 3, venc: '2027-01-10' },
         { nombre: 'Salsa de Chocolate Mocha', unidad: 'gramos', stock: 4000, costo: 0.012, seg: 800, entrega: 3, venc: '2027-02-15' },
         { nombre: 'Crema de Leche para Batir (Chantilly)', unidad: 'gramos', stock: 3500, costo: 0.008, seg: 500, entrega: 2, venc: '2026-12-05' },
-        { nombre: 'Chispas de Chocolate Belga', unidad: 'gramos', stock: 2500, costo: 0.015, seg: 400, entrega: 3, venc: '2027-03-20' },
+        { nombre: 'Chispas de Chocolate Belga', unidad: 'gramos', stock: 120, costo: 0.015, seg: 400, entrega: 3, venc: '2027-03-20' },
         { nombre: 'Hielo Purificado', unidad: 'gramos', stock: 25000, costo: 0.0005, seg: 5000, entrega: 1, venc: null },
         // Endulzantes
         { nombre: 'Sobres de Azúcar Mascabado', unidad: 'unidades', stock: 600, costo: 0.02, seg: 100, entrega: 2, venc: null },
-        { nombre: 'Sobres de Stevia Orgánica', unidad: 'unidades', stock: 500, costo: 0.03, seg: 100, entrega: 2, venc: null },
+        { nombre: 'Sobres de Stevia Orgánica', unidad: 'unidades', stock: 35, costo: 0.03, seg: 100, entrega: 2, venc: null },
         { nombre: 'Miel de Abeja Pura', unidad: 'gramos', stock: 3000, costo: 0.012, seg: 400, entrega: 4, venc: '2027-08-01' },
         // Tés
         { nombre: 'Té Matcha Japonés en Polvo', unidad: 'gramos', stock: 2000, costo: 0.045, seg: 300, entrega: 5, venc: '2027-05-20' },
@@ -275,8 +315,8 @@ async function sembrarCafeteriaCompleta() {
         mapaInsumos[ins.nombre] = id;
     }
 
-    // Compra adicional de reposición con Factura Fiscal (Kardex de insumos y crédito fiscal)
-    console.log('    -> Registrando compra de reposición de café con Factura Fiscal...');
+    // Compra de reposición de café con Factura Fiscal (Kardex Insumos y Respaldo RCV SIAT v13)
+    console.log('    -> Registrando compra de reposición de café con Factura Fiscal y CUF SIAT...');
     await queries.registrarCompraInsumo(
         mapaInsumos['Café en Grano Tostado Especial'],
         5000, // 5 kg
@@ -286,8 +326,11 @@ async function sembrarCafeteriaCompleta() {
         {
             proveedorNombre: 'Café Yungas Andino S.R.L.',
             proveedorNit: '3948201018',
-            nroFacturaCompra: 'F-44820',
+            nroFacturaCompra: '44820',
             conFactura: true,
+            nroAutorizacionCuf: 'CUF-YUN-99283401-2026',
+            codigoControl: '4B-8D-F1',
+            tipoCompra: 1,
             usuarioId: sofiaId
         }
     );
@@ -301,8 +344,8 @@ async function sembrarCafeteriaCompleta() {
         sofiaId
     );
 
-    // 7. Productos directos de reventa con Kardex Directo
-    console.log('[7/12] Creando productos directos de reventa con Kardex inicial...');
+    // 8. Productos directos de reventa y tipo Libre (Servicios)
+    console.log('[8/14] Creando catálogo de productos directos (con Lotes PEPS v12) y tipo libre (Servicios)...');
     const mapaProductos = {};
 
     const productosDirectos = [
@@ -320,7 +363,7 @@ async function sembrarCafeteriaCompleta() {
             precio: 8.00,
             costo: 3.50,
             categoria: 'Bebidas Embotelladas',
-            stock: 50,
+            stock: 3,
             stockMin: 10,
             venc: '2027-12-31'
         },
@@ -338,7 +381,7 @@ async function sembrarCafeteriaCompleta() {
             precio: 18.00,
             costo: 9.50,
             categoria: 'Snacks & Empaquetados',
-            stock: 25,
+            stock: 0,
             stockMin: 5,
             venc: '2027-06-30'
         }
@@ -359,8 +402,39 @@ async function sembrarCafeteriaCompleta() {
         mapaProductos[prod.nombre] = typeof res === 'object' && res !== null ? res.id : res;
     }
 
+    // Productos tipo 'libre' (Servicios / Sin control de stock)
+    const productosLibres = [
+        {
+            nombre: 'Alquiler Salón de Reuniones (por Hora)',
+            precio: 50.00,
+            costo: 0.00,
+            categoria: 'Servicios & Eventos'
+        },
+        {
+            nombre: 'Servicio Barista para Eventos Privados',
+            precio: 150.00,
+            costo: 0.00,
+            categoria: 'Servicios & Eventos'
+        }
+    ];
+
+    for (const pl of productosLibres) {
+        const res = await queries.crearProducto(
+            pl.nombre,
+            pl.precio,
+            pl.costo,
+            pl.categoria,
+            null, // stock null -> tipo_inventario = 'libre'
+            'servicio',
+            0,
+            null,
+            carlosId
+        );
+        mapaProductos[pl.nombre] = typeof res === 'object' && res !== null ? res.id : res;
+    }
+
     // Compra con factura de producto directo (Kardex Directo y segundo lote de Kombucha)
-    console.log('    -> Registrando compra con factura fiscal de Kombucha (Kardex directo y 2do lote)...');
+    console.log('    -> Registrando compras con Factura Fiscal SIAT RCV y multi-lote PEPS...');
     await queries.registrarCompraProductoDirecto(
         mapaProductos['Kombucha Frutos Rojos 330ml'],
         15, // 15 unidades más
@@ -369,14 +443,16 @@ async function sembrarCafeteriaCompleta() {
         {
             proveedorNombre: 'Bebidas Naturales Andinas S.A.',
             proveedorNit: '1829402011',
-            nroFacturaCompra: 'F-8921',
+            nroFacturaCompra: '8921',
             conFactura: true,
+            nroAutorizacionCuf: 'CUF-BEB-88392019-2026',
+            codigoControl: 'A1-9F-3D',
+            tipoCompra: 1,
             usuarioId: sofiaId
         }
     );
 
-    // Compra adicional de nuevo lote para Galletas de Avena (trazabilidad multi-lote v12)
-    console.log('    -> Registrando compra de segundo lote de Galletas de Avena (trazabilidad multi-lote v12)...');
+    // Compra de segundo lote para Galletas de Avena (trazabilidad multi-lote v12)
     await queries.registrarCompraProductoDirecto(
         mapaProductos['Galletas de Avena Artesanales'],
         20, // 20 unidades más
@@ -385,8 +461,11 @@ async function sembrarCafeteriaCompleta() {
         {
             proveedorNombre: 'Panadería Artesanal del Valle',
             proveedorNit: '9482019283',
-            nroFacturaCompra: 'F-3310',
+            nroFacturaCompra: '3310',
             conFactura: true,
+            nroAutorizacionCuf: 'CUF-PAN-33109284-2026',
+            codigoControl: 'C7-2E-88',
+            tipoCompra: 1,
             usuarioId: sofiaId
         }
     );
@@ -400,8 +479,8 @@ async function sembrarCafeteriaCompleta() {
         sofiaId
     );
 
-    // 8. Productos por Receta (Elaborados)
-    console.log('[8/12] Creando productos elaborados por receta (escandallo multi-insumo)...');
+    // 9. Productos por Receta (Elaborados)
+    console.log('[9/14] Creando productos elaborados por receta (escandallo multi-insumo)...');
     const productosReceta = [
         {
             nombre: 'Espresso Simple 30ml',
@@ -516,8 +595,8 @@ async function sembrarCafeteriaCompleta() {
         mapaProductos[pr.nombre] = res.id;
     }
 
-    // 9. Grupos de modificadores (v7): Reemplazos de insumos, adiciones y opciones operativas
-    console.log('[9/12] Configurando grupos de complementos y modificadores...');
+    // 10. Grupos de modificadores (Reemplazo de insumo, adiciones y opciones operativas)
+    console.log('[10/14] Configurando grupos de complementos y modificadores...');
 
     // Grupo A: Tipo de Leche (Única, obligatoria, con reemplazo exacto del insumo base)
     const grupoLecheId = await queries.crearGrupoModificadores(
@@ -702,7 +781,6 @@ async function sembrarCafeteriaCompleta() {
         sofiaId
     );
 
-    // Obtener IDs de opciones para armar ventas de prueba
     const gruposCargados = await queries.obtenerGruposModificadores(false);
     const mapaOpciones = {};
     for (const g of gruposCargados) {
@@ -711,13 +789,13 @@ async function sembrarCafeteriaCompleta() {
         }
     }
 
-    // 10. Combos y Promociones (v8): Descomposición atómica de stock y límites
-    console.log('[10/12] Creando combos y paquetes promocionales...');
+    // 11. Combos y Promociones (Descomposición atómica de stock y límites)
+    console.log('[11/14] Creando combos y paquetes promocionales...');
 
     // Combo 1: Desayuno Clásico (Cappuccino + Croissant) -> Sin límite
     const comboDesayuno = await queries.crearProductoConInsumos({
         nombre: 'Combo Desayuno Clásico',
-        precio: 20.00, // Ahorro vs 24.00 individual
+        precio: 20.00,
         categoria: 'Combos & Promociones',
         tipoComposicion: 'combo',
         componentesCombo: [
@@ -731,7 +809,7 @@ async function sembrarCafeteriaCompleta() {
     // Combo 2: Ejecutivo Almuerzo (Baguette Serrano + Kombucha) -> Con límite de 30 unidades
     const comboAlmuerzo = await queries.crearProductoConInsumos({
         nombre: 'Combo Ejecutivo Almuerzo',
-        precio: 35.00, // Ahorro vs 40.00 individual
+        precio: 35.00,
         categoria: 'Combos & Promociones',
         tipoComposicion: 'combo',
         componentesCombo: [
@@ -748,7 +826,7 @@ async function sembrarCafeteriaCompleta() {
     const fechaFinVig = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 16);
     const promoTarde = await queries.crearProductoConInsumos({
         nombre: 'Promo Tarde Dulce Aroma',
-        precio: 17.00, // Ahorro vs 20.00 individual
+        precio: 17.00,
         categoria: 'Combos & Promociones',
         tipoComposicion: 'combo',
         componentesCombo: [
@@ -761,14 +839,14 @@ async function sembrarCafeteriaCompleta() {
     });
     mapaProductos['Promo Tarde Dulce Aroma'] = promoTarde.id;
 
-    // 11. Simulación Operativa Completa: Turno #1 (Ayer, Cerrado, Cuadrado y Auditado)
-    console.log('[11/12] Simulando Turno #1 histórico (Ayer) con arqueo ciego, pagos mixtos y facturación...');
+    // 12. Simulación Histórica: Turno #1 (Ayer, Caja 1 - Barra Principal - lucia)
+    console.log('[12/14] Simulando Turnos Históricos de Ayer:');
+    console.log('   --- [A] Turno #1 (Caja 1 - Barra Principal - lucia): arqueo ciego, pagos mixtos, facturas SIAT...');
 
-    // Abrir Turno #1 en Caja 1 con fondo inicial de 150.00 Bs
     const turno1Id = await queries.abrirCaja(luciaId, 150.00, 1);
 
     // Venta A: Efectivo con cambio entregado (Cappuccino con leche de almendras y shot extra + Croissant)
-    console.log('    -> Turno 1: Venta 1 en Efectivo con modificadores de receta...');
+    console.log('       -> T1 Venta 1: Efectivo con modificadores y cálculo de cambio...');
     await queries.registrarVentaCompleta(
         turno1Id,
         [
@@ -786,14 +864,14 @@ async function sembrarCafeteriaCompleta() {
             }
         ],
         'efectivo',
-        50.00, // Pagó con billete de 50.00 Bs
+        50.00, // Pagó con billete de 50.00 Bs (cambio calculado)
         'Venta mostrador desayuno gourmet',
         luciaId
     );
 
     // Venta B: Venta por QR con FACTURA FISCAL (Snapshot IVA 13% e IT 3%)
-    console.log('    -> Turno 1: Venta 2 por QR con Factura Fiscal y cliente corporativo...');
-    await queries.registrarVentaCompleta(
+    console.log('       -> T1 Venta 2: QR con Factura Fiscal SIAT y cliente corporativo...');
+    const ventaFac = await queries.registrarVentaCompleta(
         turno1Id,
         [
             {
@@ -817,17 +895,22 @@ async function sembrarCafeteriaCompleta() {
         {
             tipoComprobante: 'factura',
             conFactura: true,
-            nroFactura: 'F-00101',
-            cufAutorizacion: 'CUF-CAF-8849-XYZ-2026',
+            nroFactura: '101',
+            cufAutorizacion: 'CUF-CAF-88492019-2026',
+            codigoControl: '5F-2A-88',
             clienteNitCi: '4839201019',
             clienteRazonSocial: 'Importadora Andina S.R.L.'
         }
     );
+    if (ventaFac && ventaFac.movimientoId) {
+        await run(
+            `UPDATE movimientos SET cuf_autorizacion = 'CUF-CAF-88492019-2026', codigo_control = '5F-2A-88' WHERE id = ?`,
+            [ventaFac.movimientoId]
+        );
+    }
 
     // Venta C: Venta con PAGO MIXTO (Efectivo + QR) y DESCUENTO comercial prorrateado
-    console.log('    -> Turno 1: Venta 3 con Pago Mixto (Efectivo + QR) y Descuento comercial...');
-    // Mocha (18.00) + Latte (16.00) = 34.00 Bs bruto. Descuento 4.00 Bs -> Total 30.00 Bs neto.
-    // Pagó: 10.00 Bs en Efectivo (con billete de 20.00 Bs -> 10.00 Bs de cambio) + 20.00 Bs por QR.
+    console.log('       -> T1 Venta 3: Pago Mixto (Efectivo + QR) con descuento comercial prorrateado...');
     await queries.registrarVentaCompleta(
         turno1Id,
         [
@@ -859,7 +942,7 @@ async function sembrarCafeteriaCompleta() {
     );
 
     // Venta D: Venta de COMBOS (2 Combos Desayuno Clásico)
-    console.log('    -> Turno 1: Venta 4 de Combo Desayuno Clásico (descuento atómico multi-componente)...');
+    console.log('       -> T1 Venta 4: Combo Desayuno Clásico (descuento atómico multi-componente)...');
     await queries.registrarVentaCompleta(
         turno1Id,
         [
@@ -874,8 +957,8 @@ async function sembrarCafeteriaCompleta() {
         luciaId
     );
 
-    // Venta E: Venta que luego es ANULADA (Demuestra auditoría de anulación y rollback de Kardex)
-    console.log('    -> Turno 1: Venta 5 y posterior ANULACIÓN auditada (rollback de inventario y Kardex)...');
+    // Venta E: Venta que luego es ANULADA auditadamente con rollback
+    console.log('       -> T1 Venta 5: Venta y anulación formal por Sofía (rollback atómico)...');
     const ventaAnular = await queries.registrarVentaCompleta(
         turno1Id,
         [
@@ -894,25 +977,25 @@ async function sembrarCafeteriaCompleta() {
         luciaId
     );
 
-    // Anulación formal por parte de la administradora Sofía
     await queries.anularMovimientoConPermiso(
         sofiaId,
         ventaAnular.movimientoId,
         'Error de mesa: el cliente solicitó cancelar la orden antes de la preparación'
     );
 
-    // Egreso 1: Gasto operativo menor de caja en efectivo (limpieza)
-    console.log('    -> Turno 1: Egreso menor en efectivo...');
+    // Egreso 1: Gasto operativo menor de caja en efectivo
+    console.log('       -> T1 Egreso 1: Gasto menor en efectivo...');
     await queries.registrarEgreso(
         turno1Id,
         18.00,
         'Compra urgente de papel secante y detergente para barra',
         'efectivo',
-        luciaId
+        luciaId,
+        { categoriaContable: 'gasto_operativo' }
     );
 
-    // Egreso 2: Gasto de mantenimiento con Factura Fiscal (Crédito fiscal IVA)
-    console.log('    -> Turno 1: Egreso operativo respaldado con Factura Fiscal...');
+    // Egreso 2: Gasto de mantenimiento con Factura Fiscal SIAT (Crédito fiscal IVA)
+    console.log('       -> T1 Egreso 2: Egreso respaldado con Factura Fiscal SIAT (crédito IVA)...');
     await queries.registrarEgreso(
         turno1Id,
         45.00,
@@ -920,17 +1003,19 @@ async function sembrarCafeteriaCompleta() {
         'efectivo',
         luciaId,
         {
-            categoriaContable: 'mantenimiento',
+            categoriaContable: 'gasto_operativo',
             proveedorNombre: 'Servicios Técnicos Café Express S.R.L.',
             proveedorNit: '2938401015',
-            nroFactura: 'F-1204',
+            nroFactura: '1204',
+            cufAutorizacion: 'CUF-SER-120492-2026',
+            codigoControl: '3E-1A-99',
             conFactura: true,
             tipoComprobante: 'factura'
         }
     );
 
     // Inyección de cambio / sencillo (ingreso_efectivo)
-    console.log('    -> Turno 1: Inyección de sencillo / monedas al cajón...');
+    console.log('       -> T1 Inyección: Sencillo y monedas para cambio matutino...');
     await queries.registrarIngresoEfectivo(
         turno1Id,
         50.00,
@@ -938,73 +1023,75 @@ async function sembrarCafeteriaCompleta() {
         luciaId
     );
 
-    // Calcular efectivo esperado exacto para cerrar el Turno 1 perfectamente cuadrado
-    const resumenT1 = await all(
-        `SELECT tipo, metodo_pago, COALESCE(SUM(monto), 0) as total
-         FROM movimientos
-         WHERE caja_id = ? AND estado = 'completado'
-         GROUP BY tipo, metodo_pago`,
-        [turno1Id]
+    // Cierre cuadrado con arqueo ciego exacto
+    const detT1 = await queries.obtenerResumenCaja(turno1Id);
+    console.log(`       -> Cerrando Turno #1 con arqueo ciego exacto: Bs ${detT1.efectivo_esperado.toFixed(2)} (QR: Bs ${detT1.qr_esperado.toFixed(2)})...`);
+    await queries.cerrarCaja(
+        turno1Id,
+        detT1.efectivo_esperado,
+        luciaId,
+        detT1.qr_esperado,
+        'Cierre de turno barra principal cuadrado sin novedades'
     );
 
-    let ingEfT1 = 0;
-    let egEfT1 = 0;
-    for (const r of resumenT1) {
-        if (r.tipo === 'ingreso' && r.metodo_pago === 'efectivo') ingEfT1 = Number(r.total);
-        if (r.tipo === 'egreso' && r.metodo_pago === 'efectivo') egEfT1 = Number(r.total);
-    }
-    // También sumar la porción de efectivo de pagos mixtos
-    const mixtosT1 = await get(
-        `SELECT COALESCE(SUM(monto_efectivo), 0) as total_mixto_efectivo
-         FROM movimientos
-         WHERE caja_id = ? AND estado = 'completado' AND metodo_pago = 'mixto'`,
-        [turno1Id]
-    );
-    const porcionMixtaEfectivo = Number(mixtosT1?.total_mixto_efectivo || 0);
+    // 13. Simulación Histórica: Turno #2 (Ayer, Caja 2 - Terraza & Take Away - marcos)
+    console.log('   --- [B] Turno #2 (Caja 2 - Terraza & Take Away - marcos): Apps de Comida v14 y Reapertura Auditada...');
+    const turno2Id = await queries.abrirCaja(marcosId, 100.00, 2);
 
-    const efEsperadoT1 = Number((150.00 + ingEfT1 + porcionMixtaEfectivo - egEfT1).toFixed(2));
-
-    console.log(`    -> Cerrando Turno #1 con arqueo ciego exacto: Bs ${efEsperadoT1.toFixed(2)}...`);
-    await queries.cerrarCaja(turno1Id, efEsperadoT1, luciaId);
-
-    // Ajustar fechas del Turno 1 a ayer para que Recharts muestre tendencias realistas
-    await run(
-        `UPDATE cajas
-         SET fecha_apertura = datetime('now', '-1 day', '08:00:00'),
-             fecha_cierre = datetime('now', '-1 day', '16:30:00')
-         WHERE id = ?`,
-        [turno1Id]
-    );
-    await run(
-        `UPDATE movimientos
-         SET fecha_hora = datetime('now', '-1 day', '+2 hours')
-         WHERE caja_id = ?`,
-        [turno1Id]
-    );
-    await run(
-        `UPDATE movimientos_pagos
-         SET movimiento_id = movimiento_id
-         WHERE movimiento_id IN (SELECT id FROM movimientos WHERE caja_id = ?)`,
-        [turno1Id]
-    );
-    await run(
-        `UPDATE movimientos_productos_directos
-         SET fecha_hora = datetime('now', '-1 day', '+2 hours')
-         WHERE movimiento_id IN (SELECT id FROM movimientos WHERE caja_id = ?)`,
-        [turno1Id]
-    );
-    await run(
-        `UPDATE movimientos_insumos
-         SET fecha_hora = datetime('now', '-1 day', '+2 hours')
-         WHERE movimiento_id IN (SELECT id FROM movimientos WHERE caja_id = ?)`,
-        [turno1Id]
+    // Venta 2.1: Delivery PedidosYa (Canal externo desacoplado del arqueo de efectivo)
+    console.log('       -> T2 Venta 1: Pedido delivery PedidosYa (v14)...');
+    await queries.registrarVentaCompleta(
+        turno2Id,
+        [
+            {
+                productoId: mapaProductos['Cappuccino Barista 12oz'],
+                cantidad: 2
+            },
+            {
+                productoId: mapaProductos['Baguette Jamón Serrano & Mozzarella'],
+                cantidad: 1
+            }
+        ],
+        'pedidos_ya',
+        null,
+        'Pedido delivery PedidosYa para retiro por repartidor',
+        marcosId,
+        null,
+        {
+            canalVenta: 'pedidos_ya',
+            referenciaExterna: 'PY-98421',
+            datosEntrega: { direccion: 'Av. Heroínas #840, Edif. Los Olivos 3B', cliente: 'Camila Rojas', telefono: '71234567' }
+        }
     );
 
-    // 12. Turno #2 (Hoy, ABIERTO en Caja 1 para operar de inmediato)
-    console.log('[12/12] Abriendo Turno #2 (Hoy, ABIERTO) con ventas en curso para mostrador...');
-    const turno2Id = await queries.abrirCaja(carlosId, 150.00, 1);
+    // Venta 2.2: Delivery Yango Food
+    console.log('       -> T2 Venta 2: Pedido delivery Yango Food (v14)...');
+    await queries.registrarVentaCompleta(
+        turno2Id,
+        [
+            {
+                productoId: mapaProductos['Mocha Chocolate Suizo 16oz'],
+                cantidad: 1
+            },
+            {
+                productoId: mapaProductos['Croissant Horneado Mantequilla'],
+                cantidad: 2
+            }
+        ],
+        'yango',
+        null,
+        'Pedido delivery Yango Food',
+        marcosId,
+        null,
+        {
+            canalVenta: 'yango',
+            referenciaExterna: 'YNG-55210',
+            datosEntrega: { direccion: 'Calle Calama #230, Piso 1', cliente: 'Diego Morales', telefono: '68901234' }
+        }
+    );
 
-    // Venta de hoy 1: Combo Ejecutivo Almuerzo por QR
+    // Venta 2.3: Delivery con Mototaxi propio pagado por QR
+    console.log('       -> T2 Venta 3: Despacho mototaxi propio con QR bancario...');
     await queries.registrarVentaCompleta(
         turno2Id,
         [
@@ -1015,7 +1102,160 @@ async function sembrarCafeteriaCompleta() {
         ],
         'qr',
         null,
-        'Almuerzo en terraza inicio turno hoy',
+        'Despacho motorizado propio a oficina centro',
+        marcosId,
+        null,
+        {
+            canalVenta: 'mototaxi',
+            referenciaQr: 'QR-BNB-33190',
+            datosEntrega: { motorizado: 'Juan Pérez (Moto 4)', direccion: 'Av. América #120' }
+        }
+    );
+
+    // Venta 2.4: Venta de producto libre 'Alquiler Salón de Reuniones' en efectivo
+    console.log('       -> T2 Venta 4: Servicio Libre (Alquiler salón 2 horas) en efectivo...');
+    await queries.registrarVentaCompleta(
+        turno2Id,
+        [
+            {
+                productoId: mapaProductos['Alquiler Salón de Reuniones (por Hora)'],
+                cantidad: 2
+            }
+        ],
+        'efectivo',
+        100.00,
+        'Alquiler de salón privado para reunión ejecutiva',
+        marcosId
+    );
+
+    // Venta 2.5: Venta mostrador terraza en efectivo
+    console.log('       -> T2 Venta 5: Café y galleta en efectivo en terraza...');
+    await queries.registrarVentaCompleta(
+        turno2Id,
+        [
+            {
+                productoId: mapaProductos['Cappuccino Barista 12oz'],
+                cantidad: 1
+            },
+            {
+                productoId: mapaProductos['Galletas de Avena Artesanales'],
+                cantidad: 1
+            }
+        ],
+        'efectivo',
+        30.00,
+        'Consumo en mesa terraza tarde',
+        marcosId
+    );
+
+    // Cierre inicial de Turno #2
+    const detT2_1 = await queries.obtenerResumenCaja(turno2Id);
+    console.log(`       -> Cierre inicial de Turno #2 con arqueo ciego exacto: Bs ${detT2_1.efectivo_esperado.toFixed(2)} (Apps: Bs ${detT2_1.ventas_apps_total.toFixed(2)} desacopladas)...`);
+    await queries.cerrarCaja(
+        turno2Id,
+        detT2_1.efectivo_esperado,
+        marcosId,
+        detT2_1.qr_esperado,
+        'Cierre habitual de turno terraza'
+    );
+
+    // REAPERTURA AUDITADA: Carlos (propietario) reabre formalmente Turno #2
+    console.log('       -> Demostrando REAPERTURA AUDITADA formal por Propietario (Carlos)...');
+    await queries.reabrirCajaConPermiso(
+        carlosId,
+        turno2Id,
+        'Auditoría y sincronización de pedido delivery omitido en cierre inicial'
+    );
+
+    // Registro de venta durante la reapertura
+    console.log('       -> Registrando venta omitida en turno reabierto...');
+    await queries.registrarVentaCompleta(
+        turno2Id,
+        [
+            {
+                productoId: mapaProductos['Matcha Latte Frío 16oz'],
+                cantidad: 1
+            }
+        ],
+        'qr',
+        null,
+        'Bebida agregada durante reapertura auditada',
+        marcosId,
+        null,
+        {
+            referenciaQr: 'QR-BNB-998812'
+        }
+    );
+
+    // Cierre final post-reapertura de Turno #2
+    const detT2_2 = await queries.obtenerResumenCaja(turno2Id);
+    console.log(`       -> Cierre definitivo post-reapertura con historial y veces_reabierta = 1...`);
+    await queries.cerrarCaja(
+        turno2Id,
+        detT2_2.efectivo_esperado,
+        marcosId,
+        detT2_2.qr_esperado,
+        'Cierre final post-auditoría con reapertura formal'
+    );
+
+    // Ajuste temporal realista de Turnos #1 y #2 a ayer distribuido en horarios de atención
+    console.log('    -> Sincronizando timestamps de turnos históricos para analíticas y Recharts...');
+    await run(
+        `UPDATE cajas
+         SET fecha_apertura = datetime('now', '-1 day', '07:30:00'),
+             fecha_cierre = datetime('now', '-1 day', '16:00:00')
+         WHERE id = ?`,
+        [turno1Id]
+    );
+    await run(
+        `UPDATE cajas
+         SET fecha_apertura = datetime('now', '-1 day', '11:00:00'),
+             fecha_cierre = datetime('now', '-1 day', '20:30:00')
+         WHERE id = ?`,
+        [turno2Id]
+    );
+
+    const movsT1 = await all(`SELECT id FROM movimientos WHERE caja_id = ? ORDER BY id ASC`, [turno1Id]);
+    const horasT1 = ['08:15:00', '09:40:00', '11:20:00', '12:35:00', '13:50:00', '14:10:00', '14:45:00', '15:15:00'];
+    for (let i = 0; i < movsT1.length; i++) {
+        const hora = horasT1[i] || '15:30:00';
+        await run(`UPDATE movimientos SET fecha_hora = datetime('now', '-1 day', ?) WHERE id = ?`, [hora, movsT1[i].id]);
+        await run(`UPDATE movimientos_productos_directos SET fecha_hora = datetime('now', '-1 day', ?) WHERE movimiento_id = ?`, [hora, movsT1[i].id]);
+        await run(`UPDATE movimientos_insumos SET fecha_hora = datetime('now', '-1 day', ?) WHERE movimiento_id = ?`, [hora, movsT1[i].id]);
+    }
+
+    const movsT2 = await all(`SELECT id FROM movimientos WHERE caja_id = ? ORDER BY id ASC`, [turno2Id]);
+    const horasT2 = ['11:45:00', '13:10:00', '14:30:00', '16:00:00', '17:20:00', '19:15:00', '20:00:00'];
+    for (let i = 0; i < movsT2.length; i++) {
+        const hora = horasT2[i] || '20:15:00';
+        await run(`UPDATE movimientos SET fecha_hora = datetime('now', '-1 day', ?) WHERE id = ?`, [hora, movsT2[i].id]);
+        await run(`UPDATE movimientos_productos_directos SET fecha_hora = datetime('now', '-1 day', ?) WHERE movimiento_id = ?`, [hora, movsT2[i].id]);
+        await run(`UPDATE movimientos_insumos SET fecha_hora = datetime('now', '-1 day', ?) WHERE movimiento_id = ?`, [hora, movsT2[i].id]);
+    }
+
+    // Fechas de compras e inventario inicial en anteayer
+    await run(`UPDATE movimientos_insumos SET fecha_hora = datetime('now', '-2 days', '08:00:00') WHERE movimiento_id IS NULL`);
+    await run(`UPDATE movimientos_productos_directos SET fecha_hora = datetime('now', '-2 days', '08:00:00') WHERE movimiento_id IS NULL`);
+
+    // 14. Turnos simultáneos ABIERTOS HOY (Caja 1 y Caja 2 en vivo)
+    console.log('[13/14] Abriendo turnos simultáneos HOY para operación multicaja en vivo...');
+
+    // Turno #3: Caja 1 - Barra Principal (carlos)
+    const turno3Id = await queries.abrirCaja(carlosId, 150.00, 1);
+    console.log(`    -> Turno #3 ABIERTO en Caja 1 (Barra Principal) a nombre de Carlos (Propietario)...`);
+
+    // Venta hoy 3.1: Combo Ejecutivo Almuerzo por QR
+    await queries.registrarVentaCompleta(
+        turno3Id,
+        [
+            {
+                productoId: mapaProductos['Combo Ejecutivo Almuerzo'],
+                cantidad: 1
+            }
+        ],
+        'qr',
+        null,
+        'Almuerzo en mostrador barra inicio turno hoy',
         carlosId,
         null,
         {
@@ -1023,9 +1263,9 @@ async function sembrarCafeteriaCompleta() {
         }
     );
 
-    // Venta de hoy 2: Mocha Chocolate con Leche Deslactosada y Chantilly + 1 Croissant en Efectivo
+    // Venta hoy 3.2: Mocha Chocolate con Deslactosada y Chantilly + Croissant en Efectivo
     await queries.registrarVentaCompleta(
-        turno2Id,
+        turno3Id,
         [
             {
                 productoId: mapaProductos['Mocha Chocolate Suizo 16oz'],
@@ -1046,16 +1286,14 @@ async function sembrarCafeteriaCompleta() {
         carlosId
     );
 
-    // Venta de hoy 3: Trazabilidad de lotes (v12)
-    // 1 Galleta de Avena especificando lote manual y 1 Kombucha con PEPS automático
+    // Venta hoy 3.3: Trazabilidad FIFO y selección manual de lote (v12)
     const loteGalletaReciente = await get(
         `SELECT id, fecha_vencimiento, stock FROM producto_lotes WHERE producto_id = ? ORDER BY fecha_vencimiento DESC LIMIT 1`,
         [mapaProductos['Galletas de Avena Artesanales']]
     );
 
-    console.log(`    -> Turno 2: Venta 3 con selección manual de lote #${loteGalletaReciente.id} (${loteGalletaReciente.fecha_vencimiento}) y Kombucha con PEPS automático...`);
     await queries.registrarVentaCompleta(
-        turno2Id,
+        turno3Id,
         [
             {
                 productoId: mapaProductos['Galletas de Avena Artesanales'],
@@ -1065,21 +1303,68 @@ async function sembrarCafeteriaCompleta() {
             {
                 productoId: mapaProductos['Kombucha Frutos Rojos 330ml'],
                 cantidad: 1
-                // Sin loteId: aplica automáticamente PEPS (consume del lote que vence primero)
+                // PEPS automático para Kombucha
             }
         ],
         'efectivo',
         25.00,
-        'Snack tarde con selección de lote fresco y política PEPS',
+        'Snack con selección de lote manual y política PEPS automática',
         carlosId
     );
 
-    // Verificación final de integridad de Kardex y Lotes
-    console.log('\n--- VERIFICACIÓN AUTOMÁTICA DE INTEGRIDAD ALGEBRAICA (KARDEX & LOTES PEPS) ---');
+    // Turno #4: Caja 2 - Terraza & Take Away (marcos)
+    const turno4Id = await queries.abrirCaja(marcosId, 100.00, 2);
+    console.log(`    -> Turno #4 ABIERTO en Caja 2 (Terraza & Take Away) a nombre de Marcos (Cajero)...`);
+
+    // Venta hoy 4.1: Pedido Delivery PedidosYa entrante
+    await queries.registrarVentaCompleta(
+        turno4Id,
+        [
+            {
+                productoId: mapaProductos['Matcha Latte Frío 16oz'],
+                cantidad: 1
+            },
+            {
+                productoId: mapaProductos['Ciabatta Caprese Gourmet'],
+                cantidad: 1
+            }
+        ],
+        'pedidos_ya',
+        null,
+        'Pedido online PedidosYa en preparación',
+        marcosId,
+        null,
+        {
+            canalVenta: 'pedidos_ya',
+            referenciaExterna: 'PY-66102',
+            datosEntrega: { direccion: 'Calle Paccieri #330', cliente: 'Andrea Torrico', telefono: '72345678' }
+        }
+    );
+
+    // Venta hoy 4.2: Venta en mostrador terraza efectivo
+    await queries.registrarVentaCompleta(
+        turno4Id,
+        [
+            {
+                productoId: mapaProductos['Americano Clásico 12oz'],
+                cantidad: 2
+            },
+            {
+                productoId: mapaProductos['Croissant Horneado Mantequilla'],
+                cantidad: 2
+            }
+        ],
+        'efectivo',
+        50.00,
+        'Cafés y panes para mesa terraza mañana',
+        marcosId
+    );
+
+    // 15. Verificación de integridad de Kardex, Lotes y Arqueos
+    console.log('\n[14/14] --- AUDITORÍA AUTOMÁTICA DE INTEGRIDAD ALGEBRAICA (KARDEX & LOTES PEPS) ---');
     const checkKardexDirecto = await queries.verificarIntegridadKardexDirecto();
     const checkKardexInsumos = await queries.verificarIntegridadKardexInsumos();
 
-    // Verificación de consistencia de producto_lotes vs stock en productos directos
     const checkLotes = await all(
         `SELECT p.id as producto_id, p.nombre, p.stock as stock_producto,
                 COALESCE(SUM(pl.stock), 0) as stock_total_lotes,
@@ -1101,7 +1386,7 @@ async function sembrarCafeteriaCompleta() {
 
     console.log(`[Kardex Directo] Válido: ${checkKardexDirecto.integridadOk} | Productos auditados: ${checkKardexDirecto.totalProductosDirectos} | Descuadres: ${checkKardexDirecto.totalDescuadres}`);
     console.log(`[Kardex Insumos] Válido: ${checkKardexInsumos.integridadOk} | Insumos auditados: ${checkKardexInsumos.totalInsumos} | Descuadres: ${checkKardexInsumos.totalDescuadres}`);
-    console.log(`[Lotes PEPS v12] Válido: ${lotesOk} | Productos con lotes: ${checkLotes.length} | Descuadres: ${descuadresLotes}`);
+    console.log(`[Lotes PEPS] Válido: ${lotesOk} | Productos con lotes: ${checkLotes.length} | Descuadres: ${descuadresLotes}`);
 
     if (!checkKardexDirecto.integridadOk || !checkKardexInsumos.integridadOk || !lotesOk) {
         console.error('ADVERTENCIA: Se detectaron descuadres en la verificación de Kardex / Lotes.');
@@ -1110,26 +1395,27 @@ async function sembrarCafeteriaCompleta() {
     }
 
     console.log('==================================================================');
-    console.log(' SEED INTEGRAL v12 COMPLETADO EXITOSAMENTE');
+    console.log(' SEED INTEGRAL v16 COMPLETADO EXITOSAMENTE');
     console.log('==================================================================');
     console.log(`- Establecimiento: Café Gourmet & Bakery Aroma`);
     console.log(`- Régimen Fiscal: Régimen General (IVA 13%, IT 3%, Base: todas_las_ventas)`);
-    console.log(`- Cajas Físicas: 2 estaciones con respaldo fiscal habilitado`);
-    console.log(`- Categorías: ${categorias.length} categorías creadas`);
-    console.log(`- Insumos de almacén: ${listaInsumos.length} con Kardex y NIC 2`);
-    console.log(`- Productos en catálogo: ${Object.keys(mapaProductos).length} (Directos, Recetas y Combos)`);
-    console.log(`- Trazabilidad de Lotes (v12): Lotes activos con control PEPS / FIFO y selección manual`);
-    console.log(`- Grupos de Modificadores: 4 grupos (Leches con reemplazo, Endulzante, Extras, Sándwiches)`);
-    console.log(`- Combos configurados: 3 combos (Estándar, Con límite regresivo y Con vigencia temporal)`);
-    console.log(`- Turno #1 (Ayer, CERRADO): Cuadrado con arqueo ciego, pagos mixtos, facturas y anulación`);
-    console.log(`- Turno #2 (Hoy, ABIERTO): En Caja 1 con fondo de Bs 150.00 a nombre de "carlos"`);
+    console.log(`- Respaldo RCV SIAT: CUF, Código de control y Facturas de compras/egresos`);
+    console.log(`- Servicio SMTP: Gmail SSL/TLS activo con destinatarios verificados`);
+    console.log(`- Canales de Venta: Local, Delivery Propio (Mototaxi), PedidosYa y Yango Food`);
+    console.log(`- Estaciones Multicaja: 2 Cajas Físicas activas con turnos simultáneos`);
+    console.log(`- Tipos de Catálogo: Libre (servicios), Directo (reventa), Receta (elaborados) y Combo (promociones)`);
+    console.log(`- Trazabilidad de Lotes: Multi-lotes con control PEPS / FIFO y selección manual`);
+    console.log(`- Turno #1 (Ayer, CERRADO): Barra Principal operado por Lucía (cuadrado sin novedades)`);
+    console.log(`- Turno #2 (Ayer, CERRADO & REABIERTO): Terraza operado por Marcos con apps de delivery y auditoría`);
+    console.log(`- Turno #3 (Hoy, ABIERTO): Barra Principal a nombre de Carlos (Propietario) con ventas en curso`);
+    console.log(`- Turno #4 (Hoy, ABIERTO): Terraza a nombre de Marcos (Cajero) con pedidos online en curso`);
     console.log('------------------------------------------------------------------');
     console.log('Credenciales de acceso para pruebas:');
     console.log('  - Propietario(a): carlos   | Clave: 12345678');
-    console.log('  - Admin:       sofia    | Clave: 12345678');
-    console.log('  - Cajera 1:    lucia    | Clave: 12345678');
-    console.log('  - Cajero 2:    marcos   | Clave: 12345678');
-    console.log('  - Developer:   developer| Clave: 12345678');
+    console.log('  - Admin:          sofia    | Clave: 12345678');
+    console.log('  - Cajera 1:       lucia    | Clave: 12345678');
+    console.log('  - Cajero 2:       marcos   | Clave: 12345678');
+    console.log('  - Developer:      developer| Clave: 12345678');
     console.log('==================================================================\n');
 }
 

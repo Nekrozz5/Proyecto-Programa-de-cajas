@@ -15,6 +15,7 @@ const catalogoRepo = require('./catalogo.repo');
 const inventarioRepo = require('./inventario.repo');
 const ventasRepo = require('./ventas.repo');
 const reportesRepo = require('./reportes.repo');
+const analiticasRepo = require('./analiticas.repo');
 
 module.exports = {
     ...db,
@@ -26,5 +27,6 @@ module.exports = {
     ...catalogoRepo,
     ...inventarioRepo,
     ...ventasRepo,
-    ...reportesRepo
+    ...reportesRepo,
+    ...analiticasRepo
 };

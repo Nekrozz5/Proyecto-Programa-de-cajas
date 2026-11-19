@@ -1,7 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { History } from 'lucide-react';
+import Link from 'next/link';
+import { History, AlertTriangle, ArrowRight, TrendingUp } from 'lucide-react';
 import dynamic from 'next/dynamic';
 import { anularVentaAction } from '../../../server/actions/ventas.actions';
 
@@ -72,6 +73,7 @@ function Badge({ className = '', variant = 'default', children, ...props }) {
 export default function TabResumen({
     datos,
     tendencias,
+    metricasInteligencia,
     cargarTodo,
     setMensaje,
     setError,
@@ -84,6 +86,10 @@ export default function TabResumen({
     const est = datos?.estadisticas;
     const cajaAuditada = datos?.cajaAuditada;
     const movimientos = datos?.movimientos || [];
+
+    const itemsReposicion = metricasInteligencia?.semaforoReposicion?.items || [];
+    const alertasVencimiento = metricasInteligencia?.radarVencimientos?.alertas || [];
+    const hayAlertas = itemsReposicion.length > 0 || alertasVencimiento.length > 0;
 
     async function confirmarAnularMovimiento(movimientoId) {
         if (!motivoAnulacion || motivoAnulacion.trim().length < 3) {
@@ -116,6 +122,39 @@ export default function TabResumen({
 
     return (
         <div className="flex flex-col gap-6">
+            {/* MINI-BANNER DISCRETO DE ALERTAS OPERATIVAS */}
+            {hayAlertas && (
+                <div className="rounded-xl border border-amber-200 bg-amber-50/90 p-3 sm:p-4 text-xs sm:text-sm text-amber-900 shadow-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 transition-all">
+                    <div className="flex items-center gap-3 min-w-0">
+                        <span className="p-2 rounded-lg bg-amber-100 text-amber-700 shrink-0">
+                            <AlertTriangle className="w-4 h-4" />
+                        </span>
+                        <div className="min-w-0">
+                            <div className="font-semibold text-amber-950 flex items-center gap-2">
+                                <span>Alertas de inventario y reposición</span>
+                                <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-200/80 text-amber-800">
+                                    {itemsReposicion.length + alertasVencimiento.length}
+                                </span>
+                            </div>
+                            <p className="text-amber-800/90 text-xs mt-0.5 truncate">
+                                {[
+                                    itemsReposicion.length > 0 ? `${itemsReposicion.length} artículo(s) con stock crítico/agotado` : null,
+                                    alertasVencimiento.length > 0 ? `${alertasVencimiento.length} lote(s) con vencimiento urgente` : null
+                                ].filter(Boolean).join(' • ')}
+                            </p>
+                        </div>
+                    </div>
+                    <Link
+                        href="/admin/inteligencia"
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-medium text-xs transition-colors shrink-0 shadow-xs"
+                    >
+                        <TrendingUp className="w-3.5 h-3.5" />
+                        <span>Ver Inteligencia y Alertas</span>
+                        <ArrowRight className="w-3.5 h-3.5" />
+                    </Link>
+                </div>
+            )}
+
             {/* KPI CARDS FINANCIEROS (SHADCN CARD + BADGE) */}
             <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 {/* 1. Ventas Totales */}

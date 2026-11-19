@@ -22,6 +22,9 @@ import {
     enviarEmailPrueba,
     enviarNotificacionCierreCaja
 } from '../lib/mailer';
+import {
+    obtenerMetricasInteligencia
+} from '../repositories/analiticas.repo';
 
 const ROLES_ADMIN = ['admin', 'propietario', 'developer'];
 const ROLES_DEVELOPER = ['developer'];
@@ -204,3 +207,18 @@ export async function reenviarCierreEmailAction(datos) {
         return { mensaje: `Reporte de Turno #${idNum} enviado por correo exitosamente.` };
     });
 }
+
+/**
+ * Obtiene métricas avanzadas de inteligencia de negocio:
+ * matriz de rendimiento (menú/producto engineering), semáforo de reposición de stock y radar de vencimientos.
+ * Envuelta en el wrapper de acción con verificación de roles administrativos ('admin', 'propietario', 'developer').
+ */
+export async function obtenerMetricasInteligenciaAction(params = {}) {
+    return ejecutarAction(ROLES_ADMIN, async () => {
+        const dias = typeof params === 'number'
+            ? params
+            : (params && params.dias !== undefined ? Number(params.dias) : 30);
+        return await obtenerMetricasInteligencia({ dias });
+    });
+}
+

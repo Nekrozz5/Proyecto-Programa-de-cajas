@@ -84,3 +84,43 @@
     @apply font-sans;
   }
 }
+
+/* Prevenir recuadro amarillo/enfoque por defecto en tablas, contenedores scroll y gráficos SVG de Recharts */
+table,
+table:focus,
+table:focus-visible,
+.overflow-x-auto,
+.overflow-x-auto:focus,
+.overflow-x-auto:focus-visible,
+.recharts-wrapper,
+.recharts-wrapper:focus,
+.recharts-wrapper:focus-visible,
+svg.recharts-surface,
+svg.recharts-surface:focus,
+svg.recharts-surface:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Scrollbar personalizado limpio para gráficos y tablas */
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: #94a3b8 #f1f5f9;
+}
+.custom-scrollbar::-webkit-scrollbar {
+  height: 8px;
+  width: 8px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: #f1f5f9;
+  border-radius: 9999px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #94a3b8;
+  border-radius: 9999px;
+  border: 1px solid #f1f5f9;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #64748b;
+}

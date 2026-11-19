@@ -1,6 +1,7 @@
 'use client';
 
 import { createContext, useContext, useState, useEffect } from 'react';
+import { obtenerMetricasInteligenciaAction } from '@/server/actions/admin.actions';
 
 const AdminContext = createContext(null);
 
@@ -23,6 +24,8 @@ export function AdminProvider({ children }) {
         kardexDetallado: { kardexProductosDirectos: [], kardexInsumos: [] }
     });
     const [tendencias, setTendencias] = useState(null);
+    const [metricasInteligencia, setMetricasInteligencia] = useState(null);
+    const [cargandoMetricas, setCargandoMetricas] = useState(false);
     const [adminAutenticado, setAdminAutenticado] = useState(null);
     const [turnoAuditadoId, setTurnoAuditadoId] = useState(null);
     const [mensaje, setMensaje] = useState(null);
@@ -31,6 +34,24 @@ export function AdminProvider({ children }) {
     function limpiarAlertas() {
         setMensaje(null);
         setError(null);
+    }
+
+    async function cargarMetricasInteligencia(dias = 30) {
+        try {
+            setCargandoMetricas(true);
+            const res = await obtenerMetricasInteligenciaAction({ dias });
+            if ((res?.ok || res?.success) && res?.data) {
+                setMetricasInteligencia(res.data);
+                return res.data;
+            } else if (res?.error) {
+                console.warn('Aviso al cargar métricas de inteligencia:', res.error);
+            }
+        } catch (err) {
+            console.error('Error al cargar métricas de inteligencia:', err);
+        } finally {
+            setCargandoMetricas(false);
+        }
+        return null;
     }
 
     async function cargarTodo(cajaAuditadaOpcional = turnoAuditadoId) {
@@ -57,6 +78,8 @@ export function AdminProvider({ children }) {
                     const dataRep = await resRep.json();
                     setTendencias(dataRep);
                 }
+                // Carga asíncrona de métricas de inteligencia bajo demanda / al inicio
+                cargarMetricasInteligencia(30);
             } else {
                 setAdminAutenticado(null);
             }
@@ -129,6 +152,11 @@ export function AdminProvider({ children }) {
         setDatos,
         tendencias,
         setTendencias,
+        metricasInteligencia,
+        setMetricasInteligencia,
+        cargandoMetricas,
+        cargarMetricasInteligencia,
+        recargarMetricasInteligencia: cargarMetricasInteligencia,
         cargando,
         setCargando,
         adminAutenticado,

@@ -21,7 +21,8 @@ import {
     ShoppingCart, 
     AlertCircle, 
     CheckCircle2, 
-    Folder 
+    Folder,
+    TrendingUp 
 } from 'lucide-react';
 
 function AdminShell({ children }) {
@@ -265,6 +266,7 @@ function AdminShell({ children }) {
     };
     const esDeveloper = adminAutenticado?.rol === 'developer';
     const esPrivilegiado = ['propietario', 'developer'].includes(adminAutenticado?.rol);
+    const rolesConPrivilegios = ['admin', 'propietario', 'developer'].includes(adminAutenticado?.rol);
     const usaRecetas = Boolean(configActual.usa_recetas_ensamblaje);
 
     // Lista de Pestañas y Enlaces para Navegación
@@ -275,6 +277,7 @@ function AdminShell({ children }) {
         ...(usaRecetas ? [{ id: 'insumos', href: '/admin/insumos', label: '4. Materiales / Insumos', Icon: Layers, titulo: 'Kardex de Materiales e Insumos' }] : []),
         { id: 'usuarios', href: '/admin/usuarios', label: `${usaRecetas ? '5' : '4'}. Usuarios y Roles`, Icon: Users, titulo: 'Gestión de Cuentas y Permisos' },
         { id: 'exportacion', href: '/admin/exportacion', label: `${usaRecetas ? '6' : '5'}. Exportar Reportes`, Icon: Download, titulo: 'Exportación de Libros Contables (Excel/PDF/CSV)' },
+        ...(rolesConPrivilegios ? [{ id: 'inteligencia', href: '/admin/inteligencia', label: 'Inteligencia y Alertas', Icon: TrendingUp, titulo: 'Inteligencia de Negocio y Alertas Operativas' }] : []),
         ...(esPrivilegiado ? [{ id: 'configuracion', href: '/admin/configuracion', label: 'Configuración', Icon: Settings, titulo: 'Configuración del Negocio y Notificaciones' }] : [])
     ];
 

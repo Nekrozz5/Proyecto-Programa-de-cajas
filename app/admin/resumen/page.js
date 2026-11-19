@@ -7,6 +7,7 @@ export default function ResumenPage() {
     const {
         datos,
         tendencias,
+        metricasInteligencia,
         cargarTodo,
         setMensaje,
         setError,
@@ -17,6 +18,7 @@ export default function ResumenPage() {
         <TabResumen
             datos={datos}
             tendencias={tendencias}
+            metricasInteligencia={metricasInteligencia}
             cargarTodo={cargarTodo}
             setMensaje={setMensaje}
             setError={setError}
