@@ -25,6 +25,7 @@ import {
     TrendingUp,
     Sparkles 
 } from 'lucide-react';
+import packageInfo from '../../package.json';
 
 function AdminShell({ children }) {
     const pathname = usePathname();
@@ -485,7 +486,7 @@ function AdminShell({ children }) {
                     <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between text-[11px] text-slate-400 px-1">
                         <span>POS Cajas</span>
                         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-800/90 text-slate-300 font-mono text-[10px] font-semibold border border-slate-700">
-                            v1.3.1
+                            v{packageInfo?.version || '1.3.2'}
                         </span>
                     </div>
                 </div>
