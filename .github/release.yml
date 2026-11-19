@@ -1,0 +1,15 @@
+changelog:
+  categories:
+    - title: 🚀 Nuevas Funcionalidades
+      labels:
+        - 'enhancement'
+        - 'feature'
+    - title: 🐛 Correcciones y Estabilidad
+      labels:
+        - 'bug'
+        - 'fix'
+    - title: 🛠️ Mejoras y Mantenimiento
+      labels:
+        - 'chore'
+        - 'documentation'
+        - 'refactor'

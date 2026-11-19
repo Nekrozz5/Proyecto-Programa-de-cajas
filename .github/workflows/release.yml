@@ -1,0 +1,121 @@
+name: Release Installer
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version_tag:
+        description: 'Tag de versión (ej. v1.2.0 - dejar vacío para usar package.json)'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: Compilar y Publicar Release
+    runs-on: windows-latest
+
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configurar Node.js (v20)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Determinar versión y tag
+        id: versioning
+        shell: pwsh
+        run: |
+          if ("${{ github.event.inputs.version_tag }}" -ne "") {
+            $tag = "${{ github.event.inputs.version_tag }}"
+          } elseif ("${{ github.ref_type }}" -eq "tag") {
+            $tag = "${{ github.ref_name }}"
+          } else {
+            $pkgVersion = (Get-Content package.json | ConvertFrom-Json).version
+            $tag = "v$pkgVersion"
+          }
+          Write-Host "Tag de la Release: $tag"
+          "RELEASE_TAG=$tag" >> $env:GITHUB_ENV
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Preparar entorno de producción para el instalador
+        shell: pwsh
+        run: |
+          if (-not (Test-Path ".env.production") -and -not (Test-Path ".env.local")) {
+            $secret = [System.Guid]::NewGuid().ToString("N") + [System.Guid]::NewGuid().ToString("N")
+            @"
+          NODE_ENV=production
+          PORT=3000
+          DATABASE_PATH=./caja.db
+          SESSION_SECRET=$secret
+          TRUST_PROXY=true
+          MAX_BACKUPS_LOCAL=30
+          "@ | Set-Content -Path ".env.production" -Encoding UTF8
+            Write-Host "Generado .env.production base para empaquetado del instalador."
+          }
+
+      - name: Compilar aplicación Next.js
+        run: npm run build
+        env:
+          NODE_ENV: production
+          NEXT_TELEMETRY_DISABLED: 1
+
+      - name: Instalar Inno Setup Compiler
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+          $paths = @(
+            "C:\Program Files (x86)\Inno Setup 6",
+            "C:\Program Files\Inno Setup 6",
+            "C:\Program Files (x86)\Inno Setup 7",
+            "C:\Program Files\Inno Setup 7"
+          )
+          foreach ($p in $paths) {
+            if (Test-Path $p) {
+              Write-Host "Añadiendo al PATH: $p"
+              $p >> $env:GITHUB_PATH
+            }
+          }
+
+      - name: Recolectar archivos de distribución
+        run: node scripts/preparar-dist.js --copy-modules
+
+      - name: Compilar Instalador de Windows (.exe)
+        run: iscc installer/pos-cajas.iss
+
+      - name: Verificar Instalador generado
+        id: verify-artifact
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem -Path "installer\output" -Filter "Setup-POS-Cajas-*.exe" | Select-Object -First 1
+          if (-not $installer) {
+            Write-Error "No se encontró el instalador generado en installer\output"
+            exit 1
+          }
+          $sizeMb = [math]::Round($installer.Length / 1MB, 2)
+          Write-Host "Instalador verificado: $($installer.FullName) ($sizeMb MB)"
+          "INSTALLER_PATH=$($installer.FullName)" >> $env:GITHUB_ENV
+          "INSTALLER_NAME=$($installer.Name)" >> $env:GITHUB_ENV
+
+      - name: Publicar GitHub Release y adjuntar instalador
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: Release ${{ env.RELEASE_TAG }}
+          files: ${{ env.INSTALLER_PATH }}
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
