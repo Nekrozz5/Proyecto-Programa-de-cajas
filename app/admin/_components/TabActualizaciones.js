@@ -178,7 +178,7 @@ export default function TabActualizaciones() {
                                 </span>
                                 <div>
                                     <h4 className="text-sm sm:text-base font-bold text-amber-950">
-                                        ¡Nueva versión disponible: v{info.versionNueva}!
+                                        ¿Quieres actualizar a la versión: {info.versionNueva}?
                                     </h4>
                                     <p className="text-xs text-amber-800 mt-0.5">
                                         {info.titulo} {info.fechaPublicacion && `• Publicada el ${formatearFecha(info.fechaPublicacion)}`}
@@ -194,7 +194,7 @@ export default function TabActualizaciones() {
                                     className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-700 active:scale-95 text-white text-xs sm:text-sm font-bold shadow-md transition-all cursor-pointer shrink-0"
                                 >
                                     <DownloadCloud className="w-4 h-4" />
-                                    <span>Descargar Actualización (.exe)</span>
+                                    <span>Sí, actualizar ahora (.exe)</span>
                                 </a>
                             )}
                         </div>
