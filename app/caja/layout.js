@@ -131,7 +131,7 @@ function CajaShell({ children }) {
                     <div className="flex items-center justify-between mt-1">
                         <span className="font-semibold text-sky-400 text-sm">{usuarioActual.nombre}</span>
                         <Badge variant="secondary" className="bg-slate-800 text-slate-300 text-[10px] px-2 py-0.5 font-semibold">
-                            {usuarioActual.rol === 'propietario' || usuarioActual.rol === 'superadmin' ? 'Propietario(a)' : usuarioActual.rol === 'admin' ? 'Administrador' : usuarioActual.rol === 'developer' ? 'Desarrollador' : 'Cajero'}
+                            {usuarioActual.rol === 'propietario' ? 'Propietario(a)' : usuarioActual.rol === 'admin' ? 'Administrador' : usuarioActual.rol === 'developer' ? 'Desarrollador' : 'Cajero'}
                         </Badge>
                     </div>
 

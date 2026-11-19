@@ -46,8 +46,8 @@ export default function TabConfiguracionCorreos({
     setMensajeGlobal,
     setErrorGlobal
 }) {
-    // 1. Verificación de Roles: Exclusivo superadmin y developer
-    const esAutorizado = adminAutenticado && ['superadmin', 'developer'].includes(adminAutenticado.rol);
+    // 1. Verificación de Roles: Exclusivo propietario y developer
+    const esAutorizado = adminAutenticado && ['propietario', 'developer'].includes(adminAutenticado.rol);
 
     // Estados de Carga
     const [cargandoInicial, setCargandoInicial] = useState(true);
@@ -133,7 +133,7 @@ export default function TabConfiguracionCorreos({
                         <CardTitle className="text-base font-bold">Módulo Restringido</CardTitle>
                     </div>
                     <CardDescription className="text-red-600 text-xs sm:text-sm">
-                        La administración de servidores de salida SMTP y destinatarios de notificaciones está reservada exclusivamente para el Propietario (<strong>superadmin</strong>) o Desarrollador (<strong>developer</strong>).
+                        La administración de servidores de salida SMTP y destinatarios de notificaciones está reservada exclusivamente para el Propietario (<strong>propietario</strong>) o Desarrollador (<strong>developer</strong>).
                     </CardDescription>
                 </CardHeader>
             </Card>

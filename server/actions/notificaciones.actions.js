@@ -14,11 +14,11 @@ import {
 import { runQuery, getQuery } from '../repositories/db';
 import { enviarCodigoVerificacionEmail } from '../lib/mailer';
 
-const ROLES_PERMITIDOS = ['superadmin', 'developer'];
+const ROLES_PERMITIDOS = ['propietario', 'developer'];
 
 /**
  * Guarda o actualiza los parámetros del servidor SMTP en base de datos.
- * Restringido exclusivamente a superadmin y developer.
+ * Restringido exclusivamente a propietario y developer.
  */
 export async function guardarConfigSmtpAction(datos) {
     return validarSesionAccion(ROLES_PERMITIDOS, async (usuario) => {

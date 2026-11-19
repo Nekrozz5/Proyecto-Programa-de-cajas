@@ -87,7 +87,7 @@ export default function AperturaTurno({
                             <div className="flex items-center gap-1.5">
                                 <strong className="text-slate-900 font-semibold">{usuarioActual?.nombre}</strong>
                                 <Badge variant="secondary" className="text-[10px] bg-slate-200 text-slate-700 font-semibold">
-                                    {usuarioActual?.rol === 'propietario' || usuarioActual?.rol === 'superadmin' ? 'Propietario(a)' : usuarioActual?.rol === 'admin' ? 'Administrador' : usuarioActual?.rol === 'developer' ? 'Desarrollador' : 'Cajero'}
+                                    {usuarioActual?.rol === 'propietario' ? 'Propietario(a)' : usuarioActual?.rol === 'admin' ? 'Administrador' : usuarioActual?.rol === 'developer' ? 'Desarrollador' : 'Cajero'}
                                 </Badge>
                             </div>
                         </div>

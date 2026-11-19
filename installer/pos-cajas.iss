@@ -4,7 +4,7 @@
 ; =====================================================================
 
 #define MyAppName "Sistema POS y Control de Cajas"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "1.1.0"
 #define MyAppPublisher "POS Cajas"
 #define MyAppExeName "lanzar-silencioso.vbs"
 #define AppGuid "{{A87C39E2-5D4E-49A1-9F16-339281BD510F}"
@@ -24,8 +24,8 @@ DisableProgramGroupPage=yes
 
 ; Configuración de salida del compilador
 OutputDir=output
-OutputBaseFilename=Setup-POS-Cajas
-Compression=lzma2/max
+OutputBaseFilename=Setup-POS-Cajas-v1.1.0
+Compression=lzma2/normal
 SolidCompression=yes
 WizardStyle=modern
 
@@ -50,13 +50,16 @@ Name: "{app}"; Permissions: users-full
 Name: "{app}\backups"; Permissions: users-full
 Name: "{app}\.next"; Permissions: users-full
 
+#define ExclusionesArchivos "caja.db,.env*,.env.local,.env.production,*.log,*.tmp,*.map,.cache,.github,.vscode"
+
 [Files]
 ; 1. Archivos principales de la aplicación recolectados en 'dist' (se excluyen caja.db y variables .env para proteger datos y configuración)
-Source: "..\dist\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "caja.db,.env*,.env.local,.env.production,*.log,*.tmp"
+; Se excluyen archivos de metadatos de desarrollo (*.map, *.d.ts, docs, tests) para reducir 17.000+ archivos y acelerar la instalación a segundos
+Source: "..\dist\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "{#ExclusionesArchivos}"
 
 ; Dependencias node_modules: si no están dentro de dist, se empaquetan directamente desde la raíz
 #if !DirExists("..\dist\node_modules") && DirExists("..\node_modules")
-Source: "..\node_modules\*"; DestDir: "{app}\node_modules"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: ".cache,*.log"
+Source: "..\node_modules\*"; DestDir: "{app}\node_modules"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "{#ExclusionesArchivos}"
 #endif
 
 ; 2. Base de datos SQLite y Configuración inicial:
@@ -86,7 +89,7 @@ Filename: "{app}\scripts\lanzar-silencioso.vbs"; Description: "{cm:LaunchProgram
 
 [UninstallRun]
 ; Detener cualquier proceso del servidor POS antes de desinstalar los archivos
-Filename: "{app}\scripts\detener-pos.bat"; Flags: runhidden
+Filename: "{app}\scripts\detener-pos.bat"; Flags: runhidden; RunOnceId: "DetenerServidorPOS"
 
 [Code]
 // =====================================================================
@@ -113,8 +116,84 @@ begin
     ForceDirectories(BackupDir);
     FechaStr := GetDateTimeString('yyyymmdd_hhnnss', #0, #0);
     BackupFile := BackupDir + '\caja-pre-update-' + FechaStr + '.db';
-    FileCopy(DbFile, BackupFile, False);
+    CopyFile(DbFile, BackupFile, False);
   end;
 
   Result := '';
+end;
+
+var
+  BorrarDatosCompletos: Boolean;
+
+// =====================================================================
+// Lógica de Desinstalación: Preguntar si conserva o borra la Base de Datos
+// =====================================================================
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  Respuesta: Integer;
+  Mensaje: String;
+  AppDir: String;
+begin
+  if CurUninstallStep = usUninstall then
+  begin
+    BorrarDatosCompletos := False;
+
+    // Si no es desinstalación silenciosa, preguntar al usuario sobre la base de datos
+    if not UninstallSilent then
+    begin
+      Mensaje := '¿Desea eliminar también la base de datos y todos los datos del sistema con la desinstalación?' + #13#10 + #13#10 +
+                 '• SÍ (Borrar todo):' + #13#10 +
+                 '  Se eliminarán permanentemente la base de datos (ventas, arqueos, inventario, catálogo),' + #13#10 +
+                 '  todas las copias de seguridad y los archivos de configuración.' + #13#10 + #13#10 +
+                 '• NO (Mantener datos):' + #13#10 +
+                 '  Se desinstalará la aplicación pero se conservará la base de datos y respaldos intactos' + #13#10 +
+                 '  (recomendado si piensa reinstalar el programa en el futuro o conservar su historial contable).';
+
+      Respuesta := MsgBox(Mensaje, mbConfirmation, MB_YESNO or MB_DEFBUTTON2);
+      if Respuesta = IDYES then
+        BorrarDatosCompletos := True;
+    end;
+  end
+  else if CurUninstallStep = usPostUninstall then
+  begin
+    AppDir := ExpandConstant('{app}');
+
+    if BorrarDatosCompletos then
+    begin
+      // 1. Eliminar base de datos SQLite y archivos de transacciones WAL
+      DeleteFile(AppDir + '\caja.db');
+      DeleteFile(AppDir + '\caja.db-wal');
+      DeleteFile(AppDir + '\caja.db-shm');
+      DeleteFile(AppDir + '\caja.db-journal');
+
+      // 2. Eliminar variables de entorno y configuración local
+      DeleteFile(AppDir + '\.env');
+      DeleteFile(AppDir + '\.env.local');
+      DeleteFile(AppDir + '\.env.production');
+
+      // 3. Eliminar carpeta de copias de seguridad completa
+      DelTree(AppDir + '\backups', True, True, True);
+
+      // 4. Eliminar cualquier resto en la carpeta de la aplicación
+      DelTree(AppDir + '\.next', True, True, True);
+      DelTree(AppDir + '\node_modules', True, True, True);
+      DelTree(AppDir + '\scripts', True, True, True);
+      DelTree(AppDir, True, True, True);
+      RemoveDir(AppDir);
+    end;
+  end
+  else if CurUninstallStep = usDone then
+  begin
+    AppDir := ExpandConstant('{app}');
+    // Si el usuario eligió mantener los datos y no es desinstalación silenciosa, recordarle dónde quedaron
+    if (not BorrarDatosCompletos) and (not UninstallSilent) then
+    begin
+      if FileExists(AppDir + '\caja.db') then
+      begin
+        MsgBox('La aplicación ha sido desinstalada.' + #13#10 + #13#10 +
+               'Su base de datos y copias de seguridad se han conservado exitosamente en:' + #13#10 +
+               AppDir, mbInformation, MB_OK);
+      end;
+    end;
+  end;
 end;

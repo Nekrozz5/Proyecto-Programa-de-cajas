@@ -16,7 +16,7 @@ import {
     actualizarPermisoFiscalCajaAction
 } from '../../../server/actions/admin.actions';
 
-const NIVEL_ROL = { user: 1, admin: 2, propietario: 3, superadmin: 3, developer: 4 };
+const NIVEL_ROL = { user: 1, admin: 2, propietario: 3, developer: 4 };
 
 export default function TabUsuariosCajas({
     datos,
@@ -195,7 +195,7 @@ export default function TabUsuariosCajas({
                             className="w-full h-9 rounded-md border border-slate-300 bg-white px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-slate-950"
                         >
                             <option value="user">Cajero</option>
-                            {(adminAutenticado?.rol === 'propietario' || adminAutenticado?.rol === 'superadmin' || adminAutenticado?.rol === 'developer') && (
+                            {(adminAutenticado?.rol === 'propietario' || adminAutenticado?.rol === 'developer') && (
                                 <option value="admin">Administrador — Exclusivo Propietario(a)</option>
                             )}
                             {adminAutenticado?.rol === 'developer' && (
@@ -231,7 +231,7 @@ export default function TabUsuariosCajas({
                         {(datos?.usuarios || []).map((u) => {
                             const esMismoUsuario = Number(u.id) === Number(adminAutenticado?.id);
                             const esInferior = NIVEL_ROL[adminAutenticado?.rol || 'user'] > NIVEL_ROL[u.rol || 'user'];
-                            const rolBadge = (u.rol === 'propietario' || u.rol === 'superadmin') ? (
+                            const rolBadge = u.rol === 'propietario' ? (
                                 <Badge className="bg-amber-100 text-amber-900 border border-amber-300 hover:bg-amber-100 font-bold text-[11px]">
                                     PROPIETARIO(A)
                                 </Badge>

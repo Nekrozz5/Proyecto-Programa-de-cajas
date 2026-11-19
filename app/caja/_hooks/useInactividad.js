@@ -12,7 +12,7 @@ import { useEffect } from 'react';
  */
 export function useInactividad(usuarioActual, onCierreInactividad, minutosInactividad = 15) {
     useEffect(() => {
-        if (!usuarioActual || !['developer', 'propietario', 'superadmin', 'admin'].includes(usuarioActual.rol)) {
+        if (!usuarioActual || !['developer', 'propietario', 'admin'].includes(usuarioActual.rol)) {
             return;
         }
 
@@ -31,7 +31,7 @@ export function useInactividad(usuarioActual, onCierreInactividad, minutosInacti
                 } catch (_) {}
 
                 if (typeof onCierreInactividad === 'function') {
-                    const rolLabel = (usuarioActual.rol === 'propietario' || usuarioActual.rol === 'superadmin') ? 'propietario(a)' : usuarioActual.rol === 'admin' ? 'administrador(a)' : usuarioActual.rol;
+                    const rolLabel = usuarioActual.rol === 'propietario' ? 'propietario(a)' : usuarioActual.rol === 'admin' ? 'administrador(a)' : usuarioActual.rol;
                     onCierreInactividad(
                         `Tu sesión de ${rolLabel} se ha cerrado automáticamente tras ${minutosInactividad} minutos de inactividad por seguridad.`
                     );

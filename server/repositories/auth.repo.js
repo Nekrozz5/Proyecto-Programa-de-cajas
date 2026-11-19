@@ -155,12 +155,11 @@ const NIVEL_ROL = {
     user: 1,
     admin: 2,
     propietario: 3,
-    superadmin: 3, // Compatibilidad retroactiva
     developer: 4
 };
 
 function esRolAdministrativo(rol) {
-    return rol === 'admin' || rol === 'propietario' || rol === 'superadmin' || rol === 'developer';
+    return rol === 'admin' || rol === 'propietario' || rol === 'developer';
 }
 
 async function verificarUsuario(nombre, pin, ip = 'local') {
@@ -241,7 +240,7 @@ async function obtenerUsuarios() {
     return await allQuery(
         `SELECT id, nombre, rol, COALESCE(puede_registrar_respaldo_fiscal, 1) as puede_registrar_respaldo_fiscal
          FROM usuarios WHERE activo = 1 AND rol != 'developer'
-         ORDER BY CASE rol WHEN 'propietario' THEN 1 WHEN 'superadmin' THEN 1 WHEN 'admin' THEN 2 ELSE 3 END, id ASC`
+         ORDER BY CASE rol WHEN 'propietario' THEN 1 WHEN 'admin' THEN 2 ELSE 3 END, id ASC`
     );
 }
 
@@ -272,7 +271,6 @@ const LONGITUD_MINIMA_PIN_POR_ROL = {
     user: 4,
     admin: 8,
     propietario: 8,
-    superadmin: 8,
     developer: 8
 };
 
@@ -282,7 +280,7 @@ function validarPoliticaPin(pin, rol) {
     if (pinStr.length < minimo) {
         const etiqueta = rol === 'user'
             ? 'el PIN de un Cajero'
-            : `la contraseña de un perfil ${rol === 'propietario' || rol === 'superadmin' ? 'Propietario(a)' : rol === 'developer' ? 'Desarrollador' : 'Administrador'}`;
+            : `la contraseña de un perfil ${rol === 'propietario' ? 'Propietario(a)' : rol === 'developer' ? 'Desarrollador' : 'Administrador'}`;
         throw new Error(`Contraseña / PIN demasiado corto: ${etiqueta} debe tener al menos ${minimo} caracteres.`);
     }
     return pinStr;

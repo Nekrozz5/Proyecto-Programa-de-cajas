@@ -106,7 +106,8 @@ function validarRequisitos() {
     const lanzadores = [
         path.join(ROOT_DIR, 'scripts', 'iniciar-pos.bat'),
         path.join(ROOT_DIR, 'scripts', 'detener-pos.bat'),
-        path.join(ROOT_DIR, 'scripts', 'lanzar-silencioso.vbs')
+        path.join(ROOT_DIR, 'scripts', 'lanzar-silencioso.vbs'),
+        path.join(ROOT_DIR, 'scripts', 'iniciar-servidor.vbs')
     ];
     for (const lanzador of lanzadores) {
         if (fs.existsSync(lanzador)) {
@@ -182,7 +183,7 @@ function recolectarArchivos() {
     }
 
     // Copiar lanzadores y scripts de producción
-    const scripts = ['iniciar-pos.bat', 'detener-pos.bat', 'lanzar-silencioso.vbs', 'backup.js'];
+    const scripts = ['iniciar-pos.bat', 'detener-pos.bat', 'lanzar-silencioso.vbs', 'iniciar-servidor.vbs', 'backup.js'];
     for (const s of scripts) {
         const src = path.join(ROOT_DIR, 'scripts', s);
         if (fs.existsSync(src)) {
@@ -198,12 +199,20 @@ function recolectarArchivos() {
     copiarDirectorio(path.join(ROOT_DIR, 'public'), path.join(DIST_DIR, 'public'));
     logOk(`Carpetas de aplicación copiadas exitosamente`);
 
-    // Copiar .next (excluyendo carpeta de cache de desarrollo/webpack para optimizar espacio)
+    // Copiar .next (excluyendo carpetas temporales y de desarrollo para optimizar espacio y velocidad)
     const srcNext = path.join(ROOT_DIR, '.next');
     if (fs.existsSync(srcNext)) {
-        logInfo(`Copiando build de Next.js (.next) omitiendo cache temporal...`);
-        copiarDirectorio(srcNext, path.join(DIST_DIR, '.next'), ['cache']);
-        logOk(`Build de Next.js copiado a dist/.next`);
+        logInfo(`Copiando build de Next.js (.next) omitiendo cache y carpetas de desarrollo...`);
+        const exclusionesNext = ['cache', 'dev', 'diagnostics', 'types'];
+        copiarDirectorio(srcNext, path.join(DIST_DIR, '.next'), exclusionesNext);
+        // Limpiar carpetas de desarrollo si existían previamente en dist
+        for (const ex of ['dev', 'diagnostics', 'types', 'cache']) {
+            const rutaSucia = path.join(DIST_DIR, '.next', ex);
+            if (fs.existsSync(rutaSucia)) {
+                fs.rmSync(rutaSucia, { recursive: true, force: true });
+            }
+        }
+        logOk(`Build de Next.js copiado a dist/.next (limpio y optimizado)`);
     }
 
     // Asegurar caja.db en dist (base de datos inicial o plantilla)

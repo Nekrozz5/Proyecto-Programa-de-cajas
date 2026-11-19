@@ -160,7 +160,7 @@ function AdminShell({ children }) {
             });
             const data = await res.json();
             if (!res.ok) throw new Error(data.error);
-            if (!['admin', 'propietario', 'superadmin', 'developer'].includes(data.usuario.rol)) {
+            if (!['admin', 'propietario', 'developer'].includes(data.usuario.rol)) {
                 await fetch('/api/auth', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -264,7 +264,7 @@ function AdminShell({ children }) {
         configurado: 0
     };
     const esDeveloper = adminAutenticado?.rol === 'developer';
-    const esPrivilegiado = ['propietario', 'superadmin', 'developer'].includes(adminAutenticado?.rol);
+    const esPrivilegiado = ['propietario', 'developer'].includes(adminAutenticado?.rol);
     const usaRecetas = Boolean(configActual.usa_recetas_ensamblaje);
 
     // Lista de Pestañas y Enlaces para Navegación
@@ -376,7 +376,7 @@ function AdminShell({ children }) {
                             <span className="truncate">{adminAutenticado.nombre}</span>
                         </div>
                         <div className="text-[10px] uppercase font-semibold text-slate-400 tracking-wider mt-0.5">
-                            Rango: {adminAutenticado.rol === 'propietario' || adminAutenticado.rol === 'superadmin' ? 'Propietario(a)' : adminAutenticado.rol === 'admin' ? 'Administrador' : adminAutenticado.rol === 'developer' ? 'Desarrollador' : 'Cajero'}
+                            Rango: {adminAutenticado.rol === 'propietario' ? 'Propietario(a)' : adminAutenticado.rol === 'admin' ? 'Administrador' : adminAutenticado.rol === 'developer' ? 'Desarrollador' : 'Cajero'}
                         </div>
                         <button
                             onClick={handleLogout}

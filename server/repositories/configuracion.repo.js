@@ -315,7 +315,6 @@ async function inicializarSistemaPrimeraVez(datos = {}) {
     return {
         configuracionNegocio: await obtenerConfiguracionNegocio(),
         propietarioId,
-        superAdminId: propietarioId, // Compatibilidad
         smtpConfigurado: Boolean(infoEmail?.smtpGuardado),
         destinatarioRegistrado: Boolean(infoEmail?.destinatarioCreado)
     };
