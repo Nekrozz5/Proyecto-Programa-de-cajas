@@ -39,6 +39,7 @@ export default function TabActualizaciones() {
     const [cargando, setCargando] = useState(false);
     const [info, setInfo] = useState(null);
     const [error, setError] = useState(null);
+    const [ultimaComprobacion, setUltimaComprobacion] = useState(null);
 
     const comprobarActualizaciones = async () => {
         setCargando(true);
@@ -53,6 +54,7 @@ export default function TabActualizaciones() {
                 throw new Error(data.error || 'No se pudo obtener información de actualizaciones.');
             }
             setInfo(data);
+            setUltimaComprobacion(new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
         } catch (err) {
             setError(err.message || 'Error de conexión.');
         } finally {
@@ -86,15 +88,22 @@ export default function TabActualizaciones() {
                         </div>
                     </div>
 
-                    <button
-                        type="button"
-                        onClick={comprobarActualizaciones}
-                        disabled={cargando}
-                        className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 active:scale-95 text-white text-xs font-semibold shadow-xs transition-all disabled:opacity-60 cursor-pointer shrink-0"
-                    >
-                        <RefreshCw className={`w-3.5 h-3.5 ${cargando ? 'animate-spin' : ''}`} />
-                        <span>{cargando ? 'Comprobando...' : 'Comprobar ahora'}</span>
-                    </button>
+                    <div className="flex flex-col sm:flex-row sm:items-center gap-2.5">
+                        {ultimaComprobacion && (
+                            <span className="text-[11px] text-slate-400 font-medium self-end sm:self-center">
+                                Comprobado a las {ultimaComprobacion}
+                            </span>
+                        )}
+                        <button
+                            type="button"
+                            onClick={comprobarActualizaciones}
+                            disabled={cargando}
+                            className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 active:scale-95 text-white text-xs font-semibold shadow-xs transition-all disabled:opacity-60 cursor-pointer shrink-0"
+                        >
+                            <RefreshCw className={`w-3.5 h-3.5 ${cargando ? 'animate-spin' : ''}`} />
+                            <span>{cargando ? 'Comprobando...' : 'Comprobar ahora'}</span>
+                        </button>
+                    </div>
                 </div>
 
                 {/* COMPARATIVA VISUAL: VERSIÓN INSTALADA VS SERVIDOR */}
