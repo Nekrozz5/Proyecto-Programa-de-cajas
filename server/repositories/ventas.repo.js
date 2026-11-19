@@ -258,20 +258,31 @@ async function registrarVentaCompleta(
 
                     if (modOp.insumo_reemplazado_id) {
                         // Reemplazo: quitar o sustituir el insumo base
-                        const cantReemplazada = mapaInsumosPorUnidad.has(modOp.insumo_reemplazado_id)
+                        const estabaEnReceta = mapaInsumosPorUnidad.has(modOp.insumo_reemplazado_id);
+                        const cantReemplazada = estabaEnReceta
                             ? mapaInsumosPorUnidad.get(modOp.insumo_reemplazado_id).cantidad
                             : cantMod;
-                        const costoReemplazado = Number(modOp.insumo_reemplazado_costo || 0);
+                        const costoReemplazado = estabaEnReceta
+                            ? Number(modOp.insumo_reemplazado_costo || 0)
+                            : 0;
 
-                        mapaInsumosPorUnidad.delete(modOp.insumo_reemplazado_id);
+                        if (estabaEnReceta) {
+                            mapaInsumosPorUnidad.delete(modOp.insumo_reemplazado_id);
+                        }
+
                         const cantEfectiva = cantMod > 0 ? cantMod : cantReemplazada;
-                        mapaInsumosPorUnidad.set(modOp.insumo_id, {
-                            insumoId: modOp.insumo_id,
-                            cantidad: cantEfectiva,
-                            nombre: modOp.insumo_nombre,
-                            unidad: modOp.insumo_unidad,
-                            costoUnitario: costoInsumoMod
-                        });
+                        const actual = mapaInsumosPorUnidad.get(modOp.insumo_id);
+                        if (actual) {
+                            actual.cantidad = Number((actual.cantidad + cantEfectiva).toFixed(4));
+                        } else {
+                            mapaInsumosPorUnidad.set(modOp.insumo_id, {
+                                insumoId: modOp.insumo_id,
+                                cantidad: cantEfectiva,
+                                nombre: modOp.insumo_nombre,
+                                unidad: modOp.insumo_unidad,
+                                costoUnitario: costoInsumoMod
+                            });
+                        }
                         costoDelta = Number((cantEfectiva * costoInsumoMod - cantReemplazada * costoReemplazado).toFixed(4));
                     } else {
                         // Extra / Adición
@@ -493,6 +504,12 @@ async function registrarVentaCompleta(
         if (descuentoTotal > subtotalBruto) {
             throw new Error(`El descuento (Bs ${descuentoTotal}) no puede superar el subtotal de la venta (Bs ${subtotalBruto}).`);
         }
+        if (!esRolAdministrativo(operador.rol) && descuentoTotal > 0) {
+            const maxPermitido = redondear2(subtotalBruto * 0.15);
+            if (descuentoTotal > maxPermitido) {
+                throw new Error(`Permiso denegado: como cajero no puedes aplicar más del 15% de descuento (Bs ${maxPermitido.toFixed(2)} máximo) sin autorización administrativa.`);
+            }
+        }
         const montoNeto = redondear2(subtotalBruto - descuentoTotal);
 
         // 5. Validar método de pago y montos según desglose
@@ -558,7 +575,7 @@ async function registrarVentaCompleta(
             }
 
             const sumaPartes = redondear2(montoEfectivo + montoQr);
-            if (Math.abs(sumaPartes - montoNeto) > 0.01) {
+            if (Math.abs(sumaPartes - montoNeto) > 0.0001) {
                 throw new Error(`En pago mixto, la suma de Efectivo (Bs ${montoEfectivo.toFixed(2)}) y QR (Bs ${montoQr.toFixed(2)}) debe ser exactamente igual al monto neto a cobrar (Bs ${montoNeto.toFixed(2)}). Suma actual: Bs ${sumaPartes.toFixed(2)}`);
             }
 
@@ -579,6 +596,16 @@ async function registrarVentaCompleta(
         const regimenConfig = configNegocio?.regimen_tributario || 'simplificado_control_interno';
 
         const tipoComprobante = opcionesExtra?.tipoComprobante === 'factura' ? 'factura' : 'recibo';
+        const conFactura = tipoComprobante === 'factura';
+
+        validarRegimenYPermisosVenta({
+            conFactura,
+            regimen: regimenConfig,
+            emiteFacturaConfig: configNegocio?.emite_factura,
+            operador,
+            caja
+        });
+
         const clienteNitCi = opcionesExtra?.clienteNitCi && String(opcionesExtra.clienteNitCi).trim() !== ''
             ? String(opcionesExtra.clienteNitCi).trim()
             : null;
@@ -589,49 +616,25 @@ async function registrarVentaCompleta(
             ? String(opcionesExtra.nroFactura).trim()
             : null;
 
-        if (tipoComprobante === 'factura') {
-            if (regimenConfig === 'simplificado_control_interno') {
-                throw new Error('Operación no permitida: El negocio está configurado bajo Régimen Tributario Simplificado / Control Interno. La emisión de facturas oficiales con IVA está estrictamente prohibida.');
-            }
-            if (Number(configNegocio?.emite_factura ?? 0) !== 1) {
-                throw new Error('Operación no permitida: La emisión de facturas no está habilitada en la configuración general del negocio.');
-            }
-            if (Number(caja.habilita_respaldo_fiscal ?? 1) !== 1) {
-                throw new Error(`Operación no permitida: La estación "${caja.caja_fisica_nombre}" tiene deshabilitada la emisión de facturas fiscales.`);
-            }
-
+        if (conFactura && !nroFactura) {
             // Asignación correlativa automática si no se proporcionó número manual
-            if (!nroFactura) {
-                const filaMax = await getQuery(
-                    `SELECT COALESCE(MAX(CAST(nro_factura AS INTEGER)), 0) + 1 AS siguiente_nro
-                     FROM movimientos
-                     WHERE tipo_comprobante = 'factura'
-                       AND CAST(nro_factura AS INTEGER) > 0`
-                );
-                nroFactura = String(filaMax?.siguiente_nro || 1);
-            }
+            const filaMax = await getQuery(
+                `SELECT COALESCE(MAX(CAST(nro_factura AS INTEGER)), 0) + 1 AS siguiente_nro
+                 FROM movimientos
+                 WHERE tipo_comprobante = 'factura'
+                   AND CAST(nro_factura AS INTEGER) > 0`
+            );
+            nroFactura = String(filaMax?.siguiente_nro || 1);
         }
 
-        const ivaPorcCfg = Number(configNegocio?.iva_porcentaje ?? 13);
-        const itPorcCfg = Number(configNegocio?.it_porcentaje ?? 3);
-        const itBaseCfg = configNegocio?.it_base === 'solo_facturadas' ? 'solo_facturadas' : 'todas_las_ventas';
-
-        let ivaPorcSnapshot = 0;
-        let itPorcSnapshot = 0;
-        let ivaMontoSnapshot = 0;
-        let itMontoSnapshot = 0;
-
-        if (regimenConfig === 'regimen_general') {
-            if (tipoComprobante === 'factura') {
-                ivaPorcSnapshot = ivaPorcCfg;
-                ivaMontoSnapshot = redondear2(montoNeto * (ivaPorcCfg / 100));
-            }
-            const aplicaIt = itBaseCfg === 'todas_las_ventas' || (itBaseCfg === 'solo_facturadas' && tipoComprobante === 'factura');
-            if (aplicaIt) {
-                itPorcSnapshot = itPorcCfg;
-                itMontoSnapshot = redondear2(montoNeto * (itPorcCfg / 100));
-            }
-        }
+        const snapshotFiscal = calcularSnapshotFiscalVenta({
+            montoTotal: montoNeto,
+            conFactura,
+            regimen: regimenConfig,
+            ivaPorcentaje: configNegocio?.iva_porcentaje,
+            itPorcentaje: configNegocio?.it_porcentaje,
+            itBase: configNegocio?.it_base
+        });
 
         // 7. Insertar cabecera de movimiento
         const metodoPagoCabecera = (metodoPago === 'pedidos_ya' || metodoPago === 'yango') ? 'qr' : metodoPago;
@@ -659,15 +662,15 @@ async function registrarVentaCompleta(
                 referenciaQr,
                 recibidoEfectivo,
                 cambioCalculado,
-                tipoComprobante,
+                snapshotFiscal.tipoComprobante,
                 nroFactura,
                 clienteNitCi,
                 clienteRazonSocial,
-                regimenConfig,
-                ivaPorcSnapshot,
-                itPorcSnapshot,
-                ivaMontoSnapshot,
-                itMontoSnapshot,
+                snapshotFiscal.regimenTributario,
+                snapshotFiscal.ivaPorcentaje,
+                snapshotFiscal.itPorcentaje,
+                snapshotFiscal.ivaMonto,
+                snapshotFiscal.itMonto,
                 descripcion.trim(),
                 canalVenta,
                 datosEntrega,
@@ -703,6 +706,12 @@ async function registrarVentaCompleta(
                 await runQuery(
                     `INSERT INTO movimientos_pagos (movimiento_id, metodo_pago, monto, referencia) VALUES (?, 'qr', ?, ?)`,
                     [movimientoId, montoQr, referenciaQr]
+                );
+            }
+            if (montoEfectivo === 0 && montoQr === 0) {
+                await runQuery(
+                    `INSERT INTO movimientos_pagos (movimiento_id, metodo_pago, monto, referencia) VALUES (?, 'efectivo', 0, NULL)`,
+                    [movimientoId]
                 );
             }
         }
@@ -754,12 +763,15 @@ async function registrarVentaCompleta(
 
             // Si es combo con límite activo, decrementar el contador restante de combos
             if (it.tipoInventario === 'combo' && it.limiteMaximoActivo) {
-                await runQuery(
+                const rCombo = await runQuery(
                     `UPDATE productos
                      SET limite_unidades_restante = ROUND(limite_unidades_restante - ?, 4)
                      WHERE id = ? AND limite_unidades_restante >= ?`,
                     [it.cantidad, it.productoId, it.cantidad]
                 );
+                if (rCombo.changes === 0) {
+                    throw new Error(`Error de concurrencia: Límite de venta alcanzado o insuficiente para la promoción "${it.nombre}".`);
+                }
             }
         }
 
@@ -838,6 +850,9 @@ async function registrarVentaCompleta(
                     if (rLote.changes > 0) {
                         remPeps = Number((remPeps - desc).toFixed(4));
                     }
+                }
+                if (remPeps > 0) {
+                    throw new Error('Stock insuficiente en lotes activos del producto para cubrir la política PEPS.');
                 }
             }
 

@@ -1,9 +1,11 @@
 {
   "name": "programa-cajas",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "description": "Sistema POS y Control de Cajas Híbrido con Next.js y SQLite3",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "node tests/simulador_integral.js",
+    "test:e2e": "playwright test",
+    "test:all": "npm test && npm run test:e2e",
     "dev": "next dev",
     "build": "next build --webpack",
     "start": "next start",
@@ -46,6 +48,7 @@
     "better-sqlite3@13.2.0": true
   },
   "devDependencies": {
+    "@playwright/test": "^1.65.1",
     "autoprefixer": "^10.6.2",
     "postcss": "^8.5.33",
     "tailwindcss": "^3.4.19"

@@ -86,6 +86,16 @@ export default function ModalCobro({
     }, [isOpen]);
 
     // Cálculos para Efectivo, QR y Pagos Mixtos
+    const usuario = usuarioActual || contextCaja?.usuarioActual;
+    const esAdministrativo = Boolean(
+        usuario && (usuario.rol === 'admin' || usuario.rol === 'propietario' || usuario.rol === 'developer')
+    );
+    const maxDescuentoCajero = Number((subtotalBrutoCarrito * 0.15).toFixed(2));
+    const superaLimiteCajero = !esAdministrativo && descuentoAplicadoNum > 0 && (
+        descuentoAplicadoNum > maxDescuentoCajero || (subtotalBrutoCarrito > 0 && (descuentoAplicadoNum / subtotalBrutoCarrito) * 100 > 15.001)
+    );
+    const descuentoBloqueado = Boolean(descuentoInvalido || superaLimiteCajero);
+
     const montoEfectivoRequerido = metodoPago === 'mixto'
         ? (montoMixtoEfectivo !== '' ? Number(montoMixtoEfectivo) : 0)
         : (metodoPago === 'efectivo' ? totalCarrito : 0);
@@ -217,6 +227,10 @@ export default function ModalCobro({
         }
         if (descuentoInvalido) {
             onError?.(`El descuento (Bs ${descuentoAplicadoNum.toFixed(2)}) debe ser menor al subtotal (Bs ${subtotalBrutoCarrito.toFixed(2)}).`);
+            return;
+        }
+        if (superaLimiteCajero) {
+            onError?.(`Permiso denegado: como cajero no puedes aplicar más del 15% de descuento (Bs ${maxDescuentoCajero.toFixed(2)} máximo) sin autorización administrativa.`);
             return;
         }
         if (metodoPago === 'mixto' && mixtoDescuadrado) {
@@ -412,7 +426,7 @@ export default function ModalCobro({
                                     Bs {totalCarrito.toFixed(2)}
                                 </div>
                             </div>
-                            {descuentoAplicadoNum > 0 && !descuentoInvalido && (
+                            {descuentoAplicadoNum > 0 && !descuentoBloqueado && (
                                 <div className="text-xs text-slate-600 mt-1.5 flex items-center gap-1.5 flex-wrap">
                                     <span>Sub: Bs {subtotalBrutoCarrito.toFixed(2)}</span>
                                     <span className="text-rose-600 font-semibold bg-rose-100/70 px-1.5 py-0.5 rounded text-[11px]">
@@ -480,7 +494,7 @@ export default function ModalCobro({
                                     }
                                 }}
                                 className={`w-full px-3 py-2 rounded-lg border text-sm transition-colors focus:outline-hidden focus:ring-2 ${
-                                    descuentoInvalido
+                                    descuentoBloqueado
                                         ? 'border-rose-400 bg-rose-50 text-rose-900 focus:ring-rose-300'
                                         : 'border-slate-300 bg-white text-slate-800 focus:ring-sky-400'
                                 }`}
@@ -492,10 +506,22 @@ export default function ModalCobro({
                                     <AlertCircle className="w-3.5 h-3.5 shrink-0" />
                                     <span>El descuento debe ser menor al subtotal (Bs {subtotalBrutoCarrito.toFixed(2)}).</span>
                                 </span>
-                            ) : (
-                                <span className="text-slate-500">
-                                    Subtotal bruto: <strong className="text-slate-700">Bs {subtotalBrutoCarrito.toFixed(2)}</strong>
+                            ) : superaLimiteCajero ? (
+                                <span className="font-semibold text-rose-600 flex items-center gap-1">
+                                    <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                                    <span>Tope cajero superado: máx. 15% (Bs {maxDescuentoCajero.toFixed(2)}). Requiere autorización admin.</span>
                                 </span>
+                            ) : (
+                                <div className="text-slate-500 space-y-0.5">
+                                    <div>
+                                        Subtotal bruto: <strong className="text-slate-700">Bs {subtotalBrutoCarrito.toFixed(2)}</strong>
+                                    </div>
+                                    {!esAdministrativo && (
+                                        <div className="text-[11px] text-amber-700 font-medium">
+                                            Límite cajero: máx. 15% (Bs {maxDescuentoCajero.toFixed(2)})
+                                        </div>
+                                    )}
+                                </div>
                             )}
                         </div>
                     </div>
@@ -852,7 +878,7 @@ export default function ModalCobro({
                         </button>
                         <button
                             type="submit"
-                            disabled={guardando || carrito.length === 0 || faltaDineroRecibido || hayCantidadInvalida || mixtoDescuadrado || descuentoInvalido}
+                            disabled={guardando || carrito.length === 0 || faltaDineroRecibido || hayCantidadInvalida || mixtoDescuadrado || descuentoBloqueado}
                             className="px-5 py-2 text-sm font-bold rounded-lg bg-sky-600 hover:bg-sky-700 active:bg-sky-800 text-white shadow-xs transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                         >
                             {guardando ? (

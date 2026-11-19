@@ -2,8 +2,18 @@
 
 import { useState } from 'react';
 import { History } from 'lucide-react';
-import GraficosFinancieros from '../GraficosFinancieros';
+import dynamic from 'next/dynamic';
 import { anularVentaAction } from '../../../server/actions/ventas.actions';
+
+const GraficosFinancieros = dynamic(() => import('../GraficosFinancieros'), {
+    ssr: false,
+    loading: () => (
+        <div className="h-64 flex flex-col items-center justify-center text-slate-400 gap-2 border border-slate-200 rounded-xl bg-slate-50/50">
+            <div className="w-6 h-6 border-2 border-slate-300 border-t-slate-600 rounded-full animate-spin" />
+            <span className="text-xs font-medium">Cargando gráficos interactivos...</span>
+        </div>
+    )
+});
 
 function Card({ className = '', children, ...props }) {
     return (

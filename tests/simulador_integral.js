@@ -610,9 +610,9 @@ async function ejecutarSimulador() {
         }
     });
 
-    await simularPaso('VENTAS', 'Venta 5: Pago Mixto (Efectivo Bs 10 + QR Bs 20) con Descuento Comercial', async () => {
+    await simularPaso('VENTAS', 'Venta 5: Pago Mixto (Efectivo Bs 10 + QR Bs 20) con Descuento Comercial (Autorizado Admin)', async () => {
         // 2 Muffins (Bs 24) + 1 Cappuccino (Bs 18) = Bs 42.00
-        // Descuento global Bs 12.00 -> Total a pagar Bs 30.00
+        // Descuento global Bs 12.00 -> Total a pagar Bs 30.00 (Autorizado por Administrador)
         return await q.registrarVentaCompleta(
             ctx.cajaId,
             [
@@ -621,8 +621,8 @@ async function ejecutarSimulador() {
             ],
             'mixto',
             10.0, // recibido en efectivo
-            'Venta 5 Mixta con Descuento',
-            ctx.cajeroId,
+            'Venta 5 Mixta con Descuento Autorizado',
+            ctx.adminId,
             0,
             {
                 descuentoTotal: 12.0,

@@ -118,6 +118,17 @@ export default function CatalogoProductos({
         }).length;
     }
 
+    const cantidadesEnCarritoMap = useMemo(() => {
+        const mapa = new Map();
+        (carrito || []).forEach((item) => {
+            if (item && item.productoId) {
+                const actual = mapa.get(item.productoId) || 0;
+                mapa.set(item.productoId, actual + (Number(item.cantidad) || 0));
+            }
+        });
+        return mapa;
+    }, [carrito]);
+
     return (
         <Card className="shadow-sm border-slate-200">
             <CardHeader className="p-4 sm:p-5 pb-3">
@@ -286,8 +297,7 @@ export default function CatalogoProductos({
                     <div className="max-h-[620px] overflow-y-auto pr-1 pb-2">
                         <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-3 2xl:grid-cols-4 gap-3">
                             {productosFiltrados.map((p) => {
-                                const itemsEnCarrito = carrito.filter((item) => item.productoId === p.id);
-                                const cantidadEnCarrito = itemsEnCarrito.reduce((sum, item) => sum + (Number(item.cantidad) || 0), 0);
+                                const cantidadEnCarrito = cantidadesEnCarritoMap.get(p.id) || 0;
                                 const esLibre = p.tipo_inventario === 'libre' || p.unidades_disponibles === null || p.unidades_disponibles === Infinity;
                                 const disponiblesRestantes = esLibre ? Infinity : Math.max(0, p.unidades_disponibles - cantidadEnCarrito);
                                 const sinStock = !esLibre && disponiblesRestantes <= 0;

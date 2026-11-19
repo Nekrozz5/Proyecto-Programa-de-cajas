@@ -47,6 +47,8 @@ pnpm-debug.log*
 scratch/
 tests/tmp/
 tests/reporte_simulacion.*
+test-results/
+playwright-report/
 
 # Llaves maestras de activación y certificados (exclusivo del desarrollador)
 keys/

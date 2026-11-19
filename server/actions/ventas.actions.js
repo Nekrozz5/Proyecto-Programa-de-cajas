@@ -25,6 +25,7 @@ export async function registrarVentaAction(datos) {
             : null;
 
         const opcionesExtra = {
+            pagos: datos.pagos || null,
             montoEfectivo: datos.montoEfectivo !== undefined && datos.montoEfectivo !== null && datos.montoEfectivo !== ''
                 ? Number(datos.montoEfectivo)
                 : null,

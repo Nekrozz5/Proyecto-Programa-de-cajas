@@ -98,7 +98,7 @@ export async function GET(request) {
             obtenerCajaAbierta(usuarioSesion.id),
             obtenerCajasAbiertas(),
             obtenerCajasFisicas(!esAdmin),
-            obtenerHistorialCajas(),
+            esAdmin ? obtenerHistorialCajas() : Promise.resolve([]),
             obtenerProductos(),
             esAdmin ? obtenerInsumos() : Promise.resolve([]),
             esAdmin ? obtenerPrediccionComprasInsumos() : Promise.resolve([]),

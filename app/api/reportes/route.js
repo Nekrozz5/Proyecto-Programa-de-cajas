@@ -10,6 +10,19 @@ import { exigirUsuarioSesion } from '../../../server/sesion';
 
 const ROLES_ADMIN = ['admin', 'propietario', 'developer'];
 
+function sanitizarSufijo(cajaId, desde, hasta) {
+    if (cajaId && Number.isFinite(Number(cajaId)) && Number(cajaId) > 0) {
+        return `turno_${Number(cajaId)}`;
+    }
+    const regexFecha = /^\d{4}-\d{2}-\d{2}$/;
+    const desdeLimpio = (desde && regexFecha.test(String(desde).trim())) ? String(desde).trim() : null;
+    const hastaLimpio = (hasta && regexFecha.test(String(hasta).trim())) ? String(hasta).trim() : null;
+    if (desdeLimpio || hastaLimpio) {
+        return `${desdeLimpio || 'inicio'}_a_${hastaLimpio || 'hoy'}`;
+    }
+    return 'completo';
+}
+
 export async function GET(request) {
     try {
         const usuarioSesion = await exigirUsuarioSesion(request, ROLES_ADMIN);
@@ -31,9 +44,7 @@ export async function GET(request) {
 
         if (formato === 'xlsx') {
             const buffer = await generarReporteExcel(cajaId ? Number(cajaId) : null, filtros);
-            const sufijo = cajaId
-                ? `turno_${Number(cajaId)}`
-                : (desde || hasta ? `${desde || 'inicio'}_a_${hasta || 'hoy'}` : 'completo');
+            const sufijo = sanitizarSufijo(cajaId, desde, hasta);
             const nombreArchivo = `reporte_contable_${sufijo}.xlsx`;
             return new NextResponse(buffer, {
                 status: 200,
@@ -46,9 +57,7 @@ export async function GET(request) {
 
         if (formato === 'csv') {
             const csv = await generarReporteCSV(cajaId ? Number(cajaId) : null, filtros);
-            const sufijo = cajaId
-                ? `turno_${Number(cajaId)}`
-                : (desde || hasta ? `${desde || 'inicio'}_a_${hasta || 'hoy'}` : 'completo');
+            const sufijo = sanitizarSufijo(cajaId, desde, hasta);
             return new NextResponse(csv, {
                 status: 200,
                 headers: {
@@ -65,9 +74,7 @@ export async function GET(request) {
                 cajaId: cajaId ? Number(cajaId) : null,
                 usuarioGenerador: filtros.usuarioGenerador
             });
-            const sufijo = cajaId
-                ? `turno_${Number(cajaId)}`
-                : (desde || hasta ? `${desde || 'inicio'}_a_${hasta || 'hoy'}` : 'completo');
+            const sufijo = sanitizarSufijo(cajaId, desde, hasta);
             const nombreArchivo = `rcv_compras_${sufijo}.txt`;
             return new NextResponse(txt, {
                 status: 200,
@@ -85,9 +92,7 @@ export async function GET(request) {
                 cajaId: cajaId ? Number(cajaId) : null,
                 usuarioGenerador: filtros.usuarioGenerador
             });
-            const sufijo = cajaId
-                ? `turno_${Number(cajaId)}`
-                : (desde || hasta ? `${desde || 'inicio'}_a_${hasta || 'hoy'}` : 'completo');
+            const sufijo = sanitizarSufijo(cajaId, desde, hasta);
             const nombreArchivo = `rcv_compras_${sufijo}.xlsx`;
             return new NextResponse(buffer, {
                 status: 200,
