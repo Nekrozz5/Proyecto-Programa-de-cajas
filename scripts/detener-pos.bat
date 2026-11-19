@@ -9,8 +9,8 @@ for /f "tokens=5" %%a in ('netstat -ano ^| findstr :3000 ^| findstr LISTENING') 
     set DETENIDO=1
 )
 
-if %DETENIDO% equ 1 (
-    echo Servidor POS detenido exitosamente.
-) else (
-    echo No se encontro ningun proceso escuchando en el puerto 3000.
-)
+:: Detener cualquier proceso residual de Node o ejecutores de script
+taskkill /f /im node.exe >nul 2>&1
+
+echo Servidor POS y procesos asociados detenidos exitosamente.
+exit /b 0

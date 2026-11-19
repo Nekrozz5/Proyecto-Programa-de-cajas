@@ -34,7 +34,8 @@ ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=admin
 PrivilegesRequiredOverridesAllowed=dialog
 CloseApplications=force
-CloseApplicationsFilter=*.bat,*.vbs,node.exe
+CloseApplicationsFilter=*.bat,*.vbs,*.exe,node.exe
+RestartApplications=no
 
 [Languages]
 ; Asistente de instalación en español
@@ -100,13 +101,19 @@ var
   ResultCode: Integer;
   StopBat, DbFile, BackupDir, BackupFile, FechaStr: String;
 begin
-  // 1. Detener el servidor POS si ya estaba corriendo para evitar bloqueos EBUSY en .next o scripts
+  // 1. Detener el servidor POS si ya estaba corriendo para evitar bloqueos EBUSY o archivos .node bloqueados
   StopBat := ExpandConstant('{app}\scripts\detener-pos.bat');
   if FileExists(StopBat) then
   begin
     Exec(ExpandConstant('{cmd}'), '/c "' + StopBat + '"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-    Sleep(1000); // 1 segundo de espera para que Windows libere el puerto 3000 y archivos
   end;
+
+  // Cierre forzoso de cualquier instancia residual de node.exe para liberar módulos nativos de C++ (better-sqlite3)
+  Exec(ExpandConstant('{cmd}'), '/c taskkill /f /im node.exe >nul 2>&1', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec(ExpandConstant('{cmd}'), '/c taskkill /f /im wscript.exe >nul 2>&1', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+
+  // Pausa de seguridad para que el kernel de Windows libere los handles de archivos y DLLs en memoria
+  Sleep(1500);
 
   // 2. Respaldo preventivo automático de caja.db antes de aplicar cualquier archivo nuevo
   DbFile := ExpandConstant('{app}\caja.db');
