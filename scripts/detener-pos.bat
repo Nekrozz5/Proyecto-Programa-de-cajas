@@ -4,7 +4,7 @@ cd /d "%~dp0\.."
 
 set DETENIDO=0
 for /f "tokens=5" %%a in ('netstat -ano ^| findstr :3000 ^| findstr LISTENING') do (
-    echo Deteniendo servidor POS en puerto 3000 (PID: %%a)...
+    echo Deteniendo servidor POS en puerto 3000 PID %%a
     taskkill /f /t /pid %%a >nul 2>&1
     set DETENIDO=1
 )

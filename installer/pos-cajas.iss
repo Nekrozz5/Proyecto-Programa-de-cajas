@@ -4,7 +4,7 @@
 ; =====================================================================
 
 #define MyAppName "Sistema POS y Control de Cajas"
-#define MyAppVersion "1.3.2"
+#define MyAppVersion "1.3.3"
 #define MyAppPublisher "POS Cajas"
 #define MyAppExeName "lanzar-silencioso.vbs"
 #define AppGuid "{{A87C39E2-5D4E-49A1-9F16-339281BD510F}"
@@ -24,7 +24,7 @@ DisableProgramGroupPage=yes
 
 ; Configuración de salida del compilador
 OutputDir=output
-OutputBaseFilename=Setup-POS-Cajas-v1.3.2
+OutputBaseFilename=Setup-POS-Cajas-v1.3.3
 Compression=lzma2/normal
 SolidCompression=yes
 WizardStyle=modern
@@ -124,6 +124,12 @@ begin
     FechaStr := GetDateTimeString('yyyymmdd_hhnnss', #0, #0);
     BackupFile := BackupDir + '\caja-pre-update-' + FechaStr + '.db';
     CopyFile(DbFile, BackupFile, False);
+  end;
+
+  // 3. Purgar completamente la carpeta .next anterior para eliminar cualquier residuo, chunk o caché vieja
+  if DirExists(ExpandConstant('{app}\.next')) then
+  begin
+    DelTree(ExpandConstant('{app}\.next'), True, True, True);
   end;
 
   Result := '';

@@ -201,18 +201,16 @@ function recolectarArchivos() {
 
     // Copiar .next (excluyendo carpetas temporales y de desarrollo para optimizar espacio y velocidad)
     const srcNext = path.join(ROOT_DIR, '.next');
+    const destNext = path.join(DIST_DIR, '.next');
     if (fs.existsSync(srcNext)) {
+        logInfo(`Limpiando carpeta previa dist/.next para evitar residuos de builds anteriores...`);
+        if (fs.existsSync(destNext)) {
+            fs.rmSync(destNext, { recursive: true, force: true });
+        }
         logInfo(`Copiando build de Next.js (.next) omitiendo cache y carpetas de desarrollo...`);
         const exclusionesNext = ['cache', 'dev', 'diagnostics', 'types'];
-        copiarDirectorio(srcNext, path.join(DIST_DIR, '.next'), exclusionesNext);
-        // Limpiar carpetas de desarrollo si existían previamente en dist
-        for (const ex of ['dev', 'diagnostics', 'types', 'cache']) {
-            const rutaSucia = path.join(DIST_DIR, '.next', ex);
-            if (fs.existsSync(rutaSucia)) {
-                fs.rmSync(rutaSucia, { recursive: true, force: true });
-            }
-        }
-        logOk(`Build de Next.js copiado a dist/.next (limpio y optimizado)`);
+        copiarDirectorio(srcNext, destNext, exclusionesNext);
+        logOk(`Build de Next.js copiado a dist/.next (100% limpio y optimizado)`);
     }
 
     // Asegurar caja.db en dist (base de datos inicial o plantilla)

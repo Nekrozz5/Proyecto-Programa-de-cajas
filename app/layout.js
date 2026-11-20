@@ -1,4 +1,5 @@
 import './globals.css';
+import LimpiadorCacheCliente from '@/components/LimpiadorCacheCliente';
 
 export const metadata = {
   title: 'Control de Cajas',
@@ -26,6 +27,7 @@ export default function RootLayout({ children }) {
   return (
     <html lang="es" translate="no" className="notranslate">
       <body className="min-h-screen bg-slate-50 text-slate-900 font-sans antialiased">
+        <LimpiadorCacheCliente />
         {children}
       </body>
     </html>
