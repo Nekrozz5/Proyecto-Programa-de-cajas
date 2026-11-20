@@ -1,6 +1,6 @@
-# Sistema POS y Control de Cajas Híbrido
+# Sistema POS y Control de Cajas (Cloud / AWS)
 
-Aplicación web integral de Punto de Venta (POS), control de turnos/arqueo ciego, estaciones multicaja, motor fiscal modular (IVA / IT / RCV SIAT), canales de delivery (PedidosYa / Yango), trazabilidad de lotes PEPS (FIFO), combos/promociones, modificadores de recetas, Kardex dual cronológico (NIC 2), notificaciones SMTP dinámicas con verificación de código, licenciamiento offline por criptografía asimétrica (Ed25519), instalador nativo para Windows y reportes contables en Excel (10 hojas) y PDF, construida con **Next.js (App Router)** y **SQLite3**.
+Aplicación web integral de Punto de Venta (POS), control de turnos/arqueo ciego, estaciones multicaja, motor fiscal modular (IVA / IT / RCV SIAT), canales de delivery (PedidosYa / Yango), trazabilidad de lotes PEPS (FIFO), combos/promociones, modificadores de recetas, Kardex dual cronológico (NIC 2), notificaciones SMTP dinámicas con verificación de código y reportes contables en Excel (10 hojas) y PDF, construida con **Next.js (App Router)** y desplegada en **AWS**.
 
 ---
 
@@ -9,9 +9,8 @@ Aplicación web integral de Punto de Venta (POS), control de turnos/arqueo ciego
 | Documento | Descripción |
 | :--- | :--- |
 | [GUIA_DESARROLLO.md](GUIA_DESARROLLO.md) | **Guía Rápida: Frontend vs Backend.** Mapa visual del proyecto, qué carpetas tocar según lo que quieras programar y reglas clave para colaboradores. |
-| [docs/ARQUITECTURA.md](docs/ARQUITECTURA.md) | Diseño técnico, modelo de seguridad, base de datos relacional, migraciones (v1 a v16), motor fiscal, Kardex dual, lotes PEPS, delivery, SMTP dinámico, licenciamiento Ed25519 y reportes. |
-| [docs/PRUEBAS.md](docs/PRUEBAS.md) | Batería de 23 escenarios de verificación funcional, concurrencia, stock, lotes, arqueo, combos, modificadores, régimen fiscal, pagos mixtos, delivery, SMTP, licencias e instalador. |
-| [docs/GUIA_LANZAMIENTO_INSTALABLE.md](docs/GUIA_LANZAMIENTO_INSTALABLE.md) | Guía técnica para compilación con Inno Setup, generación de instalador (`Setup-POS-Cajas-v1.0.exe`), modo kiosco de escritorio y despliegue PWA en dispositivos móviles. |
+| [docs/ARQUITECTURA.md](docs/ARQUITECTURA.md) | Diseño técnico, modelo de seguridad, base de datos relacional, migraciones, motor fiscal, Kardex dual, lotes PEPS, delivery, SMTP dinámico y reportes. |
+| [docs/PRUEBAS.md](docs/PRUEBAS.md) | Batería de escenarios de verificación funcional, concurrencia, stock, lotes, arqueo, combos, modificadores, régimen fiscal, pagos mixtos, delivery y SMTP. |
 | [GEMINI.md](GEMINI.md) | Reglas de negocio obligatorias, directrices técnicas, variables de entorno y estado actual del proyecto (fuente de verdad para desarrollo y agentes). |
 
 ---
@@ -25,8 +24,6 @@ Aplicación web integral de Punto de Venta (POS), control de turnos/arqueo ciego
 - **Canales de Delivery y Apps de Comida (v14):** Soporte nativo para ventas por mostrador o delivery (PedidosYa y Yango Delivery) con registro de datos de entrega, referencias externas y conciliación de métodos de pago específicos.
 - **Configuración SMTP Dinámica y Verificación por Email (v15):** Administración en caliente del servidor de correo en base de datos (`configuracion_smtp`) y lista de destinatarios autorizados con verificación de seguridad mediante código numérico temporal (`notificacion_destinatarios`).
 - **Rol Propietario y Jerarquía Segura (v16):** Consolidación del perfil de máxima autoridad empresarial (`propietario`), diferenciado de administradores (`admin`), cajeros (`user`) y soporte técnico (`developer`).
-- **Licenciamiento Criptográfico Offline (Ed25519):** Motor de validación de claves de producto firmado asimétricamente (`POS-ACT-...`) que vincula el software al negocio de forma offline sin depender de servidores externos de activación.
-- **Instalador de Escritorio Windows Autónomo (Plug & Play) y PWA:** Empaquetador nativo con Inno Setup (`installer/pos-cajas.iss`) que incluye motor Node.js portable embebido e instalación silenciosa automática de librerías Microsoft Visual C++, sin requerir preinstalaciones en computadoras vírgenes. Acceso directo silencioso en segundo plano, ejecución en modo ventana/kiosco para terminales de cobro y compatibilidad PWA para teléfonos y tablets.
 - **Régimen Tributario Modular y Snapshot Fiscal (v9-v11):** Soporte de Régimen Simplificado (control interno) y Régimen General con alícuotas configurables (IVA 13%, IT 3%, base IT configurable). Snapshot inmutable congelado en cada venta (`movimientos`), garantizando integridad histórica.
 - **Pagos Mixtos Flexibles (Efectivo + QR):** Fuente de verdad normalizada en `movimientos_pagos`. Desglose exacto por método de pago con cálculo y entrega de cambio exclusivamente sobre la porción en efectivo.
 - **Kardex Cronológico Dual y Costo Ponderado (NIC 2):** Trazabilidad completa de inventario en `movimientos_productos_directos` y `movimientos_insumos` con `stock_resultante` y `costo_promedio_resultante` en cada fila. Preservación de hasta 6 decimales en insumos métricos (g / ml) y función de auditoría matemática de integridad con 0 descuadres.
@@ -41,8 +38,9 @@ Aplicación web integral de Punto de Venta (POS), control de turnos/arqueo ciego
 ```text
 ├── app/
 │   ├── api/
-│   │   ├── auth/route.js            # Autenticación, login, logout e instalación
+│   │   ├── auth/route.js            # Autenticación, login y logout
 │   │   ├── caja/route.js            # API de turnos, sincronización y lectura en tiempo real
+│   │   ├── configuracion/route.js   # API de configuración general del negocio
 │   │   └── reportes/route.js        # API de reportes, estadísticas y exportación (XLSX 10 hojas, CSV)
 │   ├── admin/
 │   │   ├── layout.js                # Layout administrativo con AdminProvider
@@ -52,25 +50,24 @@ Aplicación web integral de Punto de Venta (POS), control de turnos/arqueo ciego
 │   │   ├── insumos/page.js          # Subruta: Insumos de producción y compras
 │   │   ├── arqueos/page.js          # Subruta: Turnos y arqueos ciegos
 │   │   ├── usuarios/page.js         # Subruta: Cajeros y terminales físicas
+│   │   ├── inteligencia/page.js     # Subruta: Inteligencia de negocio y alertas
 │   │   ├── configuracion/page.js    # Subruta: Configuración fiscal, SMTP y parámetros
 │   │   ├── exportacion/page.js      # Subruta: Reportes Excel y PDF
 │   │   ├── GraficosFinancieros.js   # Métricas visuales interactivas con Recharts
 │   │   ├── exportarPDF.js           # Generación de reportes PDF de balance fiscal
 │   │   └── _components/             # Componentes modulares administrativos
-│   │       ├── TabConfiguracionCorreos.js # Panel de gestión SMTP y destinatarios
-│   │       └── ModalVerificarEmail.js    # Modal para verificación de código temporal
 │   ├── caja/
 │   │   ├── layout.js                # Layout de caja con CajaProvider
 │   │   ├── _context/CajaContext.js  # Estado reactivo del terminal POS
 │   │   ├── pos/page.js              # Subruta: Terminal táctil de cobro y carrito
 │   │   └── movimientos/page.js      # Subruta: Historial del turno e ingresos/egresos
 │   ├── layout.js                    # Layout raíz de Next.js (protección notranslate)
-│   └── page.js                      # Pantalla de inicio de sesión
+│   └── page.js                      # Portal principal del sistema
 ├── database/
 │   ├── database.js                  # Conexión SQLite (WAL, busy_timeout, foreign_keys, DATABASE_PATH)
 │   ├── schema.js                    # Esquema Drizzle ORM (20 tablas tipadas y relaciones)
 │   ├── drizzle.js                   # Cliente Drizzle singleton sobre better-sqlite3
-│   └── migraciones.js               # Esquema versionado transaccional (PRAGMA user_version v1-v16)
+│   └── migraciones.js               # Esquema versionado transaccional (PRAGMA user_version)
 ├── server/
 │   ├── actions/                     # Server Actions protegidas ('use server')
 │   │   ├── admin.actions.js         # Administración de usuarios, cajas físicas y negocio
@@ -83,33 +80,22 @@ Aplicación web integral de Punto de Venta (POS), control de turnos/arqueo ciego
 │   ├── domain/                      # Lógica pura de dominio (costos CPP, motor fiscal)
 │   ├── repositories/                # Módulos de persistencia SQL parametrizada
 │   ├── lib/                         # Infraestructura técnica
-│   │   ├── licencia.js              # Motor criptográfico de validación de licencias Ed25519
 │   │   ├── mailer.js                # Despacho de notificaciones SMTP con libro Excel adjunto
 │   │   ├── secretos.js              # Validación de variables de entorno y claves
 │   │   └── sesion.js                # Autenticación JWT, cookies HttpOnly y rate limiting
-│   └── queries.js                   # Fachada barrel retrocompatible
-├── components/ui/                   # Componentes de interfaz Shadcn UI (password-input, etc.)
-├── installer/
-│   └── pos-cajas.iss                # Script Inno Setup para compilar instalador de Windows
+│   └── queries.js                   # Fachada barrel
+├── components/ui/                   # Componentes de interfaz Shadcn UI
 ├── public/
 │   ├── manifest.json                # Especificación PWA para móviles y tablets
 │   └── icons/                       # Iconos de la aplicación en múltiples resoluciones
 ├── scripts/
 │   ├── backup.js                    # Respaldo atómico en caliente (VACUUM INTO) con retención
-│   ├── update.js                    # Actualización segura (backup + git pull + npm ci + build)
-│   ├── seed_cafeteria.js            # Sembrado integral con catálogo, lotes, fiscal y Kardex
-│   ├── generar-clave.js             # Generador CLI de claves maestras de activación
-│   ├── preparar-dist.js             # Recolección y empaquetado para distribución en dist/
-│   ├── inicializar-entorno.js       # Autogeneración de secretos criptográficos únicos (.env.production)
-│   ├── iniciar-pos.bat              # Script de inicio del servidor en Windows
-│   ├── detener-pos.bat              # Script de detención quirúrgica del servidor y ventanas del POS
-│   ├── iniciar-servidor.vbs         # Arranque de Next.js en segundo plano sin consola
-│   └── lanzar-silencioso.vbs        # Lanzador de escritorio en segundo plano sin ventana negra CMD
+│   └── seed_cafeteria.js            # Sembrado integral con catálogo, lotes, fiscal y Kardex
 ├── tests/
 │   ├── simulador_integral.js        # Simulador E2E integral de flujo comercial completo
 │   ├── test_migracion_v8_v9.js      # Verificaciones contables y de migración v8->v9
 │   └── test_ventas_v9.js            # Suite de pruebas de ventas, Kardex y concurrencia
-├── docs/                            # Documentación técnica, pruebas y guía de instalación
+├── docs/                            # Documentación técnica y pruebas
 ├── ecosystem.config.js              # Configuración de PM2 para ejecución continua
 ├── instrumentation.js               # Validación temprana de seguridad en arranque de Next.js
 └── next.config.js                   # Configuración de empaquetado (serverExternalPackages)
@@ -117,7 +103,7 @@ Aplicación web integral de Punto de Venta (POS), control de turnos/arqueo ciego
 
 ---
 
-## Inicio Rápido (Desarrollo Local)
+## Inicio Rápido (Desarrollo)
 
 1. **Instalar dependencias:**
    ```bash
@@ -138,7 +124,6 @@ Aplicación web integral de Punto de Venta (POS), control de turnos/arqueo ciego
    ```bash
    npm run seed
    ```
-   *Carga el catálogo completo de cafetería gourmet, recetas, insumos métricos, combos, grupos de modificadores, ventas con factura, pagos mixtos, compras con RCV SIAT y verifica la integridad del Kardex.*
 
 4. **Iniciar el servidor de desarrollo:**
    ```bash
@@ -157,9 +142,4 @@ Aplicación web integral de Punto de Venta (POS), control de turnos/arqueo ciego
 | `npm run start` | Inicia la aplicación compilada en modo producción. |
 | `npm run seed` | Carga el seed integral de prueba con régimen fiscal, combos, modificadores, compras con factura, pagos mixtos y auditoría de Kardex. |
 | `npm run simular` | Ejecuta la simulación integral automatizada de punta a punta (turnos, ventas, recetas, arqueos y reportes). |
-| `npm run licencia` | Utilidad de línea de comandos para generar o verificar claves criptográficas de activación Ed25519. |
 | `npm run backup` | Ejecuta un respaldo atómico en caliente en `backups/` con retención automática. |
-| `npm run update` | Actualiza el sistema de forma segura: crea backup de `caja.db`, descarga cambios (`git pull`), instala versiones exactas (`npm ci`), compila y reinicia PM2 si está activo. |
-| `npm run dist:prepare` | Valida binarios nativos y empaqueta los archivos necesarios en `dist/` para el instalador de Windows. |
-| `npm run app:start` | Inicia el servidor POS local en segundo plano (Windows). |
-| `npm run app:stop` | Detiene el proceso del servidor POS y libera el puerto 3000 (Windows). |

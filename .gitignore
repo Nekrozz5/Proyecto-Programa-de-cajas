@@ -4,7 +4,6 @@ node_modules/
 out/
 build/
 dist/
-installer/output/
 
 # Bases de datos SQLite y archivos temporales WAL/Journal
 caja.db
@@ -50,14 +49,9 @@ tests/reporte_simulacion.*
 test-results/
 playwright-report/
 
-# Llaves maestras de activación y certificados (exclusivo del desarrollador)
-keys/
+# Certificados y llaves SSH
 *.key
 *.pem
-
-# Binarios locales del empaquetador (Node embebido y VC++ redist)
-bin/
-redist/
 
 # Archivos del sistema operativo y editores
 .DS_Store

@@ -395,11 +395,6 @@ async function cambiarPasswordConPermiso(ejecutorId, usuarioObjetivoId, nuevoPin
     return true;
 }
 
-async function inicializarSistemaPrimeraVez(datos = {}) {
-    const configuracionRepo = require('./configuracion.repo');
-    return await configuracionRepo.inicializarSistemaPrimeraVez(datos);
-}
-
 module.exports = {
     BCRYPT_ROUNDS,
     NIVEL_ROL,
@@ -415,6 +410,5 @@ module.exports = {
     crearUsuario,
     crearUsuarioConPermiso,
     borrarUsuarioConPermiso,
-    cambiarPasswordConPermiso,
-    inicializarSistemaPrimeraVez
+    cambiarPasswordConPermiso
 };

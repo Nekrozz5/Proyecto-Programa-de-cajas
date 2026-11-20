@@ -17,8 +17,7 @@ Ante **CUALQUIER** solicitud de investigación, análisis, planificación, nueva
 - **Persistencia y Concurrencia:** SQLite en modo WAL (`PRAGMA journal_mode = WAL`), claves foráneas activas (`PRAGMA foreign_keys = ON`), timeout concurrente de 5000ms (`PRAGMA busy_timeout = 5000`) y ruta configurable vía `DATABASE_PATH` en `database/database.js`.
 - **Esquema Tipado y Migraciones:** 20 tablas definidas en `database/schema.js`. Toda mutación al esquema se versiona transaccionalmente en `database/migraciones.js` mediante `PRAGMA user_version` con respaldo automático previo (`VACUUM INTO`).
 - **Seguridad y Sesiones (`server/lib/sesion.js`):** JWT HttpOnly (`jose`), hash bcrypt (salt 10). `INSTANCE_BOOT_ID` para invalidación inmediata de tokens administrativos al reiniciar servidor. TTL: `developer` (15 min), `propietario`/`admin` (30 min), `user` (8 h). Rate limiting dual (IP con `cf-connecting-ip`/`TRUST_PROXY` y cuenta).
-- **Operación Dual (Híbrida):** Soporte simultáneo para PC local/LAN (`http://localhost:3000`) y acceso móvil remoto (`https://` vía Cloudflare Tunnel) con cookies adaptativas y blindaje cliente (`notranslate` en `app/layout.js`, `Cache-Control: no-store` en endpoints de caja).
-- **Licenciamiento Criptográfico Offline:** Validación asimétrica Ed25519 en `server/lib/licencia.js` con claves firmadas `POS-ACT-...`.
+- **Operación Cloud (AWS):** Despliegue en AWS con soporte para acceso desde PC y dispositivos móviles con cookies adaptativas y blindaje cliente (`notranslate` en `app/layout.js`, `Cache-Control: no-store` en endpoints de caja).
 - **Punteros Documentales:**
   - Arquitectura detallada y diagramas de flujo: [`docs/ARQUITECTURA.md`](docs/ARQUITECTURA.md).
   - Batería de escenarios de verificación funcional: [`docs/PRUEBAS.md`](docs/PRUEBAS.md).
@@ -85,11 +84,7 @@ Para maximizar la densidad de información y el ahorro de tokens, las siguientes
 - **Git y Control de Versiones [ON-DEMAND-ONLY]:**
   - La IA **nunca** ejecuta `git add` ni `git commit` de forma automática tras cambios rutinarios. Solo interviene en Git ante solicitud explícita del usuario (ej. *"haz commit"*, *"prepara el repositorio"*, *"sube a github"*).
   - Operaciones remotas autenticadas (`git push`, subida de ramas/tags) son **exclusivas del usuario humano**. La IA proporciona únicamente el comando exacto.
-  - **Versionamiento Semántico (SemVer) Obligatorio en Subidas:** Cada vez que el usuario pida subir cambios a GitHub o preparar el repositorio, la IA debe evaluar e incrementar obligatoriamente la versión según SemVer (`MAJOR.MINOR.PATCH`) sincronizando de forma simultánea:
-    1. `package.json` (`"version": "X.Y.Z"`)
-    2. `installer/pos-cajas.iss` (`#define MyAppVersion "X.Y.Z"` y `OutputBaseFilename=Setup-POS-Cajas-vX.Y.Z`)
-- **Compilación de Instaladores [ON-DEMAND-ONLY]:**
-  - Actualizar números de versión en archivos fuente; **nunca** compilar el instalador (`npm run installer:build`, `ISCC.exe` o `scripts/preparar-dist.js`) automáticamente. Solo ejecutarlo ante orden expresa del usuario (ej. *"compila el instalador"*, *"genera el setup"*).
+  - **Versionamiento Semántico (SemVer) Obligatorio en Subidas:** Cada vez que el usuario pida subir cambios a GitHub o preparar el repositorio, la IA debe evaluar e incrementar obligatoriamente la versión según SemVer (`MAJOR.MINOR.PATCH`) en `package.json` (`"version": "X.Y.Z"`).
 - **Diagnósticos y Suites de Pruebas [ON-DEMAND-ONLY]:**
   - La IA no ejecuta suites de estrés ni compilaciones pesadas de verificación tras cada ajuste menor. Solo se ejecutan cuando el usuario lo solicite (ej. *"ejecuta las pruebas"*, *"busca bugs"*).
 - **Planificación Estructurada y Presupuesto de Modelos (`phase-planner`):**
@@ -103,16 +98,8 @@ Para maximizar la densidad de información y el ahorro de tokens, las siguientes
 - **Desarrollo:** `npm run dev` (abre en `http://localhost:3000`).
 - **Compilación y Producción:** `npm run build` | `npm run start` | `pm2 start ecosystem.config.js`.
 - **Respaldo Atómico SQLite:** `npm run backup` (ejecuta `VACUUM INTO backups/`).
-- **Actualización Segura:** `npm run update` (backup + git pull + npm ci + build).
 - **Carga de Datos de Prueba:** `npm run seed` (lotes PEPS, combos, Kardex dual, régimen fiscal).
 - **Simulación Integral E2E:** `npm run simular`.
-- **Licenciamiento CLI (Ed25519):**
-  ```bash
-  npm run licencia -- emitir --negocio "Nombre" --vence "2028-12-31" --cajas 2
-  npm run licencia -- verificar --clave "POS-ACT-..."
-  ```
-- **Empaquetado Instalador Windows:** `npm run dist:prepare`.
-- **Control de Servicio Windows:** `npm run app:start` | `npm run app:stop`.
 
 ## 6. Variables Críticas de Entorno (`.env.local`)
 ```env

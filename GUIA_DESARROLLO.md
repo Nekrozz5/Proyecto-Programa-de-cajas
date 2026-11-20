@@ -6,11 +6,9 @@ Bienvenido al proyecto. Si eres nuevo en el repositorio o vienes a colaborar, es
 
 ## 💡 ¿Cómo está estructurado el sistema?
 
-Este proyecto utiliza **Next.js (App Router)** como un sistema **Full-Stack Híbrido**. 
+Este proyecto utiliza **Next.js (App Router)** como un sistema **Full-Stack Cloud desplegado en AWS**. 
 
 En lugar de tener dos servidores o carpetas separadas (como un frontend en Vite y un backend en Express en puertos distintos), el Frontend y el Backend **coexisten dentro del mismo proyecto pero están limpiamente separados por carpetas especializadas**.
-
-Esta arquitectura permite que el sistema funcione en computadoras locales como un **Punto de Venta de escritorio (ejecutable `.exe` con SQLite embebido)** sin requerir conexión a internet ni levantar múltiples servidores en Windows.
 
 ```text
 programa-cajas/
@@ -25,9 +23,8 @@ programa-cajas/
 │   ├── app/admin/                   # Panel de control administrativo y reportes
 │   └── components/ui/               # Componentes UI reutilizables (Botones, Modales, Inputs)
 │
-└── 🛠️ INFRAESTRUCTURA Y DISTRIBUCIÓN
-    ├── scripts/                     # Automatizaciones (respaldos, actualización, generador de licencias)
-    └── installer/                   # Configuración de Inno Setup para crear el instalador de Windows (.exe)
+└── 🛠️ INFRAESTRUCTURA Y UTILIDADES
+    └── scripts/                     # Automatizaciones (respaldos y datos semilla)
 ```
 
 ---
@@ -42,7 +39,7 @@ El Backend gestiona las transacciones, la integridad de los datos, el cálculo d
 | **`server/actions/`** | **Server Actions (`'use server'`)** | Las mutaciones protegidas que ejecuta Next.js en el servidor: registrar ventas, aperturas y cierres de turno, compras, mermas, actualización de catálogo. Todo corre dentro de `transaccion()`. |
 | **`server/domain/`** | **Reglas de Negocio Puras** | Lógica financiera desacoplada: cálculo de Costo Promedio Ponderado (`costos.js`), snapshot tributario e impuestos IVA/IT (`fiscal.js`). |
 | **`server/repositories/`**| **Consultas SQL** | Consultas SQL parametrizadas a la base de datos (`ventas.repo.js`, `catalogo.repo.js`, `cajas.repo.js`, `inventario.repo.js`, etc.). |
-| **`server/lib/`** | **Infraestructura Técnica** | Seguridad de contraseñas (`bcryptjs`), sesiones JWT con HttpOnly (`sesion.js`), envío SMTP de correos (`mailer.js`) y validación de licencias Ed25519 (`licencia.js`). |
+| **`server/lib/`** | **Infraestructura Técnica** | Seguridad de contraseñas (`bcryptjs`), sesiones JWT con HttpOnly (`sesion.js`), validación de secretos (`secretos.js`) y envío SMTP de correos (`mailer.js`). |
 | **`app/api/`** | **Rutas REST Tradicionales** | Endpoints HTTP convencionales para operaciones que requieren streaming de archivos: descarga de Excel de 10 hojas (`app/api/reportes/route.js`), etc. |
 
 ---
@@ -86,11 +83,9 @@ El Frontend es todo lo visual que se ejecuta en el navegador o en la ventana del
 
 ## ⚠️ Reglas de Oro para Colaboradores
 
-1. **No separes el proyecto en dos servidores independientes:**
-   El proyecto compila hacia un instalador autónomo para Windows (`installer/pos-cajas.iss`) que levanta un proceso único con SQLite local. Separar en dos servidores rompería el instalador y la ejecución offline.
-2. **Toda escritura en Base de Datos va dentro de `transaccion()`:**
+1. **Toda escritura en Base de Datos va dentro de `transaccion()`:**
    Cualquier Server Action que inserte o actualice datos debe usar la función `transaccion(async (dbTx) => { ... })` para evitar inconsistencias de inventario o dinero.
-3. **Descuento de stock atómico:**
+2. **Descuento de stock atómico:**
    Todo descuento de stock en SQL debe usar condiciones de seguridad para evitar números negativos (`UPDATE ... WHERE stock >= ?`).
-4. **Sesión exclusiva en el servidor:**
+3. **Sesión exclusiva en el servidor:**
    Los roles y permisos del usuario se leen siempre desde la cookie cifrada en el servidor (`server/lib/sesion.js`), nunca desde parámetros enviados desde el cliente.

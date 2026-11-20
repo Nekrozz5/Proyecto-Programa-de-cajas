@@ -3,7 +3,6 @@ import {
     esRolAdministrativo,
     obtenerConfiguracionNegocio,
     obtenerCategorias,
-    sistemaEstaInstalado,
     obtenerCajerosParaLogin,
     obtenerUsuarios,
     obtenerUsuarioPorId,
@@ -49,15 +48,13 @@ export async function GET(request) {
             obtenerConfiguracionNegocio(),
             obtenerCategorias()
         ]);
-        const sistemaInstalado = await sistemaEstaInstalado(configuracionNegocio);
 
         // Si no hay sesión autenticada, devolver únicamente lo necesario para el arranque / selector de login:
-        // estado de instalación y solo cajeros (id y nombre, sin rol). Las cuentas privilegiadas no se exponen.
+        // solo cajeros (id y nombre, sin rol). Las cuentas privilegiadas no se exponen.
         if (!usuarioSesion) {
             const usuarios = await obtenerCajerosParaLogin();
             const respuestaSinSesion = NextResponse.json({
                 usuarioSesion: null,
-                sistemaInstalado,
                 configuracionNegocio,
                 usuarios,
                 categorias,
@@ -117,7 +114,6 @@ export async function GET(request) {
         if (!cajaReferencia) {
             return NextResponse.json({
                 usuarioSesion: usuarioSesionEnriquecido,
-                sistemaInstalado,
                 configuracionNegocio,
                 cajasFisicas,
                 cajasAbiertas,
@@ -149,7 +145,6 @@ export async function GET(request) {
 
         const respuesta = NextResponse.json({
             usuarioSesion: usuarioSesionEnriquecido,
-            sistemaInstalado,
             configuracionNegocio,
             cajasFisicas,
             cajasAbiertas,

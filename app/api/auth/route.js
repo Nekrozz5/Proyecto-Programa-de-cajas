@@ -1,9 +1,6 @@
 import { NextResponse } from 'next/server';
-import nodemailer from 'nodemailer';
 import {
-    autenticarUsuarioPorId,
-    inicializarSistemaPrimeraVez,
-    sistemaEstaInstalado
+    autenticarUsuarioPorId
 } from '../../../server/queries';
 import {
     crearTokenSesion,
@@ -47,7 +44,7 @@ export async function GET(request) {
     }
 }
 
-// POST /api/auth -> Manejo de autenticación, logout e inicialización del sistema
+// POST /api/auth -> Manejo de autenticación y logout
 export async function POST(request) {
     try {
         const body = await request.json();
@@ -71,60 +68,6 @@ export async function POST(request) {
             const response = NextResponse.json({ ok: true }, { headers: HEADERS_SIN_CACHE });
             limpiarCookieSesion(response, request);
             return response;
-        }
-
-        if (accion === 'probar_smtp_instalacion') {
-            const instalado = await sistemaEstaInstalado();
-            if (instalado) {
-                return NextResponse.json(
-                    { ok: false, error: 'El sistema ya se encuentra instalado.' },
-                    { status: 403, headers: HEADERS_SIN_CACHE }
-                );
-            }
-
-            const host = body.host || 'smtp.gmail.com';
-            const port = Number(body.port || body.puerto || 465);
-            const secure = body.secure !== undefined ? Boolean(body.secure) : (port === 465);
-            const user = body.user || body.usuario || body.auth?.user;
-            const pass = body.pass || body.password || body.auth?.pass;
-
-            if (!user || !pass) {
-                return NextResponse.json(
-                    { ok: false, error: 'Debe ingresar el usuario/correo y la contraseña para probar la conexión SMTP.' },
-                    { status: 400, headers: HEADERS_SIN_CACHE }
-                );
-            }
-
-            try {
-                const transporter = nodemailer.createTransport({
-                    host: String(host).trim(),
-                    port,
-                    secure,
-                    auth: {
-                        user: String(user).trim(),
-                        pass: String(pass).trim()
-                    },
-                    connectionTimeout: 10000
-                });
-
-                await transporter.verify();
-                return NextResponse.json({ ok: true, mensaje: 'Conexión SMTP exitosa' }, { headers: HEADERS_SIN_CACHE });
-            } catch (smtpErr) {
-                return NextResponse.json(
-                    { ok: false, error: smtpErr.message || 'Error de conexión o autenticación con el servidor SMTP.' },
-                    { status: 400, headers: HEADERS_SIN_CACHE }
-                );
-            }
-        }
-
-        if (accion === 'instalacion_inicial') {
-            const resultado = await inicializarSistemaPrimeraVez({
-                ...body,
-                setupToken: typeof body.setupToken === 'string' ? body.setupToken : '',
-                smtp: body.smtp || null,
-                destinatarioInicial: body.destinatarioInicial || null
-            });
-            return NextResponse.json({ ok: true, ...resultado }, { headers: HEADERS_SIN_CACHE });
         }
 
         return NextResponse.json(

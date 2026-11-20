@@ -7,21 +7,7 @@
 
 const { runQuery, getQuery, allQuery, enTransaccion, redondear2, numeroNoNegativo } = require('./db');
 const { obtenerUsuarioPorId, esRolAdministrativo } = require('./auth.repo');
-const { obtenerConfiguracionNegocio, verificarVigenciaLicenciaYReloj } = require('./configuracion.repo');
-
-async function validarLimiteCajasFisicas() {
-    const config = await obtenerConfiguracionNegocio();
-    const maxCajas = Number(config?.licencia_max_cajas);
-    if (Number.isFinite(maxCajas) && maxCajas > 0) {
-        const conteo = await getQuery(`SELECT COUNT(*) AS total FROM cajas_fisicas WHERE activa = 1`);
-        const activas = Number(conteo?.total || 0);
-        if (activas >= maxCajas) {
-            const err = new Error(`Límite de licencia alcanzado: tu plan permite un máximo de ${maxCajas} caja(s) física(s) activa(s).`);
-            err.status = 403;
-            throw err;
-        }
-    }
-}
+const { obtenerConfiguracionNegocio } = require('./configuracion.repo');
 
 // ==========================================
 // ESTACIONES DE CAJA FÍSICA
@@ -51,7 +37,6 @@ async function crearCajaFisica(nombre, adminId) {
     if (existente) {
         throw new Error(`Ya existe una caja física registrada con el nombre "${nombreLimpio}".`);
     }
-    await validarLimiteCajasFisicas();
     const res = await runQuery(`INSERT INTO cajas_fisicas (nombre, activa) VALUES (?, 1)`, [nombreLimpio]);
     return res.lastID;
 }
@@ -104,9 +89,6 @@ async function reactivarCajaFisica(cajaFisicaId, adminId) {
     const caja = await getQuery(`SELECT id, activa FROM cajas_fisicas WHERE id = ?`, [idNum]);
     if (!caja) {
         throw new Error('La caja física indicada no existe.');
-    }
-    if (Number(caja.activa) === 0) {
-        await validarLimiteCajasFisicas();
     }
     await runQuery(`UPDATE cajas_fisicas SET activa = 1 WHERE id = ?`, [idNum]);
     return true;
@@ -200,8 +182,6 @@ async function abrirCaja(usuarioId, montoInicial, cajaFisicaId = null) {
     if (usuarioId === null || usuarioId === undefined || usuarioId === '') {
         throw new Error('El usuario que abre la caja es obligatorio.');
     }
-
-    await verificarVigenciaLicenciaYReloj();
 
     return await enTransaccion(async () => {
         const usuario = await obtenerUsuarioPorId(usuarioId);

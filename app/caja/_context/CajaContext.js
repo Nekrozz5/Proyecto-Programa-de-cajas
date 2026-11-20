@@ -65,11 +65,6 @@ export function CajaProvider({ children }) {
             const data = await res.json();
             if (!res.ok) throw new Error(data.error || 'Error al cargar datos de caja');
 
-            if (!data.configuracionNegocio || Number(data.configuracionNegocio.configurado) === 0 || !data.sistemaInstalado) {
-                window.location.href = '/';
-                return;
-            }
-
             setConfiguracionNegocio(data.configuracionNegocio);
             setCajaAbierta(data.cajaAbierta);
             setCajasFisicas(data.cajasFisicas || []);

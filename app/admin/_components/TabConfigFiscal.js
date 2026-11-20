@@ -22,7 +22,6 @@ import {
 export default function TabConfigFiscal({
     datos,
     adminAutenticado,
-    esPrimeraEjecucion,
     onConfiguracionGuardada,
     cargarTodo,
     setMensaje,
@@ -131,11 +130,7 @@ export default function TabConfigFiscal({
             <section className="bg-white p-5 rounded-lg border-2 border-sky-600 shadow-sm">
                 <h2 className="text-xl font-bold text-slate-900 mt-0 mb-1.5 flex items-center gap-2">
                     <Settings className="w-5 h-5 text-sky-600" />
-                    <span>
-                        {esPrimeraEjecucion
-                            ? 'Configuración Inicial del Sistema (Primera Ejecución)'
-                            : 'Configurar Modalidad de Funcionamiento del Inventario'}
-                    </span>
+                    <span>Configurar Modalidad de Funcionamiento del Inventario</span>
                 </h2>
                 <p className="text-slate-600 text-sm mb-4">
                     Selecciona cómo funciona el inventario de tu negocio. El sistema activará u ocultará automáticamente los campos de <strong>Fechas de Vencimiento</strong> y de <strong>Ensamblaje / Recetas de Materiales</strong> según tu modalidad.

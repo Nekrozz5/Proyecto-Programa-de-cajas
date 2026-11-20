@@ -76,13 +76,6 @@ function exigirPasswordDeveloperProduccion(valor) {
     }
 }
 
-// SETUP_TOKEN con valor de ejemplo equivale a no tenerlo definido.
-function obtenerSetupTokenValido() {
-    const token = String(process.env.SETUP_TOKEN || '').trim();
-    if (!token || contieneMarcadorEjemplo(token)) return '';
-    return token;
-}
-
 // Validación completa al arrancar el servidor en producción (llamada desde instrumentation.js).
 // Lanza en el primer problema bloqueante; los avisos no bloqueantes se escriben en consola.
 function validarEntornoArranqueProduccion() {
@@ -93,9 +86,6 @@ function validarEntornoArranqueProduccion() {
 
     if (!String(process.env.DEVELOPER_PASSWORD || '').trim()) {
         console.warn('[Seguridad] DEVELOPER_PASSWORD no está definida: la cuenta técnica developer no estará disponible.');
-    }
-    if (!obtenerSetupTokenValido()) {
-        console.warn('[Seguridad] SETUP_TOKEN no está definido (o conserva el valor de ejemplo): la instalación inicial quedará rechazada.');
     }
     if (String(process.env.TRUST_PROXY || '').trim().toLowerCase() !== 'true') {
         console.warn('[Seguridad] TRUST_PROXY no es "true": el límite de intentos por IP agrupará a todos los clientes como \'local\'.');
@@ -123,7 +113,6 @@ module.exports = {
     exigirSecretoSesionProduccion,
     motivoPasswordDeveloperInvalida,
     exigirPasswordDeveloperProduccion,
-    obtenerSetupTokenValido,
     validarEntornoArranqueProduccion,
     validarOAbortarArranque
 };

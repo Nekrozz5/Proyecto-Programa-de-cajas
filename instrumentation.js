@@ -4,7 +4,7 @@
 // sin afectar a `next build` (que también corre con NODE_ENV=production).
 export async function register() {
     if (process.env.NEXT_RUNTIME === 'nodejs' && process.env.NEXT_PHASE !== 'phase-production-build') {
-        const modulo = await import('./server/secretos.js');
+        const modulo = await import('./server/lib/secretos.js');
         // Interop CommonJS: las funciones pueden llegar como export nombrado o dentro de default
         const validarOAbortarArranque = modulo.validarOAbortarArranque
             || (modulo.default && modulo.default.validarOAbortarArranque);

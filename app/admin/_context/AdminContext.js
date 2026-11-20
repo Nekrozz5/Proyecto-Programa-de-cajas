@@ -63,11 +63,6 @@ export function AdminProvider({ children }) {
 
             if (!resCaja.ok) throw new Error(dataCaja.error || 'Error al consultar /api/caja');
 
-            if (!dataCaja.configuracionNegocio || Number(dataCaja.configuracionNegocio.configurado) === 0 || !dataCaja.sistemaInstalado) {
-                window.location.href = '/';
-                return;
-            }
-
             setDatos(dataCaja);
 
             const sesionAdminValida = dataCaja.usuarioSesion && ['admin', 'propietario', 'developer'].includes(dataCaja.usuarioSesion.rol);

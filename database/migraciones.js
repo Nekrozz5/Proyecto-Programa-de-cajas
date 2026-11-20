@@ -9,7 +9,7 @@ const {
     esProduccion,
     exigirPasswordDeveloperProduccion,
     motivoPasswordDeveloperInvalida
-} = require('../server/secretos');
+} = require('../server/lib/secretos');
 
 const BCRYPT_ROUNDS = 10;
 
