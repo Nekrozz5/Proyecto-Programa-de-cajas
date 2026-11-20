@@ -14,8 +14,10 @@ import {
     FileSpreadsheet, 
     RotateCcw, 
     CheckCircle2,
-    Smartphone 
+    Smartphone,
+    Bike
 } from 'lucide-react';
+import ModalDetalleMovimiento from './ModalDetalleMovimiento';
 import { abrirTurnoAction, reabrirTurnoAction } from '../../../server/actions/turnos.actions';
 import {
     probarEmailAction,
@@ -60,6 +62,9 @@ export default function TabTurnosArqueos({
     // Notificaciones por correo
     const [enviandoPruebaEmail, setEnviandoPruebaEmail] = useState(false);
     const [enviandoEmailCajaId, setEnviandoEmailCajaId] = useState(null);
+
+    // Auditoría de movimientos del turno
+    const [movimientoParaDetalle, setMovimientoParaDetalle] = useState(null);
 
     const cajaAuditada = datos?.cajaAuditada;
     const totalAppsAuditada = (() => {
@@ -755,6 +760,116 @@ export default function TabTurnosArqueos({
                     </Table>
                 </div>
             )}
+
+            {/* AUDITORÍA FISCAL Y DE MOVIMIENTOS DEL TURNO SELECCIONADO */}
+            {cajaAuditada && (
+                <div className="mt-4 border-t border-slate-200 pt-5 flex flex-col gap-3">
+                    <div className="flex justify-between items-center flex-wrap gap-2">
+                        <div>
+                            <h3 className="text-base font-bold text-slate-900 m-0 flex items-center gap-2">
+                                <Receipt className="w-4 h-4 text-sky-600" />
+                                <span>Movimientos y Trazabilidad Fiscal - Turno #{cajaAuditada.id} ({cajaAuditada.caja_fisica_nombre || 'Caja Principal'})</span>
+                            </h3>
+                            <p className="text-xs text-slate-500 mt-0.5 mb-0">
+                                Inspección fiscal y comprobación de ingresos a caja física de cada venta y despacho registrado en este turno.
+                            </p>
+                        </div>
+                        <Badge variant="outline" className="text-xs font-semibold">
+                            {(datos?.movimientos || []).length} movimiento{(datos?.movimientos || []).length !== 1 ? 's' : ''} auditado{(datos?.movimientos || []).length !== 1 ? 's' : ''}
+                        </Badge>
+                    </div>
+
+                    {!(datos?.movimientos || []).length ? (
+                        <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 text-center text-xs text-slate-500">
+                            No hay movimientos registrados en este turno.
+                        </div>
+                    ) : (
+                        <div className="overflow-x-auto rounded-lg border border-slate-200">
+                            <Table>
+                                <TableHeader className="bg-slate-50">
+                                    <TableRow>
+                                        <TableHead className="text-xs font-semibold">ID</TableHead>
+                                        <TableHead className="text-xs font-semibold">Fecha/Hora</TableHead>
+                                        <TableHead className="text-xs font-semibold">Operador</TableHead>
+                                        <TableHead className="text-xs font-semibold">Canal / Despacho</TableHead>
+                                        <TableHead className="text-xs font-semibold">Documento / Fiscal</TableHead>
+                                        <TableHead className="text-xs font-semibold">Pago / Monto</TableHead>
+                                        <TableHead className="text-xs font-semibold">Estado</TableHead>
+                                        <TableHead className="text-xs font-semibold text-center">Auditoría</TableHead>
+                                    </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                    {(datos?.movimientos || []).map((m) => (
+                                        <TableRow key={m.id} className="hover:bg-slate-50/70">
+                                            <TableCell className="font-mono text-xs text-slate-700">#{m.id}</TableCell>
+                                            <TableCell className="text-xs text-slate-600 whitespace-nowrap">{m.fecha_hora}</TableCell>
+                                            <TableCell className="text-xs font-medium text-slate-900">{m.usuario_nombre || `Usuario #${m.usuario_id}`}</TableCell>
+                                            <TableCell className="text-xs">
+                                                {m.canal_venta === 'mototaxi' ? (
+                                                    <Badge className="bg-amber-100 text-amber-900 border border-amber-300 font-bold text-[10px] flex items-center gap-1 w-fit">
+                                                        <Bike className="w-3 h-3" />
+                                                        <span>Despacho Mototaxi</span>
+                                                    </Badge>
+                                                ) : m.canal_venta === 'pedidos_ya' ? (
+                                                    <Badge className="bg-red-100 text-red-900 border-red-300 text-[10px]">PedidosYa</Badge>
+                                                ) : m.canal_venta === 'yango' ? (
+                                                    <Badge className="bg-yellow-100 text-yellow-900 border-yellow-300 text-[10px]">Yango</Badge>
+                                                ) : (
+                                                    <span className="text-slate-600">Local</span>
+                                                )}
+                                            </TableCell>
+                                            <TableCell className="text-xs text-slate-700">
+                                                <div className="flex flex-col">
+                                                    <span className="font-semibold text-slate-800">
+                                                        {m.tipo_comprobante === 'factura' ? 'Factura' : 'Recibo'} {m.nro_factura ? `#${m.nro_factura}` : '(S/N)'}
+                                                    </span>
+                                                    {Number(m.iva_monto || 0) > 0 && (
+                                                        <span className="text-[10px] text-slate-500">
+                                                            IVA: Bs {Number(m.iva_monto).toFixed(2)} | IT: Bs {Number(m.it_monto || 0).toFixed(2)}
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            </TableCell>
+                                            <TableCell className="text-xs">
+                                                <div className="flex flex-col">
+                                                    <strong className="text-slate-900">Bs {Number(m.monto).toFixed(2)}</strong>
+                                                    <span className="text-[10px] text-slate-500 uppercase">{m.metodo_pago}</span>
+                                                </div>
+                                            </TableCell>
+                                            <TableCell className="text-xs">
+                                                {m.estado === 'anulado' ? (
+                                                    <Badge variant="destructive" className="text-[10px]">Anulado</Badge>
+                                                ) : (
+                                                    <Badge variant="outline" className="bg-emerald-50 text-emerald-800 border-emerald-300 text-[10px] font-semibold">Completado</Badge>
+                                                )}
+                                            </TableCell>
+                                            <TableCell className="text-xs text-center">
+                                                <Button
+                                                    type="button"
+                                                    size="sm"
+                                                    variant="outline"
+                                                    onClick={() => setMovimientoParaDetalle(m)}
+                                                    className="h-7 text-xs font-semibold text-sky-700 border-sky-300 hover:bg-sky-50 gap-1"
+                                                >
+                                                    <Eye className="w-3.5 h-3.5" />
+                                                    <span>Inspeccionar</span>
+                                                </Button>
+                                            </TableCell>
+                                        </TableRow>
+                                    ))}
+                                </TableBody>
+                            </Table>
+                        </div>
+                    )}
+                </div>
+            )}
+
+            {/* MODAL DE AUDITORÍA Y DETALLE DE MOVIMIENTO */}
+            <ModalDetalleMovimiento
+                movimiento={movimientoParaDetalle}
+                isOpen={Boolean(movimientoParaDetalle)}
+                onClose={() => setMovimientoParaDetalle(null)}
+            />
         </section>
     );
 }

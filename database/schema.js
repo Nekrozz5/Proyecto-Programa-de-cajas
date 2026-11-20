@@ -23,6 +23,7 @@ const configuracionNegocio = sqliteTable('configuracion_negocio', {
     usaVencimiento: integer('usa_vencimiento').default(0),
     usaRecetasEnsamblaje: integer('usa_recetas_ensamblaje').default(0),
     habilitaAppsComida: integer('habilita_apps_comida').default(0),
+    habilitaDelivery: integer('habilita_delivery').default(0),
     configurado: integer('configurado').default(0),
     nitNegocio: text('nit_negocio').default(''),
     regimenTributario: text('regimen_tributario').default('simplificado_control_interno'),

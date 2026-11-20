@@ -15,8 +15,8 @@ async function obtenerConfiguracionNegocio() {
     let config = await getQuery(`SELECT * FROM configuracion_negocio WHERE id = 1`);
     if (!config) {
         await runQuery(
-            `INSERT INTO configuracion_negocio (id, nombre_negocio, modalidad_nombre, usa_stock_directo, usa_vencimiento, usa_recetas_ensamblaje, habilita_apps_comida, configurado)
-             VALUES (1, 'Mi Negocio', 'Venta Directa No Perecedera', 1, 0, 0, 0, 0)`
+            `INSERT INTO configuracion_negocio (id, nombre_negocio, modalidad_nombre, usa_stock_directo, usa_vencimiento, usa_recetas_ensamblaje, habilita_apps_comida, habilita_delivery, configurado)
+             VALUES (1, 'Mi Negocio', 'Venta Directa No Perecedera', 1, 0, 0, 0, 0, 0)`
         );
         config = await getQuery(`SELECT * FROM configuracion_negocio WHERE id = 1`);
     }
@@ -25,8 +25,8 @@ async function obtenerConfiguracionNegocio() {
 
 async function guardarConfiguracionNegocio(adminId, config) {
     const ejecutor = await obtenerUsuarioPorId(adminId);
-    if (!ejecutor || ejecutor.rol !== 'developer') {
-        throw new Error('Permiso denegado: solo el rol Developer puede modificar la modalidad del negocio.');
+    if (!ejecutor || (ejecutor.rol !== 'developer' && ejecutor.rol !== 'propietario')) {
+        throw new Error('Permiso denegado: solo el rol Developer o Propietario(a) puede modificar la modalidad del negocio.');
     }
 
     const regimen = normalizarRegimen(config.regimenTributario);
@@ -36,6 +36,9 @@ async function guardarConfiguracionNegocio(adminId, config) {
     const emiteFacturaFinal = regimen === 'simplificado_control_interno'
         ? 0
         : (config.emiteFactura !== undefined ? (config.emiteFactura ? 1 : 0) : null);
+    const habilitaDeliveryVal = config.habilitaDelivery !== undefined
+        ? (config.habilitaDelivery ? 1 : 0)
+        : (config.habilita_delivery !== undefined ? (config.habilita_delivery ? 1 : 0) : null);
 
     await runQuery(
         `UPDATE configuracion_negocio
@@ -45,6 +48,7 @@ async function guardarConfiguracionNegocio(adminId, config) {
              usa_vencimiento = ?,
              usa_recetas_ensamblaje = ?,
              habilita_apps_comida = COALESCE(?, habilita_apps_comida, 0),
+             habilita_delivery = COALESCE(?, habilita_delivery, 0),
              nit_negocio = COALESCE(?, nit_negocio, ''),
              regimen_tributario = COALESCE(?, regimen_tributario, 'simplificado_control_interno'),
              emite_factura = COALESCE(?, emite_factura, 0),
@@ -61,6 +65,7 @@ async function guardarConfiguracionNegocio(adminId, config) {
             config.usaVencimiento ? 1 : 0,
             config.usaRecetasEnsamblaje ? 1 : 0,
             config.habilitaAppsComida !== undefined ? (config.habilitaAppsComida ? 1 : 0) : null,
+            habilitaDeliveryVal,
             config.nitNegocio !== undefined ? String(config.nitNegocio).trim() : null,
             config.regimenTributario !== undefined ? regimen : null,
             emiteFacturaFinal,
@@ -70,6 +75,72 @@ async function guardarConfiguracionNegocio(adminId, config) {
             config.usaRespaldoComprasEgresos !== undefined ? (config.usaRespaldoComprasEgresos ? 1 : 0) : null
         ]
     );
+    return await obtenerConfiguracionNegocio();
+}
+
+async function actualizarConfiguracionNegocio(config, adminId = null) {
+    if (adminId) {
+        const ejecutor = await obtenerUsuarioPorId(adminId);
+        if (!ejecutor || !esRolAdministrativo(ejecutor.rol)) {
+            throw new Error('Permiso denegado: rol no autorizado para actualizar la configuración.');
+        }
+    }
+
+    const habilitaDeliveryVal = config.habilita_delivery !== undefined
+        ? (config.habilita_delivery ? 1 : 0)
+        : (config.habilitaDelivery !== undefined ? (config.habilitaDelivery ? 1 : 0) : null);
+
+    const habilitaAppsComidaVal = config.habilita_apps_comida !== undefined
+        ? (config.habilita_apps_comida ? 1 : 0)
+        : (config.habilitaAppsComida !== undefined ? (config.habilitaAppsComida ? 1 : 0) : null);
+
+    const nombreNegocio = config.nombre_negocio !== undefined
+        ? String(config.nombre_negocio).trim()
+        : (config.nombreNegocio !== undefined ? String(config.nombreNegocio).trim() : null);
+
+    const modalidadNombre = config.modalidad_nombre !== undefined
+        ? config.modalidad_nombre
+        : (config.modalidadNombre !== undefined ? config.modalidadNombre : null);
+
+    const usaStockDirecto = config.usa_stock_directo !== undefined
+        ? (config.usa_stock_directo ? 1 : 0)
+        : (config.usaStockDirecto !== undefined ? (config.usaStockDirecto ? 1 : 0) : null);
+
+    const usaVencimiento = config.usa_vencimiento !== undefined
+        ? (config.usa_vencimiento ? 1 : 0)
+        : (config.usaVencimiento !== undefined ? (config.usaVencimiento ? 1 : 0) : null);
+
+    const usaRecetas = config.usa_recetas_ensamblaje !== undefined
+        ? (config.usa_recetas_ensamblaje ? 1 : 0)
+        : (config.usaRecetasEnsamblaje !== undefined ? (config.usaRecetasEnsamblaje ? 1 : 0) : null);
+
+    const nitNegocio = config.nit_negocio !== undefined
+        ? String(config.nit_negocio).trim()
+        : (config.nitNegocio !== undefined ? String(config.nitNegocio).trim() : null);
+
+    await runQuery(
+        `UPDATE configuracion_negocio
+         SET nombre_negocio = COALESCE(?, nombre_negocio),
+             modalidad_nombre = COALESCE(?, modalidad_nombre),
+             usa_stock_directo = COALESCE(?, usa_stock_directo),
+             usa_vencimiento = COALESCE(?, usa_vencimiento),
+             usa_recetas_ensamblaje = COALESCE(?, usa_recetas_ensamblaje),
+             habilita_apps_comida = COALESCE(?, habilita_apps_comida),
+             habilita_delivery = COALESCE(?, habilita_delivery),
+             nit_negocio = COALESCE(?, nit_negocio)
+         WHERE id = 1`,
+        [
+            nombreNegocio,
+            modalidadNombre,
+            usaStockDirecto,
+            usaVencimiento,
+            usaRecetas,
+            habilitaAppsComidaVal,
+            habilitaDeliveryVal,
+            nitNegocio
+        ]
+    );
+
     return await obtenerConfiguracionNegocio();
 }
 
@@ -180,6 +251,9 @@ async function inicializarSistemaPrimeraVez(datos = {}) {
     const esPlanEstandar = licenciaPlan === 'estandar';
     const usaVencimientoFinal = esPlanEstandar ? 0 : (datos.usaVencimiento ? 1 : 0);
     const usaRecetasFinal = esPlanEstandar ? 0 : (datos.usaRecetasEnsamblaje ? 1 : 0);
+    const habilitaDeliveryFinal = datos.habilitaDelivery !== undefined
+        ? (datos.habilitaDelivery ? 1 : 0)
+        : (datos.habilita_delivery !== undefined ? (datos.habilita_delivery ? 1 : 0) : 0);
     const nitNegocio = datos.nitNegocio !== undefined ? String(datos.nitNegocio || '').trim() : '';
     const regimenTributario = datos.regimenTributario
         ? normalizarRegimen(datos.regimenTributario)
@@ -206,6 +280,7 @@ async function inicializarSistemaPrimeraVez(datos = {}) {
                  usa_vencimiento = ?,
                  usa_recetas_ensamblaje = ?,
                  habilita_apps_comida = ?,
+                 habilita_delivery = ?,
                  nit_negocio = ?,
                  regimen_tributario = ?,
                  emite_factura = ?,
@@ -224,6 +299,7 @@ async function inicializarSistemaPrimeraVez(datos = {}) {
                 usaVencimientoFinal,
                 usaRecetasFinal,
                 datos.habilitaAppsComida ? 1 : 0,
+                habilitaDeliveryFinal,
                 nitNegocio,
                 regimenTributario,
                 emiteFactura,
@@ -586,6 +662,7 @@ async function verificarVigenciaLicenciaYReloj() {
 module.exports = {
     obtenerConfiguracionNegocio,
     guardarConfiguracionNegocio,
+    actualizarConfiguracionNegocio,
     guardarConfiguracionContable,
     validarTokenInstalacion,
     sistemaEstaInstalado,

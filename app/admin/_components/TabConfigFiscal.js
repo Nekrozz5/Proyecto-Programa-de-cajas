@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { useAdminContext } from '../_context/AdminContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -10,7 +11,8 @@ import {
     Calendar, 
     Boxes, 
     Coffee, 
-    Receipt 
+    Receipt,
+    Bike
 } from 'lucide-react';
 import {
     guardarConfiguracionAction,
@@ -19,6 +21,7 @@ import {
 
 export default function TabConfigFiscal({
     datos,
+    adminAutenticado,
     esPrimeraEjecucion,
     onConfiguracionGuardada,
     cargarTodo,
@@ -26,6 +29,11 @@ export default function TabConfigFiscal({
     setError,
     limpiarAlertas
 }) {
+    const adminCtx = useAdminContext?.();
+    const usuarioActual = adminAutenticado || adminCtx?.adminAutenticado;
+    const rolActual = usuarioActual?.rol;
+    const esPropietarioODeveloper = rolActual === 'propietario' || rolActual === 'developer';
+
     const configActual = datos?.configuracionNegocio || {};
 
     // Estado Modalidad del Inventario
@@ -34,7 +42,7 @@ export default function TabConfigFiscal({
     const [cfgUsaStockDirecto, setCfgUsaStockDirecto] = useState(Boolean(configActual.usa_stock_directo ?? true));
     const [cfgUsaVencimiento, setCfgUsaVencimiento] = useState(Boolean(configActual.usa_vencimiento ?? false));
     const [cfgUsaRecetas, setCfgUsaRecetas] = useState(Boolean(configActual.usa_recetas_ensamblaje ?? false));
-    const [cfgHabilitaAppsComida, setCfgHabilitaAppsComida] = useState(Boolean(configActual.habilita_apps_comida ?? false));
+    const [cfgHabilitaDelivery, setCfgHabilitaDelivery] = useState(Boolean(configActual.habilita_delivery ?? configActual.habilitaDelivery ?? false));
 
     // Estado Configuración Contable y Régimen Tributario
     const [cfgNitNegocio, setCfgNitNegocio] = useState(configActual.nit_negocio || '');
@@ -51,25 +59,21 @@ export default function TabConfigFiscal({
             setCfgUsaStockDirecto(true);
             setCfgUsaVencimiento(false);
             setCfgUsaRecetas(false);
-            setCfgHabilitaAppsComida(false);
         } else if (tipo === 'perecedero') {
             setCfgModalidadNombre('Venta de Productos con Fecha de Vencimiento');
             setCfgUsaStockDirecto(true);
             setCfgUsaVencimiento(true);
             setCfgUsaRecetas(false);
-            setCfgHabilitaAppsComida(false);
         } else if (tipo === 'ensamblaje_no_perecedero') {
             setCfgModalidadNombre('Producción / Ensamblaje con Materiales No Perecederos');
             setCfgUsaStockDirecto(true);
             setCfgUsaVencimiento(false);
             setCfgUsaRecetas(true);
-            setCfgHabilitaAppsComida(false);
         } else if (tipo === 'elaboracion_perecedera') {
             setCfgModalidadNombre('Elaboración con Recetas e Insumos Perecederos');
             setCfgUsaStockDirecto(true);
             setCfgUsaVencimiento(true);
             setCfgUsaRecetas(true);
-            setCfgHabilitaAppsComida(true);
         }
     }
 
@@ -83,7 +87,8 @@ export default function TabConfigFiscal({
                 usaStockDirecto: cfgUsaStockDirecto,
                 usaVencimiento: cfgUsaVencimiento,
                 usaRecetasEnsamblaje: cfgUsaRecetas,
-                habilitaAppsComida: cfgHabilitaAppsComida
+                habilitaDelivery: cfgHabilitaDelivery,
+                habilitaAppsComida: Boolean(configActual.habilita_apps_comida ?? false)
             });
 
             if (!res.ok) throw new Error(res.error || 'Error al guardar configuración de modalidad.');
@@ -277,16 +282,27 @@ export default function TabConfigFiscal({
                             </span>
                         </label>
 
-                        <label className="flex items-start gap-2.5 cursor-pointer text-xs text-slate-700">
+                        <label className={`flex items-start gap-2.5 text-xs text-slate-700 ${!esPropietarioODeveloper ? 'cursor-not-allowed opacity-80' : 'cursor-pointer'}`}>
                             <input
                                 type="checkbox"
-                                checked={cfgHabilitaAppsComida}
-                                onChange={(e) => setCfgHabilitaAppsComida(e.target.checked)}
-                                className="mt-0.5 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
+                                checked={cfgHabilitaDelivery}
+                                disabled={!esPropietarioODeveloper}
+                                onChange={(e) => setCfgHabilitaDelivery(e.target.checked)}
+                                className="mt-0.5 rounded border-slate-300 text-sky-600 focus:ring-sky-500 disabled:opacity-50 disabled:cursor-not-allowed"
                             />
-                            <span>
-                                <strong>Canales de Apps de Comida y Delivery (PedidosYa / Yango):</strong> Habilita cobros por aplicaciones de delivery con liquidación externa de fondos sin alterar el arqueo físico en caja.
-                            </span>
+                            <div className="flex flex-col gap-0.5">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                    <strong className="text-slate-800">Servicio de Envíos y Delivery (Mototaxi / Despachos Locales):</strong>
+                                    {!esPropietarioODeveloper && (
+                                        <Badge variant="outline" className="bg-amber-50 text-amber-800 border-amber-300 text-[10px] font-semibold py-0">
+                                            Solo el Propietario(a) puede activar o desactivar este servicio
+                                        </Badge>
+                                    )}
+                                </div>
+                                <span className="text-slate-600">
+                                    Habilita la opción de entrega por mototaxi en caja, solicitando datos del cliente, teléfono y dirección con registro de respaldo fiscal e ingreso a caja física.
+                                </span>
+                            </div>
                         </label>
                     </div>
 

@@ -161,6 +161,7 @@ export default function ConfiguracionPage() {
                 <TabsContent value="modalidad" className="outline-none focus:outline-none">
                     <TabConfigFiscal
                         datos={datos}
+                        adminAutenticado={adminAutenticado}
                         esPrimeraEjecucion={esPrimeraEjecucion}
                         onConfiguracionGuardada={() => router.push('/admin/catalogo')}
                         cargarTodo={cargarTodo}

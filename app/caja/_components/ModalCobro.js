@@ -48,6 +48,7 @@ export default function ModalCobro({
     }
     const config = configuracionNegocio || contextCaja?.configuracionNegocio;
     const habilitaAppsComida = Number(config?.habilita_apps_comida ?? 0) === 1 || Boolean(config?.habilita_apps_comida);
+    const habilitaDelivery = Number(config?.habilita_delivery ?? 0) === 1 || Boolean(config?.habilita_delivery);
 
     const [metodoPago, setMetodoPago] = useState('efectivo');
     const [referenciaExterna, setReferenciaExterna] = useState('');
@@ -532,15 +533,14 @@ export default function ModalCobro({
                             <span className="text-xs font-bold text-slate-700 block">
                                 Canal y Método de Pago:
                             </span>
-                            {habilitaAppsComida && (
+                            {/* Apps de comida deshabilitadas en UI */}
+                            {false && habilitaAppsComida && (
                                 <span className="text-[10px] bg-amber-100 text-amber-800 font-semibold px-1.5 py-0.5 rounded">
                                     Apps de Comida Habilitadas
                                 </span>
                             )}
                         </div>
-                        <div className={`grid gap-1.5 p-1 bg-slate-100 rounded-lg border border-slate-200 ${
-                            habilitaAppsComida ? 'grid-cols-2 sm:grid-cols-5' : 'grid-cols-3'
-                        }`}>
+                        <div className="grid gap-1.5 p-1 bg-slate-100 rounded-lg border border-slate-200 grid-cols-3">
                             <button
                                 type="button"
                                 onClick={() => handleSeleccionarMetodoPago('efectivo')}
@@ -577,7 +577,8 @@ export default function ModalCobro({
                                 <Split className="w-4 h-4 shrink-0" />
                                 <span>Mixto</span>
                             </button>
-                            {habilitaAppsComida && (
+                            {/* Soporte de Apps de comida conservado pero oculto visualmente */}
+                            {false && habilitaAppsComida && (
                                 <>
                                     <button
                                         type="button"
@@ -736,8 +737,8 @@ export default function ModalCobro({
                         </div>
                     )}
 
-                    {/* Opción de Despacho / Envío por Mototaxi (Para cualquier modalidad de negocio) */}
-                    {metodoPago !== 'pedidos_ya' && metodoPago !== 'yango' && (
+                    {/* Opción de Despacho / Envío por Mototaxi (Condicionado a habilitación de delivery) */}
+                    {habilitaDelivery && metodoPago !== 'pedidos_ya' && metodoPago !== 'yango' && (
                         <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-2.5">
                             <div className="flex items-center justify-between">
                                 <label className="flex items-center gap-2 text-xs font-bold text-slate-800 cursor-pointer">
@@ -749,7 +750,7 @@ export default function ModalCobro({
                                     />
                                     <span className="flex items-center gap-1.5">
                                         <Bike className="w-4 h-4 text-slate-600" />
-                                        <span>Envío / Mototaxi</span>
+                                        <span>Envío / Mototaxi (El conductor paga en caja al retirar el pedido)</span>
                                     </span>
                                 </label>
                                 {esEnvioMototaxi && (

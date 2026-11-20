@@ -4,7 +4,7 @@
 ; =====================================================================
 
 #define MyAppName "Sistema POS y Control de Cajas"
-#define MyAppVersion "1.5.1"
+#define MyAppVersion "1.6.0"
 #define MyAppPublisher "POS Cajas"
 #define MyAppExeName "lanzar-silencioso.vbs"
 #define AppGuid "{{A87C39E2-5D4E-49A1-9F16-339281BD510F}"
@@ -25,7 +25,7 @@ DisableProgramGroupPage=yes
 
 ; Configuración de salida del compilador
 OutputDir=output
-OutputBaseFilename=Setup-POS-Cajas-v1.5.1
+OutputBaseFilename=Setup-POS-Cajas-v1.6.0
 Compression=lzma2/normal
 SolidCompression=yes
 WizardStyle=modern

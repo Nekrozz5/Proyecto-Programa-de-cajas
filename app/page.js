@@ -18,7 +18,8 @@ import {
     Coffee, 
     ArrowLeft, 
     ArrowRight,
-    Mail
+    Mail,
+    Bike
 } from 'lucide-react';
 
 export default function HomePage() {
@@ -37,6 +38,7 @@ export default function HomePage() {
     const [nombreCaja, setNombreCaja] = useState('Caja 1');
     const [regimenTributario, setRegimenTributario] = useState('simplificado_control_interno');
     const [nitNegocio, setNitNegocio] = useState('');
+    const [habilitaDelivery, setHabilitaDelivery] = useState(false);
 
     const [adminNombre, setAdminNombre] = useState('');
     const [adminPin, setAdminPin] = useState('');
@@ -161,6 +163,7 @@ export default function HomePage() {
                 usaStockDirecto,
                 usaVencimiento,
                 usaRecetasEnsamblaje: usaRecetas,
+                habilitaDelivery,
                 adminNombre,
                 adminPin,
                 setupToken
@@ -499,6 +502,49 @@ export default function HomePage() {
                                             <span className="text-xs text-slate-500 mt-1">
                                                 Cálculo y registro de débito/crédito fiscal (IVA e IT) con facturación formal.
                                             </span>
+                                        </button>
+                                    </div>
+                                </div>
+
+                                {/* Pregunta sobre Envíos / Mototaxis */}
+                                <div className="p-4 rounded-xl border border-slate-200 bg-slate-50/70 space-y-3">
+                                    <div className="flex items-start gap-3">
+                                        <div className="p-2 rounded-lg bg-sky-100 text-sky-700 mt-0.5">
+                                            <Bike className="w-5 h-5" />
+                                        </div>
+                                        <div className="flex-1">
+                                            <h3 className="text-sm font-semibold text-slate-900">
+                                                ¿Realizas envíos a domicilio o despachos por mototaxi?
+                                            </h3>
+                                            <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">
+                                                Si activas esta opción, el punto de venta incluirá campos para registrar cliente, dirección de entrega y cobro directo al mototaxi.
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-3 pt-1">
+                                        <button
+                                            type="button"
+                                            onClick={() => setHabilitaDelivery(false)}
+                                            className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg border text-sm transition-all ${
+                                                !habilitaDelivery
+                                                    ? 'border-slate-400 bg-white shadow-sm ring-1 ring-slate-400 text-slate-800 font-semibold'
+                                                    : 'border-slate-200 bg-slate-100/60 text-slate-500 hover:bg-white'
+                                            }`}
+                                        >
+                                            {!habilitaDelivery && <Check className="w-4 h-4 text-slate-700" />}
+                                            <span>No</span>
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => setHabilitaDelivery(true)}
+                                            className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg border text-sm transition-all ${
+                                                habilitaDelivery
+                                                    ? 'border-primary bg-sky-50 shadow-sm ring-1 ring-primary text-sky-900 font-semibold'
+                                                    : 'border-slate-200 bg-slate-100/60 text-slate-500 hover:bg-white'
+                                            }`}
+                                        >
+                                            {habilitaDelivery && <Check className="w-4 h-4 text-primary" />}
+                                            <span>Sí</span>
                                         </button>
                                     </div>
                                 </div>

@@ -28,6 +28,7 @@ import {
 
 const ROLES_ADMIN = ['admin', 'propietario', 'developer'];
 const ROLES_DEVELOPER = ['developer'];
+const ROLES_CONFIG_NEGOCIO = ['developer', 'propietario'];
 
 /**
  * Registra un nuevo usuario con PIN y rol.
@@ -78,10 +79,10 @@ export async function cambiarPasswordAction(datos) {
 }
 
 /**
- * Guarda la configuración general y modalidad operativa del negocio (exclusivo developer).
+ * Guarda la configuración general y modalidad operativa del negocio (exclusivo developer y propietario).
  */
 export async function guardarConfiguracionAction(datos) {
-    return ejecutarAction(ROLES_DEVELOPER, async (usuario) => {
+    return ejecutarAction(ROLES_CONFIG_NEGOCIO, async (usuario) => {
         const config = await guardarConfiguracionNegocio(usuario.id, datos);
         revalidatePath('/admin');
         revalidatePath('/caja');

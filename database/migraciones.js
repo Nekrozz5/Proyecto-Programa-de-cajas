@@ -152,6 +152,7 @@ const MIGRACIONES = [
                     usa_stock_directo INTEGER DEFAULT 1,
                     usa_vencimiento INTEGER DEFAULT 0,
                     usa_recetas_ensamblaje INTEGER DEFAULT 0,
+                    habilita_delivery INTEGER DEFAULT 0,
                     configurado INTEGER DEFAULT 0
                 )
             `);
@@ -1384,6 +1385,13 @@ const MIGRACIONES = [
             await agregarColumnaSiNoExiste(conn, 'configuracion_negocio', 'licencia_max_cajas', 'INTEGER DEFAULT 10');
             await agregarColumnaSiNoExiste(conn, 'configuracion_negocio', 'licencia_expira', 'TEXT DEFAULT NULL');
             await agregarColumnaSiNoExiste(conn, 'configuracion_negocio', 'licencia_machine_id', "TEXT DEFAULT ''");
+        }
+    },
+    {
+        version: 18,
+        descripcion: 'Incorporación de la columna habilita_delivery en configuracion_negocio para control de servicio de delivery por rol propietario',
+        up: async (conn) => {
+            await agregarColumnaSiNoExiste(conn, 'configuracion_negocio', 'habilita_delivery', 'INTEGER DEFAULT 0');
         }
     }
 ];
