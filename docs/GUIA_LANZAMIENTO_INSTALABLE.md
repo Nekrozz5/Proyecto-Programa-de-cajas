@@ -120,3 +120,43 @@ El sistema opera bajo una arquitectura híbrida donde la PC de cobro actúa como
 | **Iniciar POS en PC** | Acceso directo en escritorio o `scripts/lanzar-silencioso.vbs` | Abre Edge en modo app |
 | **Detener POS en PC** | Acceso directo Menú Inicio o `scripts/detener-pos.bat` | Cierra el proceso Node |
 | **Respaldar Base de Datos** | `npm run backup` | Ejecuta SQLite `VACUUM INTO` |
+
+---
+
+## 6. Arquitectura del Instalador 100% Autónomo (Plug & Play para PC Virgen)
+
+> **Estado:** Implementado y Verificado. El instalador no requiere software previo en Windows.
+
+### 6.1. Diagnóstico de una PC Virgen
+Una computadora recién salida de fábrica o formateada con Windows 10/11 carece de:
+1. **Node.js en el PATH:** Los scripts batch y VBS fallaban al invocar `node` o `npm`.
+2. **Microsoft Visual C++ Redistributable (x64):** Módulos nativos como `better-sqlite3` requieren `msvcp140.dll` y `vcruntime140.dll`. Sin ellas, la carga de binarios C++ fallaba con error de DLL faltante.
+
+### 6.2. Implementación Aplicada
+
+#### A. Inclusión de Node.js Portable Embebido
+- **Estructura en distribución:** Ubicado en `{app}\bin\node.exe`.
+- **Independencia del sistema:** `iniciar-pos.bat`, `iniciar-servidor.vbs` y `inicializar-entorno.js` priorizan el binario portable local:
+  ```cmd
+  if exist "%~dp0..\bin\node.exe" (
+      set "NODE_CMD=%~dp0..\bin\node.exe"
+  ) else (
+      set "NODE_CMD=node"
+  )
+  ```
+- **Arranque directo de Next.js:** `iniciar-servidor.vbs` invoca directamente `bin\node.exe node_modules\next\dist\bin\next start`, eliminando la dependencia de `npm`.
+- **Resultado:** El software funciona inmediatamente sin requerir que el cliente descargue ni configure Node.js en Windows.
+
+#### B. Empaquetado e Instalación Silenciosa de VC++ Redistributable
+- **Archivo origen:** `redist/vc_redist.x64.exe` (Microsoft Visual C++ 2015-2022 Redistributable).
+- **Inno Setup `[Run]`:**
+  ```pascal
+  Filename: "{tmp}\vc_redist.x64.exe"; Parameters: "/install /passive /norestart"; Check: VCRedistNecesario; StatusMsg: "Configurando librerías de sistema de Microsoft (C++)..."
+  ```
+- **Función Pascal `VCRedistNecesario`:** Verifica en el registro de Windows (`HKLM\SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64`) si la librería ya está instalada para no reinstalar innecesariamente.
+
+#### C. Criterios de Aceptación Verificados
+- [x] Motor Node.js embebido copiado y verificado en `dist/bin/node.exe`.
+- [x] Paquete Microsoft Visual C++ copiado y verificado en `dist/redist/vc_redist.x64.exe`.
+- [x] Inno Setup configurado para instalación silenciosa automática de VC++ y bypass de advertencias de Node global.
+- [x] Lanzadores desacoplados de `npm` y vinculados al runtime local.

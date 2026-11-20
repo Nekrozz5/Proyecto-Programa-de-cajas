@@ -55,6 +55,10 @@ keys/
 *.key
 *.pem
 
+# Binarios locales del empaquetador (Node embebido y VC++ redist)
+bin/
+redist/
+
 # Archivos del sistema operativo y editores
 .DS_Store
 Thumbs.db

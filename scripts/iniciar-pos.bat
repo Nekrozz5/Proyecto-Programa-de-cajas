@@ -4,19 +4,26 @@ setlocal enabledelayedexpansion
 :: Navegar al directorio raiz del proyecto
 cd /d "%~dp0\.."
 
-:: 1. Verificar si Node.js esta instalado en el sistema
-where node >nul 2>&1
-if %errorlevel% neq 0 (
-    mshta "javascript:alert('Error Crítico: Node.js no se encuentra instalado o no está en la variable PATH de Windows.\n\nPor favor instale Node.js (versión 18 o superior) desde https://nodejs.org para poder ejecutar el Sistema POS.');close();"
-    exit /b 1
+:: 1. Localizar el ejecutable de Node.js (priorizar bin\node.exe embebido)
+set "NODE_EXE=%~dp0..\bin\node.exe"
+if exist "!NODE_EXE!" (
+    set "NODE_CMD=!NODE_EXE!"
+) else (
+    where node >nul 2>&1
+    if !errorlevel! equ 0 (
+        set "NODE_CMD=node"
+    ) else (
+        mshta "javascript:alert('Error Crítico: No se encontró el motor de ejecución Node.js (ni en bin\\node.exe ni en el sistema).\n\nPor favor reinstale la aplicación.');close();"
+        exit /b 1
+    )
 )
 
 :: 2. Inicializar entorno seguro (generar SESSION_SECRET único si es necesario)
 if exist "scripts\inicializar-entorno.js" (
-    node scripts\inicializar-entorno.js >nul 2>&1
+    "!NODE_CMD!" scripts\inicializar-entorno.js >nul 2>&1
 )
 
-:: 3. Autocompilacion automatica si falta el build de produccion
+:: 3. Autocompilacion automatica si falta el build de produccion (solo en modo desarrollo)
 if not exist ".next\BUILD_ID" (
     echo ===============================================================
     echo   Configurando el Sistema POS por primera vez...

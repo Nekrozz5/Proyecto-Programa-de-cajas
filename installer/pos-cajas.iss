@@ -4,7 +4,7 @@
 ; =====================================================================
 
 #define MyAppName "Sistema POS y Control de Cajas"
-#define MyAppVersion "1.3.4"
+#define MyAppVersion "1.4.0"
 #define MyAppPublisher "POS Cajas"
 #define MyAppExeName "lanzar-silencioso.vbs"
 #define AppGuid "{{A87C39E2-5D4E-49A1-9F16-339281BD510F}"
@@ -25,7 +25,7 @@ DisableProgramGroupPage=yes
 
 ; Configuración de salida del compilador
 OutputDir=output
-OutputBaseFilename=Setup-POS-Cajas-v1.3.4
+OutputBaseFilename=Setup-POS-Cajas-v1.4.0
 Compression=lzma2/normal
 SolidCompression=yes
 WizardStyle=modern
@@ -86,6 +86,11 @@ Source: "..\dist\.env.local"; DestDir: "{app}"; Flags: onlyifdoesntexist uninsne
 Source: "..\dist\.env.production"; DestDir: "{app}"; Flags: onlyifdoesntexist uninsneveruninstall; Permissions: users-full
 #endif
 
+; 3. Microsoft Visual C++ Redistributable (se copia a carpeta temporal y se elimina tras instalar si falta)
+#if FileExists("..\redist\vc_redist.x64.exe")
+Source: "..\redist\vc_redist.x64.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall ignoreversion; Check: VCRedistNecesario
+#endif
+
 [Registry]
 ; Inicio automático opcional con Windows (se elimina automáticamente al desinstalar si se activó)
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "POSCajasServer"; ValueData: """{app}\scripts\lanzar-silencioso.vbs"""; Tasks: autostart; Flags: uninsdeletevalue
@@ -100,6 +105,11 @@ Name: "{group}\{cm:UninstallProgram,{#MyAppName}}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\scripts\lanzar-silencioso.vbs"; WorkingDir: "{app}"; Comment: "Iniciar Sistema POS y Control de Cajas"; Tasks: desktopicon
 
 [Run]
+; 0. Instalar automáticamente librerías de Microsoft Visual C++ si faltan en Windows (requerido para better-sqlite3)
+#if FileExists("..\redist\vc_redist.x64.exe")
+Filename: "{tmp}\vc_redist.x64.exe"; Parameters: "/install /passive /norestart"; Flags: waituntilterminated; Check: VCRedistNecesario; StatusMsg: "Configurando librerías esenciales de Microsoft (Visual C++)..."
+#endif
+
 ; 1. Asegurar permisos de modificación NTFS (SID *S-1-5-32-545 = Usuarios de Windows en cualquier idioma)
 Filename: "{sys}\icacls.exe"; Parameters: """{app}"" /grant *S-1-5-32-545:(OI)(CI)M /T /C /Q"; Flags: runhidden; StatusMsg: "Asegurando permisos para base de datos y respaldos..."
 
@@ -107,7 +117,11 @@ Filename: "{sys}\icacls.exe"; Parameters: """{app}"" /grant *S-1-5-32-545:(OI)(C
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""POS Cajas - Servidor Local (Puerto 3000)"" dir=in action=allow protocol=TCP localport=3000 profile=private,domain"; Flags: runhidden; StatusMsg: "Configurando acceso en red local (Firewall de Windows)..."
 
 ; 3. Inicializar entorno de producción seguro con secretos criptográficos únicos no compartidos
+#if FileExists("..\dist\bin\node.exe") || FileExists("..\bin\node.exe")
+Filename: "{app}\bin\node.exe"; Parameters: """{app}\scripts\inicializar-entorno.js"""; WorkingDir: "{app}"; Flags: runhidden; StatusMsg: "Generando credenciales y secretos criptográficos únicos..."
+#else
 Filename: "{cmd}"; Parameters: "/c node ""{app}\scripts\inicializar-entorno.js"""; WorkingDir: "{app}"; Flags: runhidden; StatusMsg: "Generando credenciales y secretos criptográficos únicos..."
+#endif
 
 ; 4. Opción para iniciar automáticamente el sistema al finalizar la instalación
 Filename: "{app}\scripts\lanzar-silencioso.vbs"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: shellexec postinstall skipifsilent nowait
@@ -121,6 +135,22 @@ Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=
 
 [Code]
 // =====================================================================
+// Detección de Visual C++ 2015-2022 (x64)
+// =====================================================================
+function VCRedistNecesario(): Boolean;
+var
+  Installed: Cardinal;
+begin
+  Result := True;
+  // Verificar en el registro de 64 bits si el runtime ya se encuentra instalado
+  if RegQueryDWordValue(HKEY_LOCAL_MACHINE, 'SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64', 'Installed', Installed) then
+  begin
+    if Installed = 1 then
+      Result := False; // Ya está instalado, omitir descarga/ejecución
+  end;
+end;
+
+// =====================================================================
 // Validación Previa: Comprobar presencia de Node.js en el sistema
 // =====================================================================
 function InitializeSetup(): Boolean;
@@ -129,7 +159,8 @@ var
 begin
   Result := True;
   
-  // Ejecutar 'node -v' para verificar si el runtime está instalado en el PATH
+  // Si el instalador ya incluye su propio motor Node.js embebido, no se requiere Node global
+  #if !FileExists("..\dist\bin\node.exe") && !FileExists("..\bin\node.exe")
   if not Exec(ExpandConstant('{cmd}'), '/c node -v >nul 2>&1', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) or (ResultCode <> 0) then
   begin
     if MsgBox('ATENCIÓN: No se detectó Node.js instalado en este equipo.' + #13#10 + #13#10 +
@@ -141,6 +172,7 @@ begin
       Result := False;
     end;
   end;
+  #endif
 end;
 
 // =====================================================================
@@ -151,15 +183,21 @@ var
   ResultCode: Integer;
   StopBat, DbFile, BackupDir, BackupFile, FechaStr: String;
 begin
-  // 1. Detener el servidor POS si ya estaba corriendo para evitar bloqueos EBUSY o archivos .node bloqueados
+  // 1. Detener el servidor POS y cerrar ventanas activas de Edge si ya estaba corriendo
   StopBat := ExpandConstant('{app}\scripts\detener-pos.bat');
   if FileExists(StopBat) then
   begin
     Exec(ExpandConstant('{cmd}'), '/c "' + StopBat + '"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   end;
 
-  // Pausa de seguridad para que el kernel de Windows libere los handles de archivos y DLLs en memoria
-  Sleep(1500);
+  // Cierre complementario forzado por PowerShell para asegurar que no quede ninguna ventana ni proceso zombi
+  Exec(ExpandConstant('{cmd}'), '/c powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { ($_.Name -eq ''msedge.exe'' -and $_.CommandLine -like ''*localhost:3000*'') -or ($_.Name -eq ''node.exe'' -and ($_.CommandLine -like ''*POS Cajas*'' -or $_.CommandLine -like ''*next*'')) -or ($_.Name -eq ''wscript.exe'' -and ($_.CommandLine -like ''*POS Cajas*'' -or $_.CommandLine -like ''*lanzar*'')) } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }" >nul 2>&1', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+
+  // Cerrar cualquier socket ocupado en el puerto 3000
+  Exec(ExpandConstant('{cmd}'), '/c for /f "tokens=5" %a in (''netstat -ano ^| findstr :3000'') do taskkill /f /pid %a >nul 2>&1', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+
+  // Pausa de 2 segundos para que el kernel de Windows libere todos los handles de archivos y DLLs
+  Sleep(2000);
 
   // 2. Respaldo preventivo automático de caja.db antes de aplicar cualquier archivo nuevo
   DbFile := ExpandConstant('{app}\caja.db');
@@ -172,10 +210,10 @@ begin
     CopyFile(DbFile, BackupFile, False);
   end;
 
-  // 3. Purgar completamente la caché vieja de Next.js para evitar conflictos de chunks webpack
-  if DirExists(ExpandConstant('{app}\.next\cache')) then
+  // 3. Purgar completamente la carpeta .next vieja para eliminar chunks, manifests y caché residual
+  if DirExists(ExpandConstant('{app}\.next')) then
   begin
-    DelTree(ExpandConstant('{app}\.next\cache'), True, True, True);
+    DelTree(ExpandConstant('{app}\.next'), True, True, True);
   end;
 
   Result := '';

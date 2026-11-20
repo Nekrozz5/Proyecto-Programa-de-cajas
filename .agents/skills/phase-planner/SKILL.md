@@ -33,6 +33,19 @@ Al descomponer cualquier requerimiento, la IA debe aplicar estrictamente estas 5
      * **Fase 2: Componentes Atómicos (UI aislada):** Crear o adaptar componentes visuales puros con Shadcn/Tailwind.
      * **Fase 3: Cableado e Integración:** Conectar los componentes con la lógica/servidor.
      * **Fase 4: Verificación y Pulido:** Pruebas de borde, accesibilidad táctil y limpieza.
+6. **Asignación Racional de Modelo, Rendimiento y Agente (Budgeting de Cuotas y Tokens):**
+   * **Prohibido 'quemar tokens en vano':** Nunca asignar modelos de razonamiento pesado (`High` / `XHigh`) o con cuotas semanales restrictivas (*Gemini 4 Argon*, *Claude Opus*) a tareas mecánicas, de estilo o de 1-2 archivos.
+   * **Matriz de Asignación por Complejidad:**
+     * **UI puntual, componentes Shadcn, scripts auxiliares, refactorizaciones cosméticas:** `Gemini 3.8 Flash (Low o Medium)` — *Chat directo* (máxima velocidad, consumo despreciable de cuota diaria).
+     * **Lógica de negocio, consultas SQLite / Drizzle ORM, Endpoints API:** `Gemini 4 Neon (Medium)` o `Claude Sonnet (Medium)` — *Chat directo* (alta fidelidad y balance de cuota diaria).
+     * **Lectura o investigación de múltiples archivos (más de 3 archivos):** Subagente `research` con modelo Flash para inspeccionar en sandbox y retornar solo el extracto, protegiendo el contexto principal.
+     * **Verificación de interfaces web o interacción en navegador:** Subagente `browser`.
+     * **Arquitectura de base de datos crítica, concurrencia WAL o bugs no reproducibles:** `Gemini 4 Argon (Medium/High)` o `Claude Opus (High)` — *Reservado exclusivamente para bloqueos reales, justificando el uso de cuota semanal*.
+7. **Detección Activa de Desajuste y Confirmación de Cambio (Model Mismatch Alert):**
+   * **Monitoreo del Modelo Activo:** La IA debe contrastar activamente el modelo/esfuerzo activo en el chat con la complejidad de la fase.
+   * **Caso Sobredimensionado (Overkill):** Si el chat está en un modelo de razonamiento alto (*Gemini 4 Argon High*, *Claude Opus High*) pero la fase es simple (ej. maquetación, scripts, 1-2 archivos), la IA debe alertar que se están quemando tokens en vano y sugerir bajar a *Gemini 3.8 Flash (Low/Medium)* o *Gemini 4 Neon (Low)*.
+   * **Caso Insuficiente (Underpowered):** Si el chat está en un modelo rápido/ligero pero la fase involucra concurrencia compleja de SQLite WAL, auditoría criptográfica o algoritmos intrincados, la IA debe advertir que el modelo actual puede tener alucinaciones y sugerir subir a un modelo de mayor razonamiento.
+   * **Petición Obligatoria de Confirmación:** Siempre que se detecte un desajuste o se proponga delegar la fase a un subagente (ej. `research` o `browser`), la IA **no ejecutará automáticamente la fase**, sino que solicitará confirmación expresa al usuario (ej. *"¿Deseas cambiar el modelo en la interfaz antes de que proceda, o prefieres ejecutarlo con el actual?"*).
 
 ---
 
@@ -45,11 +58,15 @@ Cuando esta skill se invoque, la respuesta DEBE seguir rigurosamente esta estruc
 
 **Resumen Ejecutivo:** (1-2 oraciones explicando el alcance y el resultado final esperado).
 **Impacto en Tokens:** (Estimación cualitativa: Bajo / Moderado / Alto y por qué).
+**Modelo Activo en el Chat:** [Nombre del modelo y rendimiento detectado actualmente].
 
 ---
 
 ### 📍 Fase [N]: [Título Descriptivo de la Fase]
 * **Objetivo:** Qué se construye o modifica puntualmente en este paso.
+* **Modelo y Rendimiento Recomendado:** `[Modelo] ([Low / Medium / High])` — *(Ej. Gemini 3.8 Flash (Medium) para no quemar cuota en maquetación)*.
+* **Agente / Modo de Ejecución:** `[Directo en Chat | Subagente research | Subagente browser]`.
+* **Alerta de Desajuste de Modelo:** [Opcional: ⚠️ Solo si el modelo activo en el chat no coincide con el recomendado. Explicar por qué es excesivo o insuficiente y pedir confirmación antes de iniciar].
 * **Archivos Afectados:**
   - Lectura: `ruta/al/archivo.js`
   - Edición / Creación: `ruta/al/archivo_nuevo.js`
@@ -88,9 +105,9 @@ Al finalizar, responde únicamente con un resumen de 3 viñetas de lo realizado 
 > *"Quiero migrar el Modal de Cobro de la caja a Shadcn usando Dialog, Tabs para Efectivo/QR y que se vea más moderno."*
 
 ### Aplicación de la Skill:
-* **Fase 1:** Instalar y verificar los componentes de Shadcn necesarios (`npx shadcn add dialog tabs input badge`).
-* **Fase 2:** Maquetar el nuevo componente `ModalCobroShadcn.jsx` de forma aislada recibiendo props limpias.
-* **Fase 3:** Reemplazar la invocación en `app/caja/_components/ModalCobro.js` verificando que mantenga los cálculos de cambio reactivo y cierres de modal.
-* **Fase 4:** Verificación visual y pruebas de pago rápido en efectivo y QR.
+* **Fase 1 (Instalación):** `Gemini 3.8 Flash (Low)` — Chat directo. Instalar y verificar componentes Shadcn (`npx shadcn add dialog tabs input badge`).
+* **Fase 2 (UI Aislada):** `Gemini 3.8 Flash (Medium)` — Chat directo. Maquetar `ModalCobroShadcn.jsx` puro con props limpias sin tocar backend.
+* **Fase 3 (Cableado Reactivo):** `Gemini 4 Neon (Medium)` — Chat directo. Reemplazar la invocación en `app/caja/_components/ModalCobro.js` verificando cálculos de cambio reactivo y cierres.
+* **Fase 4 (Verificación):** Subagente `browser` o `Gemini 3.8 Flash (Low)`. Verificación visual y pruebas de cobro en efectivo y QR.
 
-Cada fase tiene su prompt empaquetado, impidiendo que el agente gaste 15,000 tokens en un solo turno y garantizando control total del código.
+Cada fase tiene su prompt empaquetado y su asignación presupuestaria de IA, impidiendo que el agente gaste miles de tokens de razonamiento en un solo turno y preservando intactas las cuotas de modelos pesados como Argon u Opus.

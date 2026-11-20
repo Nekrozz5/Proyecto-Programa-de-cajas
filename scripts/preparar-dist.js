@@ -138,6 +138,24 @@ function validarRequisitos() {
         logWarn(`No existe 'caja.db' en la raíz. Se creará una plantilla inicial para el instalador.`);
     }
 
+    // F. Motor Node.js Embebido Portable
+    const nodeBinPath = path.join(ROOT_DIR, 'bin', 'node.exe');
+    if (fs.existsSync(nodeBinPath)) {
+        logOk(`Motor Node.js portable embebido verificado (bin/node.exe)`);
+    } else {
+        logWarn(`No se encontró 'bin/node.exe'. La distribución dependerá del Node.js global del sistema.`);
+        advertencias++;
+    }
+
+    // G. Paquete Microsoft Visual C++ Redistributable
+    const vcRedistPath = path.join(ROOT_DIR, 'redist', 'vc_redist.x64.exe');
+    if (fs.existsSync(vcRedistPath)) {
+        logOk(`Paquete Microsoft Visual C++ verificado (redist/vc_redist.x64.exe)`);
+    } else {
+        logWarn(`No se encontró 'redist/vc_redist.x64.exe'. Se recomienda para computadoras vírgenes.`);
+        advertencias++;
+    }
+
     return { valido: errores === 0, errores, advertencias };
 }
 
@@ -223,6 +241,24 @@ function recolectarArchivos() {
         // Crear archivo vacío para que Inno Setup pueda referenciarlo
         fs.writeFileSync(destDb, '');
         logOk(`Archivo plantilla caja.db creado en dist/caja.db`);
+    }
+
+    // Copiar motor Node.js portable embebido (bin/node.exe)
+    const srcBin = path.join(ROOT_DIR, 'bin', 'node.exe');
+    const destBinDir = path.join(DIST_DIR, 'bin');
+    if (fs.existsSync(srcBin)) {
+        if (!fs.existsSync(destBinDir)) fs.mkdirSync(destBinDir, { recursive: true });
+        fs.copyFileSync(srcBin, path.join(destBinDir, 'node.exe'));
+        logOk(`Binario portable embebido copiado a dist/bin/node.exe`);
+    }
+
+    // Copiar instalador de Microsoft Visual C++ (redist/vc_redist.x64.exe)
+    const srcRedist = path.join(ROOT_DIR, 'redist', 'vc_redist.x64.exe');
+    const destRedistDir = path.join(DIST_DIR, 'redist');
+    if (fs.existsSync(srcRedist)) {
+        if (!fs.existsSync(destRedistDir)) fs.mkdirSync(destRedistDir, { recursive: true });
+        fs.copyFileSync(srcRedist, path.join(destRedistDir, 'vc_redist.x64.exe'));
+        logOk(`Paquete Microsoft Visual C++ copiado a dist/redist/vc_redist.x64.exe`);
     }
 
     // Gestionar node_modules en dist

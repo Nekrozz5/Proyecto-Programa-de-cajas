@@ -26,7 +26,7 @@ Aplicación web integral de Punto de Venta (POS), control de turnos/arqueo ciego
 - **Configuración SMTP Dinámica y Verificación por Email (v15):** Administración en caliente del servidor de correo en base de datos (`configuracion_smtp`) y lista de destinatarios autorizados con verificación de seguridad mediante código numérico temporal (`notificacion_destinatarios`).
 - **Rol Propietario y Jerarquía Segura (v16):** Consolidación del perfil de máxima autoridad empresarial (`propietario`), diferenciado de administradores (`admin`), cajeros (`user`) y soporte técnico (`developer`).
 - **Licenciamiento Criptográfico Offline (Ed25519):** Motor de validación de claves de producto firmado asimétricamente (`POS-ACT-...`) que vincula el software al negocio de forma offline sin depender de servidores externos de activación.
-- **Instalador de Escritorio Windows y Despliegue PWA:** Empaquetador nativo con Inno Setup (`installer/pos-cajas.iss`), acceso directo silencioso en segundo plano, ejecución en modo ventana/kiosco para terminales de cobro y compatibilidad PWA para teléfonos y tablets.
+- **Instalador de Escritorio Windows Autónomo (Plug & Play) y PWA:** Empaquetador nativo con Inno Setup (`installer/pos-cajas.iss`) que incluye motor Node.js portable embebido e instalación silenciosa automática de librerías Microsoft Visual C++, sin requerir preinstalaciones en computadoras vírgenes. Acceso directo silencioso en segundo plano, ejecución en modo ventana/kiosco para terminales de cobro y compatibilidad PWA para teléfonos y tablets.
 - **Régimen Tributario Modular y Snapshot Fiscal (v9-v11):** Soporte de Régimen Simplificado (control interno) y Régimen General con alícuotas configurables (IVA 13%, IT 3%, base IT configurable). Snapshot inmutable congelado en cada venta (`movimientos`), garantizando integridad histórica.
 - **Pagos Mixtos Flexibles (Efectivo + QR):** Fuente de verdad normalizada en `movimientos_pagos`. Desglose exacto por método de pago con cálculo y entrega de cambio exclusivamente sobre la porción en efectivo.
 - **Kardex Cronológico Dual y Costo Ponderado (NIC 2):** Trazabilidad completa de inventario en `movimientos_productos_directos` y `movimientos_insumos` con `stock_resultante` y `costo_promedio_resultante` en cada fila. Preservación de hasta 6 decimales en insumos métricos (g / ml) y función de auditoría matemática de integridad con 0 descuadres.
@@ -100,9 +100,11 @@ Aplicación web integral de Punto de Venta (POS), control de turnos/arqueo ciego
 │   ├── seed_cafeteria.js            # Sembrado integral con catálogo, lotes, fiscal y Kardex
 │   ├── generar-clave.js             # Generador CLI de claves maestras de activación
 │   ├── preparar-dist.js             # Recolección y empaquetado para distribución en dist/
+│   ├── inicializar-entorno.js       # Autogeneración de secretos criptográficos únicos (.env.production)
 │   ├── iniciar-pos.bat              # Script de inicio del servidor en Windows
-│   ├── detener-pos.bat              # Script de detención ordenada del servidor
-│   └── lanzar-silencioso.vbs        # Lanzador en segundo plano sin ventana negra CMD
+│   ├── detener-pos.bat              # Script de detención quirúrgica del servidor y ventanas del POS
+│   ├── iniciar-servidor.vbs         # Arranque de Next.js en segundo plano sin consola
+│   └── lanzar-silencioso.vbs        # Lanzador de escritorio en segundo plano sin ventana negra CMD
 ├── tests/
 │   ├── simulador_integral.js        # Simulador E2E integral de flujo comercial completo
 │   ├── test_migracion_v8_v9.js      # Verificaciones contables y de migración v8->v9

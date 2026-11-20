@@ -80,8 +80,12 @@ Para maximizar la densidad de información y el ahorro de tokens, las siguientes
   - Actualizar números de versión en archivos fuente; **nunca** compilar el instalador (`npm run installer:build`, `ISCC.exe` o `scripts/preparar-dist.js`) automáticamente. Solo ejecutarlo ante orden expresa del usuario (ej. *"compila el instalador"*, *"genera el setup"*).
 - **Diagnósticos y Suites de Pruebas [ON-DEMAND-ONLY]:**
   - La IA no ejecuta suites de estrés ni compilaciones pesadas de verificación tras cada ajuste menor. Solo se ejecutan cuando el usuario lo solicite (ej. *"ejecuta las pruebas"*, *"busca bugs"*).
-- **Planificación Estructurada (`phase-planner`):**
+- **Planificación Estructurada y Presupuesto de Modelos (`phase-planner`):**
   - Ante nuevas funcionalidades o refactorizaciones extensas, invocar `.agents/skills/phase-planner/SKILL.md` para segmentar el trabajo en fases atómicas con prompt quirúrgico, archivos acotados y criterios de aceptación verificables.
+  - **Asignación Racional de Modelo y Agente por Fase (Cero Quema Inútil de Tokens):** Cada fase planificada debe declarar obligatoriamente:
+    1. **Modelo y Esfuerzo de Pensamiento (`Low` / `Medium` / `High`):** Adaptado a la complejidad de la tarea y a la disponibilidad de cuota (diaria vs. semanal). Para tareas mecánicas, estilos o scripts directos usar *Gemini 3.8 Flash (Low/Medium)* o *Gemini 4 Neon (Low)*. Reservar modelos de cuota semanal y alto razonamiento (*Gemini 4 Argon*, *Claude Opus*) estrictamente para arquitectura crítica o bugs complejos.
+    2. **Agente / Entorno de Ejecución:** Indicar si se ejecuta directo en el chat o mediante subagente (ej. `research` para lectura masiva de archivos sin saturar el contexto principal; `browser` para pruebas visuales en navegador).
+    3. **Detección Activa de Desajuste y Confirmación:** Si el modelo configurado en el chat es excesivo (ej. Argon/Opus High para maquetación o scripts sencillos) o insuficiente (ej. Flash Low para concurrencia o arquitectura crítica), la IA debe advertir proactivamente el desajuste, sugerir el cambio al modelo/agente idóneo y solicitar confirmación al usuario antes de proceder con la ejecución.
 
 ## 5. Comandos del Entorno
 - **Desarrollo:** `npm run dev` (abre en `http://localhost:3000`).

@@ -270,7 +270,14 @@ El sistema implementa una arquitectura en capas limpias que separa la interfaz v
 
 ## 8. Distribución de Escritorio para Windows y Arquitectura Híbrida
 
-- **Empaquetado Nativo con Inno Setup (`installer/pos-cajas.iss`):** Compila un instalador ejecutable (`Setup-POS-Cajas-v1.0.exe`) que instala el servidor local, dependencias nativas y crea los accesos directos necesarios.
+- **Empaquetado Nativo con Inno Setup (`installer/pos-cajas.iss`):** Compila un instalador ejecutable (`Setup-POS-Cajas-v1.4.0.exe`) con compresión sólida LZMA2 que instala el servidor local, dependencias nativas y crea los accesos directos necesarios.
+- **Arquitectura 100% Autónoma (Plug & Play):**
+  - **Motor Node.js Embebido (`bin/node.exe`):** Se empaqueta un runtime portable local que elimina la necesidad de preinstalar Node.js en Windows.
+  - **Microsoft Visual C++ Redistributable (`redist/vc_redist.x64.exe`):** Inno Setup verifica en el registro de Windows si las DLLs nativas (`msvcp140.dll` y `vcruntime140.dll`) están presentes; si no existen (PC virgen de fábrica), las instala silenciosamente en segundo plano.
+  - **Arranque Directo sin npm:** `iniciar-servidor.vbs` invoca directamente `bin\node.exe node_modules\next\dist\bin\next start`.
+- **Cierre Quirúrgico de Procesos y Purga de Caché (`scripts/detener-pos.bat`):** Cierra ventanas de Microsoft Edge que ejecutan el POS (`localhost:3000`), finaliza procesos residuales de Node/WScript y libera el puerto 3000. Durante actualizaciones, Inno Setup purga completamente la carpeta `.next` previa para evitar conflictos de chunks antiguos sin requerir reinicio de Windows.
+- **Generación de Secretos Criptográficos Únicos (`scripts/inicializar-entorno.js`):** Cada instalación autogenera su propio `SESSION_SECRET` (64 caracteres hex) y contraseña técnica de producción, evitando secretos compartidos.
+- **Regla Simétrica de Firewall de Windows:** Configura automáticamente la regla de entrada en el puerto 3000 al instalar para permitir terminales móviles en LAN y la elimina al desinstalar.
 - **Arranque Silencioso en Segundo Plano (`scripts/lanzar-silencioso.vbs`):** Inicia el servidor Node.js en el puerto 3000 de forma completamente oculta, sin mostrar ventanas de consola (CMD) al usuario.
 - **Modo Aplicación (Kiosco):** Abre automáticamente la interfaz POS en una ventana aislada de Microsoft Edge (`--app=http://localhost:3000/caja/pos`) sin barras de navegación ni distracciones para el cajero.
-- **Preservación Inviolable de Datos:** La base de datos `caja.db` cuenta con la directiva `onlyifdoesntexist` en el instalador, asegurando que reinstalaciones o actualizaciones jamás borren los datos de ventas o inventario del cliente.
+- **Preservación Inviolable de Datos:** La base de datos `caja.db` cuenta con la directiva `onlyifdoesntexist` en el instalador y backup preventivo antes de cada actualización, asegurando que jamás se borren ventas ni inventario. Al desinstalar, ofrece un diálogo para conservar el historial contable.
