@@ -2,7 +2,6 @@
 const allowedOrigins = [
   'localhost:3000',
   '127.0.0.1:3000',
-  '*.trycloudflare.com',
 ];
 
 if (process.env.ALLOWED_ORIGINS) {

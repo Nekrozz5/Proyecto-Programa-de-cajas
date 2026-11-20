@@ -1,23 +1,22 @@
-# Arquitectura Técnica del Sistema
+# Arquitectura Técnica del Sistema (Cloud / AWS)
 
-Este documento describe la arquitectura global del sistema POS y Control de Cajas, su modelo de seguridad, la base de datos relacional con SQLite3, el esquema de migraciones versionadas (v1 a v16), el motor tributario modular con RCV SIAT, los pagos mixtos, los canales de delivery (PedidosYa / Yango), el Kardex cronológico dual (NIC 2), los combos, los modificadores de recetas, la trazabilidad de lotes con política PEPS (FIFO), el servicio SMTP dinámico con verificación de destinatarios, el motor de licenciamiento offline por criptografía asimétrica (Ed25519), la distribución de escritorio para Windows y el sistema de reportes contables.
+Este documento describe la arquitectura global del sistema POS y Control de Cajas desplegado en AWS, su modelo de seguridad, la base de datos relacional con SQLite3, el esquema de migraciones versionadas (v1 a v17), el motor tributario modular con RCV SIAT, los pagos mixtos, los canales de delivery (PedidosYa / Yango), el Kardex cronológico dual (NIC 2), los combos, los modificadores de recetas, la trazabilidad de lotes con política PEPS (FIFO), el servicio SMTP dinámico con verificación de destinatarios y el sistema de reportes contables.
 
 ---
 
 ## 1. Stack Tecnológico
 
 - **Frontend / Fullstack:** Next.js 16 (App Router) con React 19.
-- **Estilos y Componentes UI:** Tailwind CSS con Shadcn UI (`components/ui/*`, `@base-ui/react`, `class-variance-authority`, `lucide-react`) y diseño responsivo táctil y de escritorio.
-- **Base de Datos:** SQLite3 local (`sqlite3@^6.0.1` y `better-sqlite3@^13.2.0`) con SQL nativo parametrizado (`?`) y Drizzle ORM singleton (`database/drizzle.js`, `database/schema.js`).
-- **Autenticación y Criptografía:** JWT firmado con `jose` (`^6.2.17`) en cookies `HttpOnly` (`pos_session`), hash de contraseñas con `bcryptjs` (`^3.0.3`) (10 rondas de salt) y licenciamiento offline asimétrico con Ed25519 (`server/lib/licencia.js`).
+- **Estilos y Componentes UI:** Tailwind CSS con Shadcn UI (`components/ui/*`, `@base-ui/react`, `class-variance-authority`, `lucide-react`) y diseño responsivo táctil y web.
+- **Base de Datos:** SQLite3 (`sqlite3@^6.0.1` y `better-sqlite3@^13.2.0`) con SQL nativo parametrizado (`?`) y Drizzle ORM singleton (`database/drizzle.js`, `database/schema.js`).
+- **Autenticación y Criptografía:** JWT firmado con `jose` (`^6.2.17`) en cookies `HttpOnly` (`pos_session`) y hash de contraseñas con `bcryptjs` (`^3.0.3`) (10 rondas de salt).
 - **Reportes y Visualización:**
   - `exceljs` (`^4.4.0`): Generación en servidor de libros Excel `.xlsx` con 10 hojas contables y de auditoría.
   - `jspdf` (`^4.2.1`) y `jspdf-autotable` (`^5.0.9`): Generación en cliente de reportes PDF de balance fiscal, arqueo ciego y auditoría de turno.
   - `recharts` (`^3.10.1`): Gráficos interactivos de métricas financieras en `/admin` (flujo horario, balance de 7 días, top productos, métodos de pago).
 - **Servicio de Notificaciones:** `nodemailer` (`^10.5.0`): Envíos SMTP en segundo plano con plantilla HTML ejecutiva, configuración dinámica en BD (`configuracion_smtp`), verificación de destinatarios (`notificacion_destinatarios`) y libro Excel `.xlsx` adjunto en caliente.
-- **Instalador de Escritorio y Empaquetado:** Inno Setup 6 (`installer/pos-cajas.iss`), script recolector `scripts/preparar-dist.js`, lanzador silencioso VBScript (`scripts/lanzar-silencioso.vbs`) y modo aplicación en navegador Edge/Chrome.
-- **Despliegue, Actualización y Respaldos:** PM2 (`ecosystem.config.js`), actualización automatizada (`scripts/update.js`) y respaldo atómico en caliente con `VACUUM INTO` (`scripts/backup.js`).
-- **Blindaje Multi-Dispositivo y Cloudflare Tunnel:** Protección contra traducción automática del DOM (`notranslate` en `app/layout.js`), encabezados `Cache-Control: no-store` en `GET /api/caja` para lecturas en tiempo real sin caché, y configuración de `experimental.serverActions.allowedOrigins` en `next.config.js` (`*.trycloudflare.com`, `localhost:3000`) para ejecución segura de Server Actions en entornos remotos e híbridos.
+- **Despliegue Cloud en AWS y Respaldos:** Ejecución continua con PM2 (`ecosystem.config.js`) y respaldo atómico en caliente con `VACUUM INTO` (`scripts/backup.js`).
+- **Blindaje Multi-Dispositivo en la Nube:** Protección contra traducción automática del DOM (`notranslate` en `app/layout.js`), encabezados `Cache-Control: no-store` en `GET /api/caja` para lecturas en tiempo real sin caché, y configuración de `experimental.serverActions.allowedOrigins` en `next.config.js` (`ALLOWED_ORIGINS`) para ejecución segura de Server Actions en AWS.
 
 ---
 
@@ -26,12 +25,13 @@ Este documento describe la arquitectura global del sistema POS y Control de Caja
 El sistema implementa una arquitectura en capas limpias que separa la interfaz visual, las mutaciones seguras del servidor, la lógica pura de dominio, la persistencia en base de datos y la infraestructura técnica:
 
 ```text
-├── app/                              # Next.js App Router (Frontend y API Routes mínimas)
+├── app/                              # Next.js App Router (Frontend y API Routes)
 │   ├── layout.js                     # Root layout protegido con notranslate
-│   ├── page.js                       # Asistente de instalación inicial y redirección
+│   ├── page.js                       # Portal principal del sistema
 │   ├── api/
-│   │   ├── auth/route.js             # POST: login, logout, instalacion_inicial con cookies HttpOnly
+│   │   ├── auth/route.js             # POST: login, logout con cookies HttpOnly
 │   │   ├── caja/route.js             # GET: lectura única de estado, catálogo y sincronización (no-store)
+│   │   ├── configuracion/route.js    # GET/POST/PUT/PATCH: configuración general del negocio
 │   │   └── reportes/route.js         # GET: exportación de libros Excel (.xlsx), CSV y tendencias JSON
 │   ├── admin/
 │   │   ├── layout.js                 # Layout administrativo con AdminProvider para estado global
@@ -45,6 +45,7 @@ El sistema implementa una arquitectura en capas limpias que separa la interfaz v
 │   │   ├── insumos/page.js           # Subruta: Insumos de producción, compras y mermas
 │   │   ├── arqueos/page.js           # Subruta: Historial de turnos, arqueos ciegos y reaperturas
 │   │   ├── usuarios/page.js          # Subruta: Cajeros, permisos fiscales y terminales de caja
+│   │   ├── inteligencia/page.js      # Subruta: Inteligencia de negocio y analíticas
 │   │   ├── configuracion/page.js     # Subruta: Configuración fiscal, SMTP y parámetros del negocio
 │   │   ├── exportacion/page.js       # Subruta: Descarga de reportes contables Excel/PDF
 │   │   └── _components/              # Componentes modulares administrativos:
@@ -91,6 +92,7 @@ El sistema implementa una arquitectura en capas limpias que separa la interfaz v
 │   │   └── fiscal.js                 # Snapshot tributario, bases imponibles IVA e IT
 │   ├── repositories/                 # Capa de persistencia SQL parametrizada
 │   │   ├── db.js                     # Primitivas SQLite (get, all, run, transaccion)
+│   │   ├── analiticas.repo.js        # Inteligencia de negocio y proyecciones
 │   │   ├── auth.repo.js              # Usuarios, credenciales bcrypt y permisos
 │   │   ├── cajas.repo.js             # Terminales físicas, turnos, arqueos y reaperturas
 │   │   ├── catalogo.repo.js          # Catálogo, categorías, recetas, modificadores y combos
@@ -100,7 +102,6 @@ El sistema implementa una arquitectura en capas limpias que separa la interfaz v
 │   │   ├── ventas.repo.js            # Ventas, pagos multi-método, snapshot fiscal y anulaciones
 │   │   └── index.js                  # Barrel de repositorios
 │   ├── lib/                          # Servicios técnicos e infraestructura
-│   │   ├── licencia.js               # Validación criptográfica de claves de activación Ed25519
 │   │   ├── mailer.js                 # Generación y despacho asíncrono de reportes por correo
 │   │   ├── secretos.js               # Validación estricta de variables de entorno y claves
 │   │   └── sesion.js                 # JWT, cookies HttpOnly, rate limiting dual e INSTANCE_BOOT_ID
@@ -109,22 +110,14 @@ El sistema implementa una arquitectura en capas limpias que separa la interfaz v
 │   ├── database.js                   # Conexión SQLite (WAL, busy_timeout, foreign_keys)
 │   ├── schema.js                     # Esquema tipado Drizzle ORM (20 tablas)
 │   ├── drizzle.js                    # Cliente Drizzle singleton sobre better-sqlite3
-│   └── migraciones.js                # Sistema de migraciones versionado con PRAGMA user_version (v1 a v16)
+│   └── migraciones.js                # Sistema de migraciones versionado con PRAGMA user_version (v1 a v17)
 ├── components/ui/                    # Componentes reutilizables Shadcn UI
-├── installer/
-│   └── pos-cajas.iss                 # Script de compilación de instalador Windows con Inno Setup
 ├── public/
 │   ├── manifest.json                 # Especificación de Aplicación Web Progresiva (PWA)
-│   └── icons/                        # Iconos para PWA y accesos directos
+│   └── icons/                        # Iconos para PWA y dispositivos móviles
 ├── scripts/
 │   ├── backup.js                     # Respaldo atómico en caliente con VACUUM INTO
-│   ├── update.js                     # Actualización automatizada (backup + pull + ci + build)
-│   ├── seed_cafeteria.js             # Sembrado integral con catálogo, lotes, fiscal y Kardex
-│   ├── generar-clave.js              # Generador CLI de licencias asimétricas Ed25519
-│   ├── preparar-dist.js              # Script recolector para el instalador de distribución
-│   ├── iniciar-pos.bat               # Inicio del servidor en Windows
-│   ├── detener-pos.bat               # Detención ordenada del servidor
-│   └── lanzar-silencioso.vbs         # Arranque silencioso sin ventana negra de terminal
+│   └── seed_cafeteria.js             # Sembrado integral con catálogo, lotes, fiscal y Kardex
 └── tests/
     ├── simulador_integral.js         # Simulador integral de flujo comercial automatizado
     ├── test_migracion_v8_v9.js       # Batería de pruebas contables de migración v8 a v9
@@ -133,9 +126,8 @@ El sistema implementa una arquitectura en capas limpias que separa la interfaz v
 
 ---
 
-## 3. Seguridad, Control de Sesiones y Licenciamiento
+## 3. Seguridad y Control de Sesiones (`server/lib/sesion.js`)
 
-### A. Control de Sesiones (`server/lib/sesion.js`)
 - **Validación exclusiva en servidor:** La identidad, rol y permisos de cada petición se resuelven exclusivamente a partir del token JWT validado en servidor, nunca de campos enviados por el cliente.
 - **TTL diferenciado por rol:**
   - `developer`: 15 minutos.
@@ -144,19 +136,9 @@ El sistema implementa una arquitectura en capas limpias que separa la interfaz v
 - **`INSTANCE_BOOT_ID`:** Cada arranque del proceso genera un identificador único en memoria. Al reiniciar el servidor (`npm run dev` o PM2), todos los tokens administrativos y técnicos de arranques anteriores quedan invalidados de inmediato, eliminando sesiones zombis.
 - **Inactividad y cookies de sesión:** Los perfiles administrativos utilizan Session Cookies (se destruyen al cerrar la ventana) y cuentan con un detector de inactividad de 15 minutos en frontend que fuerza el logout.
 - **Rate limiting dual:**
-  - Por IP de origen con soporte de `TRUST_PROXY` (lectura segura de `cf-connecting-ip` para Cloudflare Tunnel y `x-real-ip` para proxies inversos).
+  - Por IP de origen con soporte de `TRUST_PROXY` (lectura segura de `x-forwarded-for` y `x-real-ip` para balanceadores AWS ALB / CloudFront / Nginx).
   - Por cuenta de usuario individual en memoria (límite de intentos fallidos con caducidad autónoma para frenar ataques de fuerza bruta).
-- **Cookie `Secure` adaptativa:** En producción, `server/sesion.js` activa `secure: true` cuando la conexión proviene de HTTPS y permite `secure: false` en conexiones HTTP locales (`localhost` o LAN) para operar simultáneamente sin conflictos de cookie.
-
-### B. Motor de Licenciamiento Offline Asimétrico (`server/lib/licencia.js`)
-- **Criptografía Asimétrica Ed25519:** La aplicación contiene una clave pública embebida (`LLAVE_PUBLICA_MAESTRA_PEM`). Solo el desarrollador posee la clave privada para firmar licencias de activación.
-- **Estructura de la Clave:** `POS-ACT-<payload_base64url>.<firma_base64url>`
-  - Payload firmado con: nombre del negocio, NIT/CI, tipo de plan, fecha de emisión, fecha de vencimiento (o vitalicia), límite de terminales físicas y Machine ID de hardware opcional.
-- **Verificación 100% Offline:** La aplicación no realiza llamadas externas ni depende de internet para verificar la autenticidad de la licencia; la verificación matemática se realiza localmente en microsegundos.
-- **Generación de Claves (`scripts/generar-clave.js`):** Utilidad de línea de comandos para que el desarrollador emita claves válidas y asigne licencias a nuevos clientes:
-  ```bash
-  npm run licencia -- emitir --negocio "Café Central" --vence "2027-12-31" --cajas 3
-  ```
+- **Cookie `Secure` adaptativa:** En producción, `server/lib/sesion.js` activa `secure: true` cuando la conexión proviene de HTTPS (`x-forwarded-proto: https`) y permite `secure: false` en conexiones HTTP de desarrollo o pruebas internas.
 
 ---
 
@@ -169,10 +151,10 @@ El sistema implementa una arquitectura en capas limpias que separa la interfaz v
   - `PRAGMA busy_timeout = 5000` para tolerar esperas de escritura sin bloqueos prematuros.
   - Respaldo automático preventivo previo a la aplicación de cualquier migración (`VACUUM INTO backups/caja-pre-migracion-vX-a-vY-*.db`).
 
-- **`database/migraciones.js` (Evolución Integral v1 a v16):**
+- **`database/migraciones.js` (Evolución Integral v1 a v17):**
   - **v1:** Esquema base de cajas, usuarios, movimientos y detalle de movimientos.
   - **v2:** Módulo de insumos, compras con CPP, recetas de ensamble y configuración de negocio.
-  - **v3:** Auditoría de reaperturas (`veces_reabierta`, `historial_reaperturas`).
+  - **v3:** Auditoría de reaperturas (`veces_reabierta`, `historial_reaperturas`) y hashing bcrypt.
   - **v4:** Tabla `categorias` para catálogo interactivo estructurado.
   - **v5:** Normalización multicategoría de productos y saneamiento de registros legados.
   - **v6:** Tabla `cajas_fisicas` (estaciones de cobro física/terminales) con vinculación a `cajas` (turnos).
@@ -180,12 +162,13 @@ El sistema implementa una arquitectura en capas limpias que separa la interfaz v
   - **v8:** Soporte de tipo de producto `combo`, tablas `combo_componentes` y `detalle_movimientos_combos`, límites de unidades máximas (`limite_unidades_restante`) y control de vigencia temporal.
   - **v9:** Régimen tributario modular (`configuracion_negocio`), normalización de pagos en `movimientos_pagos`, compras con respaldo fiscal en `movimientos_insumos`, y creación del Kardex de productos directos (`movimientos_productos_directos`).
   - **v10:** Snapshot fiscal por movimiento (`regimen_tributario`, alícuotas e importes IVA/IT congelados), parámetro configurable `it_base` ('todas_las_ventas' | 'solo_facturadas'), `costo_promedio_resultante` en productos directos y saldos de apertura.
-  - **v11:** Kardex cronológico dual enriquecido en `movimientos_insumos` (`stock_resultante`, `costo_promedio_resultante`, `monto_total_compra`), reparación de costos métricos truncados y recálculo en cascada de recetas/combos, e índice multicaja por estación física (`idx_cajas_abiertas_fisica`).
+  - **v11:** Kardex cronológico dual enriquecido en `movimientos_insumos` (`stock_resultante`, `costo_promedio_resultante`, `monto_total_compra`), reparación de costos métricos truncados y recálculo en cascada de recetas/combos, e índice multicaja por estación física (`una_caja_abierta_por_estacion`).
   - **v12:** Creación de tabla `producto_lotes` para trazabilidad de vencimientos por lote, índices por producto y fecha de caducidad, migración de stock inicial con vencimiento, y soporte de salida PEPS (Primero en Expirar, Primero en Salir / FIFO) o selección manual de lote.
   - **v13:** Columnas fiscales de respaldo RCV SIAT (`nro_autorizacion_cuf`, `codigo_control`, `tipo_compra`) añadidas a `movimientos_insumos`, `movimientos_productos_directos` y `movimientos`.
   - **v14:** Soporte para apps de comida y delivery: bandera `habilita_apps_comida` en `configuracion_negocio`, columnas `canal_venta`, `datos_entrega` y `referencia_externa` en `movimientos`, y ampliación del CHECK constraint en `movimientos_pagos` para permitir métodos `pedidos_ya` y `yango`.
   - **v15:** Configuración SMTP dinámica en base de datos (`configuracion_smtp`) y tabla de destinatarios de notificaciones (`notificacion_destinatarios`) con estado de verificación por código numérico de un solo uso.
   - **v16:** Actualización del rol administrativo de `superadmin` a `propietario` en la tabla `usuarios` y normalización del CHECK constraint (`user`, `admin`, `propietario`, `developer`).
+  - **v17:** Incorporación de la columna `habilita_delivery` en `configuracion_negocio` para el control del servicio de delivery propio por parte del rol `propietario`.
 
 ---
 
@@ -268,16 +251,11 @@ El sistema implementa una arquitectura en capas limpias que separa la interfaz v
 
 ---
 
-## 8. Distribución de Escritorio para Windows y Arquitectura Híbrida
+## 8. Operación Cloud en AWS y Producción con PM2
 
-- **Empaquetado Nativo con Inno Setup (`installer/pos-cajas.iss`):** Compila un instalador ejecutable (`Setup-POS-Cajas-v1.5.1.exe`) con compresión sólida LZMA2 que instala el servidor local, dependencias nativas y crea los accesos directos necesarios.
-- **Arquitectura 100% Autónoma (Plug & Play):**
-  - **Motor Node.js Embebido (`bin/node.exe`):** Se empaqueta un runtime portable local que elimina la necesidad de preinstalar Node.js en Windows.
-  - **Microsoft Visual C++ Redistributable (`redist/vc_redist.x64.exe`):** Inno Setup verifica en el registro de Windows si las DLLs nativas (`msvcp140.dll` y `vcruntime140.dll`) están presentes; si no existen (PC virgen de fábrica), las instala silenciosamente en segundo plano.
-  - **Arranque Directo sin npm:** `iniciar-servidor.vbs` invoca directamente `bin\node.exe node_modules\next\dist\bin\next start`.
-- **Cierre Quirúrgico de Procesos y Purga de Caché (`scripts/detener-pos.bat`):** Cierra ventanas de Microsoft Edge que ejecutan el POS (`localhost:3000`), finaliza procesos residuales de Node/WScript y libera el puerto 3000. Durante actualizaciones, Inno Setup purga completamente la carpeta `.next` previa para evitar conflictos de chunks antiguos sin requerir reinicio de Windows.
-- **Generación de Secretos Criptográficos Únicos (`scripts/inicializar-entorno.js`):** Cada instalación autogenera su propio `SESSION_SECRET` (64 caracteres hex) y contraseña técnica de producción, evitando secretos compartidos.
-- **Regla Simétrica de Firewall de Windows:** Configura automáticamente la regla de entrada en el puerto 3000 al instalar para permitir terminales móviles en LAN y la elimina al desinstalar.
-- **Arranque Silencioso en Segundo Plano (`scripts/lanzar-silencioso.vbs`):** Inicia el servidor Node.js en el puerto 3000 de forma completamente oculta, sin mostrar ventanas de consola (CMD) al usuario.
-- **Modo Aplicación (Kiosco):** Abre automáticamente la interfaz POS en una ventana aislada de Microsoft Edge (`--app=http://localhost:3000/caja/pos`) sin barras de navegación ni distracciones para el cajero.
-- **Preservación Inviolable de Datos:** La base de datos `caja.db` cuenta con la directiva `onlyifdoesntexist` en el instalador y backup preventivo antes de cada actualización, asegurando que jamás se borren ventas ni inventario. Al desinstalar, ofrece un diálogo para conservar el historial contable.
+- **Despliegue en Instancia AWS (`ecosystem.config.js`):** La aplicación se ejecuta en producción gestionada por **PM2** en modo `fork` (1 instancia para preservar el candado único de escritura WAL sobre `caja.db` y la memoria compartida de rate limiting e `INSTANCE_BOOT_ID`), con reinicio automático (`autorestart: true`) y límite de memoria (`max_memory_restart: '1G'`).
+- **Validación Estricta de Secretos en Arranque (`instrumentation.js` y `server/lib/secretos.js`):** Con `NODE_ENV=production`, el servidor valida que `SESSION_SECRET` (mínimo 32 caracteres aleatorios) y `DEVELOPER_PASSWORD` no sean valores por defecto ni marcadores de ejemplo antes de aceptar tráfico.
+- **Operación detrás de Proxy Inverso / Balanceador AWS (Nginx / ALB / CloudFront):**
+  - `TRUST_PROXY=true` habilita la lectura confiable de la IP real del cliente (`x-forwarded-for` / `x-real-ip`) para el rate limiting por IP.
+  - Detección automática de protocolo HTTPS mediante `x-forwarded-proto` para cookies de sesión seguras.
+- **Respaldo Atómico en Caliente (`scripts/backup.js`):** Permite ejecutar `npm run backup` mediante cron o demanda en el servidor AWS utilizando `VACUUM INTO` sin detener las ventas ni bloquear las lecturas concurrentes de las terminales conectadas.

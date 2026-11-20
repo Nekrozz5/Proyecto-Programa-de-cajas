@@ -1,5 +1,5 @@
 // ==========================================
-// CONFIGURACIÓN DE PM2 PARA PRODUCCIÓN LOCAL / SERVIDOR
+// CONFIGURACIÓN DE PM2 PARA PRODUCCIÓN EN AWS
 // ==========================================
 
 module.exports = {

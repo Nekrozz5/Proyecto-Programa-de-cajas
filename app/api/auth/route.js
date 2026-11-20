@@ -18,17 +18,23 @@ const HEADERS_SIN_CACHE = {
 };
 
 // IP del cliente para el límite de intentos de login.
-// Solo se confía en cf-connecting-ip (Cloudflare Tunnel) o x-real-ip (Proxy inverso)
-// cuando TRUST_PROXY=true. En cualquier otro caso se usa 'local'.
+// Solo se confía en x-forwarded-for / x-real-ip (AWS ALB / CloudFront / Nginx) o cf-connecting-ip
+// cuando TRUST_PROXY=true. En cualquier otro caso se usa 'default'.
 function obtenerIpCliente(request) {
     if (String(process.env.TRUST_PROXY || '').trim().toLowerCase() !== 'true') {
-        return 'local';
+        return 'default';
     }
-    const cfIp = String(request.headers.get('cf-connecting-ip') || '').trim();
-    if (cfIp) return cfIp.slice(0, 64);
+    const forwardedFor = String(request.headers.get('x-forwarded-for') || '').trim();
+    if (forwardedFor) {
+        const firstIp = forwardedFor.split(',')[0].trim();
+        if (firstIp) return firstIp.slice(0, 64);
+    }
 
     const realIp = String(request.headers.get('x-real-ip') || '').trim();
-    return realIp ? realIp.slice(0, 64) : 'local';
+    if (realIp) return realIp.slice(0, 64);
+
+    const cfIp = String(request.headers.get('cf-connecting-ip') || '').trim();
+    return cfIp ? cfIp.slice(0, 64) : 'default';
 }
 
 // GET /api/auth -> Consulta rápida del usuario en sesión activa

@@ -1,6 +1,6 @@
 {
   "name": "programa-cajas",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Sistema POS y Control de Cajas en AWS con Next.js y SQLite3",
   "scripts": {
     "test": "node tests/simulador_integral.js",

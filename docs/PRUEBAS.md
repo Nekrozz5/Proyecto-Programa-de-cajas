@@ -1,12 +1,12 @@
 # Checklist de Pruebas Funcionales y de Concurrencia
 
-Lista de verificación manual para validar arranque, seguridad, control de caja, stock atómico, arqueo ciego, recetas, modificadores, combos, régimen fiscal, pagos mixtos, Kardex dual cronológico, anulaciones, multicaja, reportes, notificaciones y actualizaciones seguras.
+Lista de verificación manual para validar arranque, seguridad, control de caja, stock atómico, arqueo ciego, recetas, modificadores, combos, régimen fiscal, pagos mixtos, Kardex dual cronológico, anulaciones, multicaja, reportes y notificaciones en AWS.
 
 ---
 
 ## 1. Arranque y Migraciones
 - [ ] Cierra y vuelve a correr `npm run dev`. No debe haber errores rojos en la terminal.
-- [ ] Reinícialo una segunda vez: las migraciones no deben volver a ejecutarse ni arrojar errores (`PRAGMA user_version` controlado hasta v11).
+- [ ] Reinícialo una segunda vez: las migraciones no deben volver a ejecutarse ni arrojar errores (`PRAGMA user_version` controlado hasta v17).
 
 ## 2. Seguridad y Sesión
 - [ ] Inicia sesión con una clave correcta y luego con una incorrecta. Después de 5 fallos seguidos debe bloquear temporalmente por rate limiting.
@@ -69,15 +69,12 @@ Lista de verificación manual para validar arranque, seguridad, control de caja,
 - [ ] Cierra un turno como cajero: confirma que la respuesta en pantalla sea inmediata (no se quede congelada esperando al servidor de correo) y que en la casilla del destinatario se reciba el correo con la plantilla ejecutiva y el archivo `Reporte_Turno_XX.xlsx` adjunto.
 - [ ] En `/admin`, selecciona un turno cerrado en el historial y presiona **"Reenviar reporte por correo"**: comprueba que el correo se envíe de nuevo con el archivo Excel correspondiente.
 
-## 11. Blindaje Multi-Dispositivo, Operación Dual y Actualizaciones
-- [ ] **Operación Dual (HTTP local + HTTPS remoto):**
-  - Inicia sesión localmente en `http://localhost:3000` (o red LAN): la cookie de sesión debe establecerse y funcionar fluidamente sin requerir SSL.
-  - Conéctate en simultáneo por HTTPS (vía Cloudflare Tunnel): la cookie de sesión debe adoptar `secure: true` adaptativamente por protocolo y permitir operar en paralelo.
-  - Comprueba que las respuestas de `/api/caja` incluyan encabezados `Cache-Control: no-store` para impedir que navegadores de distintas máquinas almacenen estados de caja desactualizados.
+## 11. Blindaje Multi-Dispositivo y Operación en la Nube (AWS)
+- [ ] **Cookies Adaptativas y Sincronización sin Caché:**
+  - Conéctate por HTTPS en producción (AWS): la cookie de sesión debe adoptar `secure: true` automáticamente según `x-forwarded-proto` y permitir operar múltiples terminales en paralelo.
+  - Comprueba que las respuestas de `/api/caja` incluyan encabezados `Cache-Control: no-store` para impedir que navegadores de distintas terminales almacenen estados de caja desactualizados.
 - [ ] **Blindaje contra traducción automática:**
   - En Google Chrome, activa la traducción automática de páginas: comprueba que las directivas `notranslate` en `app/layout.js` eviten rupturas en el reconciliador del DOM de React en las pantallas de cobro y administración.
-- [ ] **Actualización segura automatizada (`npm run update`):**
-  - Ejecuta `npm run update`: comprueba que el script realice un respaldo preventivo de `caja.db` en `backups/`, sincronice el código con `git pull --ff-only`, instale dependencias con `npm ci` y recompile con `npm run build` de forma limpia.
 
 ## 12. Grupos de Modificadores, Reemplazos y Complementos de Recetas (v7)
 - [ ] **Configuración en Administrador (`/admin`):**
@@ -143,19 +140,8 @@ Lista de verificación manual para validar arranque, seguridad, control de caja,
 - [ ] **Validación del Código Temporal:** En el modal de verificación, ingresa el código recibido. Verifica que el estado del destinatario cambie a "Verificado" y quede habilitado para recibir los reportes de turno.
 - [ ] **Protección contra Intentos Inválidos:** Ingresa un código erróneo: comprueba que el sistema incremente el contador de intentos fallidos y rechace la activación.
 
-## 21. Jerarquía de Roles y Propietario (v16)
+## 21. Jerarquía de Roles y Propietario (v16-v17)
 - [ ] **Identidad del Propietario:** Inicia sesión con la cuenta principal del negocio: verifica que en la barra de navegación se identifique con el rol "Propietario(a)".
-- [ ] **Diferenciación de Permisos:** Comprueba que el usuario con rol `propietario` cuente con acceso total a todas las funciones contables, de configuración fiscal y gestión de licencias.
+- [ ] **Diferenciación de Permisos:** Comprueba que el usuario con rol `propietario` cuente con acceso total a todas las funciones contables, de configuración fiscal y activación del servicio de delivery.
 - [ ] **Restricción de Perfil Developer:** Confirma que el perfil `developer` continúe protegido y no pueda ser creado ni modificado desde el formulario estándar de creación de usuarios de caja.
-
-## 22. Licenciamiento Criptográfico Asimétrico Offline (Ed25519)
-- [ ] **Generación de Clave de Activación:** Ejecuta `npm run licencia -- emitir --negocio "Mi Cafetería" --vence "2028-12-31" --cajas 2`. Verifica que se genere una clave válida con el prefijo `POS-ACT-`.
-- [ ] **Validación Matemática Offline:** Ejecuta la verificación de la clave generada con `npm run licencia -- verificar --clave "<clave_generada>"`. Debe reportar firma válida, coincidencia de negocio y fecha de expiración correcta.
-- [ ] **Rechazo de Clave Manipulada:** Altera un único carácter del payload o la firma: comprueba que la verificación matemática falle de inmediato rechazando la licencia por manipulación criptográfica.
-
-## 23. Instalador de Escritorio Windows y Despliegue Silencioso
-- [ ] **Preparación de Distribución:** Ejecuta `npm run dist:prepare` y comprueba que la carpeta `dist/` contenga todos los artefactos requeridos (Next compilado, scripts, base de datos y recursos públicos).
-- [ ] **Instalación en Windows:** Ejecuta el instalador generado con Inno Setup (`Setup-POS-Cajas-v1.0.exe`): comprueba que cree los accesos directos en Escritorio y Menú Inicio.
-- [ ] **Arranque en Segundo Plano:** Haz doble clic en el acceso directo del Escritorio: verifica que el servidor arranque silenciosamente vía `lanzar-silencioso.vbs` y se abra la ventana de cobro en modo app de Microsoft Edge sin mostrar ventanas de consola negras.
-- [ ] **Detención Ordenada:** Ejecuta el acceso directo "Detener Servidor POS": confirma que el proceso Node.js se termine limpiamente liberando el puerto 3000.
 

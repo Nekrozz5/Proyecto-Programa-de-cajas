@@ -1,4 +1,4 @@
-# Contexto del Proyecto: Sistema POS y Control de Cajas Híbrido
+# Contexto del Proyecto: Sistema POS y Control de Cajas (Cloud / AWS)
 
 ## 0. Protocolo de Entrada Obligatorio: Verificación de Modelo y Fases [GATEWAY-CHECK]
 Ante **CUALQUIER** solicitud de investigación, análisis, planificación, nueva funcionalidad o refactorización, la IA debe ejecutar este protocolo como primer paso ineludible:

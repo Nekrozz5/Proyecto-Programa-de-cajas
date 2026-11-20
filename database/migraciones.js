@@ -1377,18 +1377,6 @@ const MIGRACIONES = [
     },
     {
         version: 17,
-        descripcion: 'Persistencia de metadatos de licencia Ed25519 (clave, id, plan, límite de cajas, vencimiento y MachineId)',
-        up: async (conn) => {
-            await agregarColumnaSiNoExiste(conn, 'configuracion_negocio', 'licencia_clave', "TEXT DEFAULT ''");
-            await agregarColumnaSiNoExiste(conn, 'configuracion_negocio', 'licencia_id', "TEXT DEFAULT ''");
-            await agregarColumnaSiNoExiste(conn, 'configuracion_negocio', 'licencia_plan', "TEXT DEFAULT 'completo'");
-            await agregarColumnaSiNoExiste(conn, 'configuracion_negocio', 'licencia_max_cajas', 'INTEGER DEFAULT 10');
-            await agregarColumnaSiNoExiste(conn, 'configuracion_negocio', 'licencia_expira', 'TEXT DEFAULT NULL');
-            await agregarColumnaSiNoExiste(conn, 'configuracion_negocio', 'licencia_machine_id', "TEXT DEFAULT ''");
-        }
-    },
-    {
-        version: 18,
         descripcion: 'Incorporación de la columna habilita_delivery en configuracion_negocio para control de servicio de delivery por rol propietario',
         up: async (conn) => {
             await agregarColumnaSiNoExiste(conn, 'configuracion_negocio', 'habilita_delivery', 'INTEGER DEFAULT 0');
