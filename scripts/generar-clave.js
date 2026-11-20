@@ -71,8 +71,7 @@ function parsearArgs() {
         vitalicia: false,
         universal: false,
         plan: 'completo',
-        cajas: null,
-        equipo: null
+        cajas: null
     };
 
     for (let i = 0; i < args.length; i++) {
@@ -95,8 +94,6 @@ function parsearArgs() {
                 const num = parseInt(val, 10);
                 opciones.cajas = Number.isFinite(num) && num > 0 ? num : 2;
             }
-        } else if (arg === '--equipo' && args[i + 1]) {
-            opciones.equipo = String(args[++i]).trim();
         }
     }
     return opciones;
@@ -163,23 +160,17 @@ async function modoInteractivo(privateKeyPem) {
         ? 0
         : (parseInt(cajasNorm, 10) || 2);
 
-    // 5. Vinculación a Equipo (Machine ID)
-    console.log('\n5️⃣  VINCULACIÓN A EQUIPO (HARDWARE):');
-    console.log('   (Ingresa POS-HW-XXXX-XXXX para bloquear a una PC específica o Enter para cualquier equipo)');
-    const equipo = await preguntar(rl, '   ➤ ID de Equipo (o Enter para universal)', '*');
-
     rl.close();
 
     return generarYMostrar({
         negocio,
         dias: diasValidez,
         plan,
-        cajas,
-        equipo
+        cajas
     }, privateKeyPem);
 }
 
-function generarYMostrar({ negocio, dias, plan, cajas = 2, equipo = '*' }, privateKeyPem) {
+function generarYMostrar({ negocio, dias, plan, cajas = 2 }, privateKeyPem) {
     const fechaCreacion = new Date();
     let fechaExpira = null;
 
@@ -190,9 +181,6 @@ function generarYMostrar({ negocio, dias, plan, cajas = 2, equipo = '*' }, priva
     const maxCajas = cajas === 0
         ? 0
         : (Number.isFinite(Number(cajas)) && Number(cajas) > 0 ? Math.floor(Number(cajas)) : 2);
-    const equipoLimpio = equipo && String(equipo).trim() !== '' && String(equipo).trim() !== '*'
-        ? String(equipo).trim().toUpperCase()
-        : '*';
 
     const payload = {
         v: 1, // Versión del esquema de licencias
@@ -200,7 +188,6 @@ function generarYMostrar({ negocio, dias, plan, cajas = 2, equipo = '*' }, priva
         negocio: negocio && negocio !== '*' ? negocio.trim() : '*',
         plan: plan || 'completo',
         cajas: maxCajas,
-        equipo: equipoLimpio,
         creado: fechaCreacion.toISOString(),
         expira: fechaExpira
     };
@@ -214,7 +201,6 @@ function generarYMostrar({ negocio, dias, plan, cajas = 2, equipo = '*' }, priva
     console.log(`   🏢  Establecimiento      : ${payload.negocio === '*' ? 'Universal (Cualquier negocio)' : payload.negocio}`);
     console.log(`   📦  Edición / Plan        : ${payload.plan === 'completo' ? 'Completo (Todas las funciones)' : 'Estándar'}`);
     console.log(`   🖥️  Máximo de Cajas       : ${payload.cajas === 0 ? 'Ilimitadas' : payload.cajas}`);
-    console.log(`   🔒  Equipo Autorizado     : ${payload.equipo === '*' ? 'Universal (Cualquier equipo)' : payload.equipo}`);
     console.log(`   📅  Fecha de Emisión     : ${fechaCreacion.toLocaleDateString('es-ES')}`);
     console.log(`   ⏳  Vencimiento          : ${formatearFecha(fechaExpira)}\n`);
 
@@ -235,14 +221,13 @@ async function main() {
     const privateKeyPem = asegurarLlaves();
     const args = parsearArgs();
 
-    const hayArgumentos = args.negocio || args.dias || args.vitalicia || args.universal || args.cajas !== null || args.equipo !== null;
+    const hayArgumentos = args.negocio || args.dias || args.vitalicia || args.universal || args.cajas !== null;
 
     if (hayArgumentos) {
         const negocio = args.universal ? '*' : (args.negocio || '*');
         const dias = args.vitalicia ? null : (args.dias || null);
         const cajas = args.cajas !== null ? args.cajas : 2;
-        const equipo = args.equipo || '*';
-        generarYMostrar({ negocio, dias, plan: args.plan, cajas, equipo }, privateKeyPem);
+        generarYMostrar({ negocio, dias, plan: args.plan, cajas }, privateKeyPem);
     } else {
         await modoInteractivo(privateKeyPem);
     }

@@ -18,16 +18,13 @@ import {
     Coffee, 
     ArrowLeft, 
     ArrowRight,
-    Mail,
-    Copy
+    Mail
 } from 'lucide-react';
 
 export default function HomePage() {
     const [cargando, setCargando] = useState(true);
     const [config, setConfig] = useState(null);
     const [sistemaInstalado, setSistemaInstalado] = useState(false);
-    const [machineId, setMachineId] = useState('');
-    const [copiado, setCopiado] = useState(false);
 
     // Estado del Asistente de Primera Ejecución (4 pasos)
     const [paso, setPaso] = useState(1); // 1: Modalidad | 2: Configuración Empresa/Fiscal | 3: Crear Propietario(a) | 4: Notificaciones Correo
@@ -63,9 +60,6 @@ export default function HomePage() {
             if (res.ok) {
                 setConfig(data.configuracionNegocio || null);
                 setSistemaInstalado(Boolean(data.sistemaInstalado));
-                if (data.machineId) {
-                    setMachineId(data.machineId);
-                }
             }
         } catch (err) {
             setError(err.message);
@@ -569,45 +563,6 @@ export default function HomePage() {
                                             onChange={(e) => setAdminPin(e.target.value)}
                                             className="h-11"
                                         />
-                                    </div>
-
-                                    <div className="p-4 rounded-xl bg-slate-900 text-white space-y-2.5">
-                                        <div className="flex items-center justify-between gap-2 flex-wrap">
-                                            <span className="text-xs uppercase font-semibold text-sky-400 tracking-wider">
-                                                ID de Equipo (Hardware ID)
-                                            </span>
-                                            <Button
-                                                type="button"
-                                                size="sm"
-                                                variant="outline"
-                                                onClick={() => {
-                                                    if (machineId) {
-                                                        navigator.clipboard.writeText(machineId);
-                                                        setCopiado(true);
-                                                        setTimeout(() => setCopiado(false), 2000);
-                                                    }
-                                                }}
-                                                className="h-7 px-2.5 text-xs bg-slate-800 hover:bg-slate-700 text-white border-slate-700"
-                                            >
-                                                {copiado ? (
-                                                    <>
-                                                        <Check className="w-3.5 h-3.5 mr-1 text-emerald-400" />
-                                                        <span>Copiado</span>
-                                                    </>
-                                                ) : (
-                                                    <>
-                                                        <Copy className="w-3.5 h-3.5 mr-1" />
-                                                        <span>Copiar ID</span>
-                                                    </>
-                                                )}
-                                            </Button>
-                                        </div>
-                                        <div className="font-mono text-sm tracking-widest bg-slate-950/80 px-3 py-2 rounded-lg border border-slate-800 text-sky-300 font-bold select-all">
-                                            {machineId || 'Obteniendo identificador del equipo...'}
-                                        </div>
-                                        <p className="text-xs text-slate-400 leading-relaxed">
-                                            Copia y proporciona este identificador único al proveedor para solicitar tu clave de activación del producto para este equipo.
-                                        </p>
                                     </div>
 
                                     <div className="space-y-1.5">

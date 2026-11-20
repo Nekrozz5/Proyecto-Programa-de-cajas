@@ -270,7 +270,7 @@ El sistema implementa una arquitectura en capas limpias que separa la interfaz v
 
 ## 8. Distribución de Escritorio para Windows y Arquitectura Híbrida
 
-- **Empaquetado Nativo con Inno Setup (`installer/pos-cajas.iss`):** Compila un instalador ejecutable (`Setup-POS-Cajas-v1.5.0.exe`) con compresión sólida LZMA2 que instala el servidor local, dependencias nativas y crea los accesos directos necesarios.
+- **Empaquetado Nativo con Inno Setup (`installer/pos-cajas.iss`):** Compila un instalador ejecutable (`Setup-POS-Cajas-v1.5.1.exe`) con compresión sólida LZMA2 que instala el servidor local, dependencias nativas y crea los accesos directos necesarios.
 - **Arquitectura 100% Autónoma (Plug & Play):**
   - **Motor Node.js Embebido (`bin/node.exe`):** Se empaqueta un runtime portable local que elimina la necesidad de preinstalar Node.js en Windows.
   - **Microsoft Visual C++ Redistributable (`redist/vc_redist.x64.exe`):** Inno Setup verifica en el registro de Windows si las DLLs nativas (`msvcp140.dll` y `vcruntime140.dll`) están presentes; si no existen (PC virgen de fábrica), las instala silenciosamente en segundo plano.

@@ -32,7 +32,6 @@ import {
     adjuntarCookieSesion
 } from '../../../server/lib/sesion';
 import { verificarEstadoEmail } from '../../../server/lib/mailer';
-import { obtenerMachineId } from '../../../server/lib/licencia';
 
 export const dynamic = 'force-dynamic';
 
@@ -60,7 +59,6 @@ export async function GET(request) {
                 usuarioSesion: null,
                 sistemaInstalado,
                 configuracionNegocio,
-                machineId: obtenerMachineId(),
                 usuarios,
                 categorias,
                 cajasFisicas: [],
@@ -121,7 +119,6 @@ export async function GET(request) {
                 usuarioSesion: usuarioSesionEnriquecido,
                 sistemaInstalado,
                 configuracionNegocio,
-                machineId: obtenerMachineId(),
                 cajasFisicas,
                 cajasAbiertas,
                 cajaAbierta: null,
@@ -154,7 +151,6 @@ export async function GET(request) {
             usuarioSesion: usuarioSesionEnriquecido,
             sistemaInstalado,
             configuracionNegocio,
-            machineId: obtenerMachineId(),
             cajasFisicas,
             cajasAbiertas,
             cajaAbierta: cajaActiva,

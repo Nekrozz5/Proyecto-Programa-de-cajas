@@ -9,7 +9,7 @@ const { runQuery, getQuery, allQuery, enTransaccion, redondear2, numeroNoNegativ
 const { obtenerUsuarioPorId, obtenerUsuarios, crearUsuario, esRolAdministrativo } = require('./auth.repo');
 const { obtenerSetupTokenValido } = require('../secretos');
 const { normalizarRegimen } = require('../domain/fiscal');
-const { verificarClaveActivacion, obtenerMachineId, PREFIJO_CLAVE } = require('../lib/licencia');
+const { verificarClaveActivacion, PREFIJO_CLAVE } = require('../lib/licencia');
 
 async function obtenerConfiguracionNegocio() {
     let config = await getQuery(`SELECT * FROM configuracion_negocio WHERE id = 1`);
@@ -175,9 +175,7 @@ async function inicializarSistemaPrimeraVez(datos = {}) {
         ? Math.max(0, Math.floor(Number(payloadLicencia.cajas)))
         : 10;
     const licenciaExpira = payloadLicencia?.expira ? String(payloadLicencia.expira) : null;
-    const licenciaMachineId = payloadLicencia?.equipo && String(payloadLicencia.equipo).trim() !== '' && String(payloadLicencia.equipo).trim() !== '*'
-        ? String(payloadLicencia.equipo).trim().toUpperCase()
-        : obtenerMachineId();
+    const licenciaMachineId = '';
 
     const esPlanEstandar = licenciaPlan === 'estandar';
     const usaVencimientoFinal = esPlanEstandar ? 0 : (datos.usaVencimiento ? 1 : 0);
