@@ -9,7 +9,7 @@ const { runQuery, getQuery, allQuery, enTransaccion, redondear2, numeroNoNegativ
 const { obtenerUsuarioPorId, obtenerUsuarios, crearUsuario, esRolAdministrativo } = require('./auth.repo');
 const { obtenerSetupTokenValido } = require('../secretos');
 const { normalizarRegimen } = require('../domain/fiscal');
-const { verificarClaveActivacion, PREFIJO_CLAVE } = require('../lib/licencia');
+const { verificarClaveActivacion, obtenerMachineId, PREFIJO_CLAVE } = require('../lib/licencia');
 
 async function obtenerConfiguracionNegocio() {
     let config = await getQuery(`SELECT * FROM configuracion_negocio WHERE id = 1`);
@@ -159,7 +159,7 @@ async function sistemaEstaInstalado(configuracion = null) {
 }
 
 async function inicializarSistemaPrimeraVez(datos = {}) {
-    validarTokenInstalacion(datos.setupToken, datos.nombreNegocio);
+    const payloadLicencia = validarTokenInstalacion(datos.setupToken, datos.nombreNegocio);
 
     if (!datos.nombreNegocio || !String(datos.nombreNegocio).trim()) {
         throw new Error('Debes ingresar el nombre de la empresa o negocio.');
@@ -167,6 +167,28 @@ async function inicializarSistemaPrimeraVez(datos = {}) {
 
     // Asegura que exista la fila singleton antes de abrir la transacción
     await obtenerConfiguracionNegocio();
+
+    const licenciaClave = payloadLicencia ? String(datos.setupToken || '').trim() : '';
+    const licenciaId = payloadLicencia?.id ? String(payloadLicencia.id).trim() : '';
+    const licenciaPlan = payloadLicencia?.plan === 'estandar' ? 'estandar' : 'completo';
+    const licenciaMaxCajas = payloadLicencia && payloadLicencia.cajas !== undefined && payloadLicencia.cajas !== null && Number.isFinite(Number(payloadLicencia.cajas))
+        ? Math.max(0, Math.floor(Number(payloadLicencia.cajas)))
+        : 10;
+    const licenciaExpira = payloadLicencia?.expira ? String(payloadLicencia.expira) : null;
+    const licenciaMachineId = payloadLicencia?.equipo && String(payloadLicencia.equipo).trim() !== '' && String(payloadLicencia.equipo).trim() !== '*'
+        ? String(payloadLicencia.equipo).trim().toUpperCase()
+        : obtenerMachineId();
+
+    const esPlanEstandar = licenciaPlan === 'estandar';
+    const usaVencimientoFinal = esPlanEstandar ? 0 : (datos.usaVencimiento ? 1 : 0);
+    const usaRecetasFinal = esPlanEstandar ? 0 : (datos.usaRecetasEnsamblaje ? 1 : 0);
+    const nitNegocio = datos.nitNegocio !== undefined ? String(datos.nitNegocio || '').trim() : '';
+    const regimenTributario = datos.regimenTributario
+        ? normalizarRegimen(datos.regimenTributario)
+        : 'simplificado_control_interno';
+    const emiteFactura = regimenTributario === 'simplificado_control_interno'
+        ? 0
+        : (datos.emiteFactura !== undefined ? (datos.emiteFactura ? 1 : 0) : 1);
 
     let infoEmail = null;
 
@@ -186,17 +208,45 @@ async function inicializarSistemaPrimeraVez(datos = {}) {
                  usa_vencimiento = ?,
                  usa_recetas_ensamblaje = ?,
                  habilita_apps_comida = ?,
+                 nit_negocio = ?,
+                 regimen_tributario = ?,
+                 emite_factura = ?,
+                 licencia_clave = ?,
+                 licencia_id = ?,
+                 licencia_plan = ?,
+                 licencia_max_cajas = ?,
+                 licencia_expira = ?,
+                 licencia_machine_id = ?,
                  configurado = 1
              WHERE id = 1`,
             [
                 String(datos.nombreNegocio).trim(),
                 datos.modalidadNombre || 'Venta Directa No Perecedera',
                 datos.usaStockDirecto ? 1 : 0,
-                datos.usaVencimiento ? 1 : 0,
-                datos.usaRecetasEnsamblaje ? 1 : 0,
-                datos.habilitaAppsComida ? 1 : 0
+                usaVencimientoFinal,
+                usaRecetasFinal,
+                datos.habilitaAppsComida ? 1 : 0,
+                nitNegocio,
+                regimenTributario,
+                emiteFactura,
+                licenciaClave,
+                licenciaId,
+                licenciaPlan,
+                licenciaMaxCajas,
+                licenciaExpira,
+                licenciaMachineId
             ]
         );
+
+        if (datos.nombreCajaInicial && String(datos.nombreCajaInicial).trim().length >= 2) {
+            const nombreCaja = String(datos.nombreCajaInicial).trim();
+            const primeraCaja = await getQuery(`SELECT id FROM cajas_fisicas ORDER BY id ASC LIMIT 1`);
+            if (primeraCaja) {
+                await runQuery(`UPDATE cajas_fisicas SET nombre = ? WHERE id = ?`, [nombreCaja, primeraCaja.id]);
+            } else {
+                await runQuery(`INSERT INTO cajas_fisicas (nombre, activa) VALUES (?, 1)`, [nombreCaja]);
+            }
+        }
 
         let adminId;
         if (usuariosExistentes.length > 0) {
@@ -483,6 +533,58 @@ async function eliminarDestinatario(id) {
     return res.changes > 0;
 }
 
+function parsearFechaUtcSqlite(valor) {
+    if (!valor) return null;
+    const str = String(valor).trim();
+    if (!str) return null;
+    if (str.includes('T') || str.endsWith('Z') || /[+-]\d{2}:\d{2}$/.test(str)) {
+        const ms = Date.parse(str);
+        return Number.isFinite(ms) ? ms : null;
+    }
+    const ms = Date.parse(`${str.replace(' ', 'T')}Z`);
+    return Number.isFinite(ms) ? ms : null;
+}
+
+async function verificarVigenciaLicenciaYReloj() {
+    const config = await obtenerConfiguracionNegocio();
+
+    // (a) Validar expiración de la licencia persistida
+    if (config?.licencia_expira) {
+        const expiraMs = Date.parse(config.licencia_expira);
+        if (Number.isFinite(expiraMs) && Date.now() > expiraMs) {
+            const err = new Error(
+                `Tu licencia venció el ${new Date(expiraMs).toLocaleDateString('es-ES')}. Contacta al proveedor para renovarla.`
+            );
+            err.status = 403;
+            throw err;
+        }
+    }
+
+    // (b) Protección anti-retroceso de reloj (tolerancia de 15 minutos frente a la última actividad de cajas)
+    const ultimaActividad = await getQuery(
+        `SELECT MAX(fecha_apertura) AS max_apertura, MAX(fecha_cierre) AS max_cierre FROM cajas`
+    );
+    const maxAperturaMs = parsearFechaUtcSqlite(ultimaActividad?.max_apertura) || 0;
+    const maxCierreMs = parsearFechaUtcSqlite(ultimaActividad?.max_cierre) || 0;
+    const maxMarcaMs = Math.max(maxAperturaMs, maxCierreMs);
+    const TOLERANCIA_RELOJ_MS = 15 * 60 * 1000;
+
+    if (maxMarcaMs > 0 && Date.now() < maxMarcaMs - TOLERANCIA_RELOJ_MS) {
+        const err = new Error(
+            'Se detectó un retroceso en el reloj del sistema respecto a los turnos registrados. Corrige la fecha y hora del equipo para continuar.'
+        );
+        err.status = 403;
+        throw err;
+    }
+
+    return {
+        valida: true,
+        plan: config?.licencia_plan || 'completo',
+        maxCajas: config?.licencia_max_cajas ?? 10,
+        expira: config?.licencia_expira || null
+    };
+}
+
 module.exports = {
     obtenerConfiguracionNegocio,
     guardarConfiguracionNegocio,
@@ -490,6 +592,7 @@ module.exports = {
     validarTokenInstalacion,
     sistemaEstaInstalado,
     inicializarSistemaPrimeraVez,
+    verificarVigenciaLicenciaYReloj,
     obtenerConfiguracionSmtp,
     guardarConfiguracionSmtp,
     listarDestinatariosNotificaciones,

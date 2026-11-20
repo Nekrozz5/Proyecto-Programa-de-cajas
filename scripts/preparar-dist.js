@@ -6,6 +6,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const child_process = require('child_process');
 
 const ROOT_DIR = path.resolve(__dirname, '..');
 const DIST_DIR = path.resolve(ROOT_DIR, 'dist');
@@ -142,6 +143,23 @@ function validarRequisitos() {
     const nodeBinPath = path.join(ROOT_DIR, 'bin', 'node.exe');
     if (fs.existsSync(nodeBinPath)) {
         logOk(`Motor Node.js portable embebido verificado (bin/node.exe)`);
+        // Validar coincidencia de ABI con el binario nativo better-sqlite3
+        try {
+            const probe = child_process.spawnSync(nodeBinPath, ['-e', "require('./node_modules/better-sqlite3')"], {
+                cwd: ROOT_DIR,
+                encoding: 'utf8'
+            });
+            if (probe.status === 0) {
+                logOk(`Coincidencia de ABI de better-sqlite3 con bin/node.exe verificada exitosamente.`);
+            } else {
+                const detalleError = (probe.stderr || probe.stdout || '').trim();
+                logError(`Incompatibilidad de ABI detectada entre bin/node.exe y better-sqlite3: ${detalleError}`);
+                errores++;
+            }
+        } catch (err) {
+            logError(`Error al verificar ABI con bin/node.exe: ${err.message}`);
+            errores++;
+        }
     } else {
         logWarn(`No se encontró 'bin/node.exe'. La distribución dependerá del Node.js global del sistema.`);
         advertencias++;
@@ -170,6 +188,20 @@ function recolectarArchivos() {
         fs.mkdirSync(DIST_DIR, { recursive: true });
     }
 
+    // Sanitización previa: asegurar que dist/ no contenga bases de datos ni archivos .env de desarrollo
+    const archivosSanitizar = ['caja.db', 'caja.db-wal', 'caja.db-shm', '.env.local', '.env.production'];
+    for (const archivo of archivosSanitizar) {
+        const rutaEliminar = path.join(DIST_DIR, archivo);
+        if (fs.existsSync(rutaEliminar)) {
+            try {
+                fs.rmSync(rutaEliminar, { force: true });
+                logWarn(`Sanitizado archivo de desarrollo eliminado de dist/: ${archivo}`);
+            } catch (err) {
+                logWarn(`No se pudo eliminar ${archivo} de dist/: ${err.message}`);
+            }
+        }
+    }
+
     // Crear subcarpetas requeridas
     const subcarpetas = ['scripts', 'database', 'server', 'public', 'backups'];
     for (const sub of subcarpetas) {
@@ -189,16 +221,9 @@ function recolectarArchivos() {
         }
     }
 
-    // Copiar entorno si existe (.env.production o .env.local como referencia segura)
-    const envProd = path.join(ROOT_DIR, '.env.production');
-    const envLocal = path.join(ROOT_DIR, '.env.local');
-    if (fs.existsSync(envProd)) {
-        fs.copyFileSync(envProd, path.join(DIST_DIR, '.env.production'));
-        logOk(`Copiado: .env.production`);
-    } else if (fs.existsSync(envLocal)) {
-        fs.copyFileSync(envLocal, path.join(DIST_DIR, '.env.local'));
-        logOk(`Copiado: .env.local`);
-    }
+    // NOTA DE SEGURIDAD: Nunca copiamos .env.local, .env.production ni caja.db de desarrollo a dist/.
+    // El entorno seguro se genera automáticamente en destino con scripts/inicializar-entorno.js
+    // y la base de datos se inicializa limpia en la primera ejecución.
 
     // Copiar lanzadores y scripts de producción
     const scripts = ['iniciar-pos.bat', 'detener-pos.bat', 'lanzar-silencioso.vbs', 'iniciar-servidor.vbs', 'backup.js', 'inicializar-entorno.js'];
@@ -231,17 +256,8 @@ function recolectarArchivos() {
         logOk(`Build de Next.js copiado a dist/.next (100% limpio y optimizado)`);
     }
 
-    // Asegurar caja.db en dist (base de datos inicial o plantilla)
-    const srcDb = path.join(ROOT_DIR, 'caja.db');
-    const destDb = path.join(DIST_DIR, 'caja.db');
-    if (fs.existsSync(srcDb)) {
-        fs.copyFileSync(srcDb, destDb);
-        logOk(`Plantilla inicial de caja.db copiada a dist/caja.db`);
-    } else if (!fs.existsSync(destDb)) {
-        // Crear archivo vacío para que Inno Setup pueda referenciarlo
-        fs.writeFileSync(destDb, '');
-        logOk(`Archivo plantilla caja.db creado en dist/caja.db`);
-    }
+    // NOTA DE SEGURIDAD: Nunca copiamos caja.db existente hacia dist/.
+    // Inno Setup no debe arrastrar datos reales de clientes ni ventas locales de desarrollo.
 
     // Copiar motor Node.js portable embebido (bin/node.exe)
     const srcBin = path.join(ROOT_DIR, 'bin', 'node.exe');

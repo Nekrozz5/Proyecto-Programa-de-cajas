@@ -1,16 +1,18 @@
 ---
 name: phase-planner
 description: >-
-  Planifica avances, refactorizaciones y nuevas funcionalidades descomponiéndolas
-  en fases atómicas secuenciales con prompts quirúrgicos listos para copiar o ejecutar,
-  diseñados para maximizar el ahorro de tokens y eliminar alucinaciones.
+  Planifica avances, tareas de investigación técnica, diagnósticos, refactorizaciones
+  y nuevas funcionalidades descomponiéndolas en fases atómicas secuenciales con prompts
+  quirúrgicos, validación previa del modelo de IA y control estricto de tokens.
 ---
 
-# Skill: Phase Planner (Planificador por Fases Quirúrgicas)
+# Skill: Phase Planner (Planificador por Fases y Guardián de Modelos)
 
-Esta skill se activa cuando el usuario solicita planificar, descomponer o estructurar el desarrollo de una nueva funcionalidad, módulo, refactorización visual (ej. migración a Shadcn) o cambio de arquitectura.
+Esta skill se activa ante **cualquier solicitud de planificación, investigación técnica, diagnóstico, desarrollo de nuevas funcionalidades o refactorizaciones**.
 
-El objetivo principal es **dividir el trabajo en fases pequeñas e independientes**, generando para cada una un **Prompt Quirúrgico** que la IA pueda ejecutar sin desperdiciar tokens de contexto ni desbordar la ventana de atención.
+Su doble objetivo fundamental es:
+1. **Actuar como Guardián de Cuota y Modelo:** Verificar antes que nada qué modelo de IA y nivel de esfuerzo está activo en el chat, confirmando si es idóneo o recomendando el cambio antes de elaborar la respuesta.
+2. **Dividir el trabajo en fases atómicas e independientes:** Generar para cada fase un **Prompt Quirúrgico** para evitar el desperdicio de tokens y prevenir alucinaciones.
 
 ---
 

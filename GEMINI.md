@@ -1,5 +1,17 @@
 # Contexto del Proyecto: Sistema POS y Control de Cajas Híbrido
 
+## 0. Protocolo de Entrada Obligatorio: Verificación de Modelo y Fases [GATEWAY-CHECK]
+Ante **CUALQUIER** solicitud de investigación, análisis, planificación, nueva funcionalidad o refactorización, la IA debe ejecutar este protocolo como primer paso ineludible:
+1. **Paso 1 (Lectura Mandatoria):** Leer y aplicar las pautas de [`.agents/skills/phase-planner/SKILL.md`](.agents/skills/phase-planner/SKILL.md).
+2. **Paso 2 (Evaluación de Adecuación de Modelo y Esfuerzo):**
+   - Identificar el modelo activo en el chat y su nivel de razonamiento (`Low`, `Medium`, `High`, `XHigh`).
+   - Evaluar si el modelo actual es **idóneo**, **excesivo (quema tokens en vano)** o **insuficiente (riesgo de alucinación)** para la tarea solicitada.
+3. **Paso 3 (Confirmación Previa al Desarrollo):**
+   - **Si el modelo es idóneo:** Incluir obligatoriamente al inicio de la respuesta una breve confirmación:
+     > 🛡️ **[Validación de Modelo]:** *Confirmado: [Nombre del Modelo] ([Nivel]) es el modelo idóneo para esta tarea de [investigación/desarrollo/planificación].*
+     Y luego proceder inmediatamente con el desarrollo o desglose.
+   - **Si existe desajuste de modelo (Overkill o Underpowered):** **DETENERSE INMEDIATAMENTE**. No elaborar la solución en ese turno. Explicar al usuario por qué el modelo actual no es óptimo, sugerir la alternativa ideal (ej. cambiar a *Flash/Neon* para ahorrar cuota, o delegar a subagente `research`), y **solicitar confirmación expresa al usuario** antes de comenzar.
+
 ## 1. Arquitectura y Punteros de Contexto
 - **Stack Principal:** Next.js (App Router), Node.js, Tailwind CSS, Shadcn UI (`components/ui/`), SQLite3 local (`caja.db`) y Drizzle ORM (`database/schema.js`).
 - **Persistencia y Concurrencia:** SQLite en modo WAL (`PRAGMA journal_mode = WAL`), claves foráneas activas (`PRAGMA foreign_keys = ON`), timeout concurrente de 5000ms (`PRAGMA busy_timeout = 5000`) y ruta configurable vía `DATABASE_PATH` en `database/database.js`.

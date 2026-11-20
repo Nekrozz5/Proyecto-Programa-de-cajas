@@ -30,7 +30,13 @@ const configuracionNegocio = sqliteTable('configuracion_negocio', {
     ivaPorcentaje: real('iva_porcentaje').default(13),
     itPorcentaje: real('it_porcentaje').default(3),
     usaRespaldoComprasEgresos: integer('usa_respaldo_compras_egresos').default(1),
-    itBase: text('it_base').default('todas_las_ventas')
+    itBase: text('it_base').default('todas_las_ventas'),
+    licenciaClave: text('licencia_clave').default(''),
+    licenciaId: text('licencia_id').default(''),
+    licenciaPlan: text('licencia_plan').default('completo'),
+    licenciaMaxCajas: integer('licencia_max_cajas').default(10),
+    licenciaExpira: text('licencia_expira'),
+    licenciaMachineId: text('licencia_machine_id').default('')
 });
 
 // 2. Estaciones Físicas de Cobro

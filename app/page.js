@@ -18,30 +18,39 @@ import {
     Coffee, 
     ArrowLeft, 
     ArrowRight,
-    Mail
+    Mail,
+    Copy
 } from 'lucide-react';
 
 export default function HomePage() {
     const [cargando, setCargando] = useState(true);
     const [config, setConfig] = useState(null);
     const [sistemaInstalado, setSistemaInstalado] = useState(false);
+    const [machineId, setMachineId] = useState('');
+    const [copiado, setCopiado] = useState(false);
 
     // Estado del Asistente de Primera Ejecución (4 pasos)
-    const [paso, setPaso] = useState(1); // 1: Modalidad | 2: Nombre Empresa | 3: Crear Propietario(a) | 4: Notificaciones Correo
+    const [paso, setPaso] = useState(1); // 1: Modalidad | 2: Configuración Empresa/Fiscal | 3: Crear Propietario(a) | 4: Notificaciones Correo
     const [modalidadNombre, setModalidadNombre] = useState('Venta Directa de Artículos No Perecederos');
     const [usaStockDirecto, setUsaStockDirecto] = useState(true);
     const [usaVencimiento, setUsaVencimiento] = useState(false);
     const [usaRecetas, setUsaRecetas] = useState(false);
 
     const [nombreNegocio, setNombreNegocio] = useState('');
+    const [nombreCaja, setNombreCaja] = useState('Caja 1');
+    const [regimenTributario, setRegimenTributario] = useState('simplificado_control_interno');
+    const [nitNegocio, setNitNegocio] = useState('');
+
     const [adminNombre, setAdminNombre] = useState('');
     const [adminPin, setAdminPin] = useState('');
     const [setupToken, setSetupToken] = useState('');
 
-    // Configuración opcional de correo (Paso 4)
+    // Configuración opcional de correo (Paso 4) y prueba en vivo
     const [correoEmisor, setCorreoEmisor] = useState('');
     const [passwordApp, setPasswordApp] = useState('');
     const [correoDestinatario, setCorreoDestinatario] = useState('');
+    const [probandoSmtp, setProbandoSmtp] = useState(false);
+    const [smtpFeedback, setSmtpFeedback] = useState(null);
 
     const [error, setError] = useState(null);
     const [guardando, setGuardando] = useState(false);
@@ -54,6 +63,9 @@ export default function HomePage() {
             if (res.ok) {
                 setConfig(data.configuracionNegocio || null);
                 setSistemaInstalado(Boolean(data.sistemaInstalado));
+                if (data.machineId) {
+                    setMachineId(data.machineId);
+                }
             }
         } catch (err) {
             setError(err.message);
@@ -90,6 +102,56 @@ export default function HomePage() {
         }
     }
 
+    async function probarConexionSmtp() {
+        setError(null);
+        setSmtpFeedback(null);
+        const emisorLimpio = correoEmisor.trim();
+        const passLimpio = passwordApp.trim();
+
+        if (!emisorLimpio || !passLimpio) {
+            setSmtpFeedback({
+                tipo: 'error',
+                mensaje: 'Ingresa el correo emisor y la contraseña de aplicación para realizar la prueba.'
+            });
+            return;
+        }
+
+        setProbandoSmtp(true);
+        try {
+            const res = await fetch('/api/auth', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    accion: 'probar_smtp_instalacion',
+                    host: 'smtp.gmail.com',
+                    puerto: 465,
+                    secure: true,
+                    usuario: emisorLimpio,
+                    password: passLimpio
+                })
+            });
+            const data = await res.json();
+            if (res.ok && data.ok) {
+                setSmtpFeedback({
+                    tipo: 'exito',
+                    mensaje: data.mensaje || 'Conexión SMTP exitosa.'
+                });
+            } else {
+                setSmtpFeedback({
+                    tipo: 'error',
+                    mensaje: data.error || 'No se pudo conectar al servidor SMTP.'
+                });
+            }
+        } catch (err) {
+            setSmtpFeedback({
+                tipo: 'error',
+                mensaje: err.message || 'Error de red al probar conexión SMTP.'
+            });
+        } finally {
+            setProbandoSmtp(false);
+        }
+    }
+
     async function finalizarInstalacion(e, omitirCorreo = false) {
         if (e && e.preventDefault) e.preventDefault();
         setError(null);
@@ -98,6 +160,9 @@ export default function HomePage() {
             const payload = {
                 accion: 'instalacion_inicial',
                 nombreNegocio,
+                nombreCaja: nombreCaja.trim() || 'Caja 1',
+                regimenTributario,
+                nit: nitNegocio.trim() || null,
                 modalidadNombre,
                 usaStockDirecto,
                 usaVencimiento,
@@ -344,15 +409,15 @@ export default function HomePage() {
                             </div>
                         )}
 
-                        {/* PASO 2: NOMBRE DE LA EMPRESA */}
+                        {/* PASO 2: NOMBRE DE LA EMPRESA, CAJA Y RÉGIMEN FISCAL */}
                         {paso === 2 && (
                             <div className="space-y-6">
                                 <div>
                                     <h2 className="text-lg font-semibold text-slate-800">
-                                        Paso 2: Nombre de tu Empresa o Negocio
+                                        Paso 2: Datos de la Empresa, Caja y Régimen Fiscal
                                     </h2>
                                     <p className="text-sm text-slate-500 mt-1">
-                                        Este nombre aparecerá en el encabezado del sistema y en los reportes de control.
+                                        Configura el nombre del establecimiento, la estación física inicial y el esquema tributario.
                                     </p>
                                 </div>
 
@@ -367,6 +432,81 @@ export default function HomePage() {
                                         onChange={(e) => setNombreNegocio(e.target.value)}
                                         className="h-11"
                                     />
+                                </div>
+
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div className="space-y-1.5">
+                                        <label className="text-sm font-semibold text-slate-700">
+                                            Nombre de la Caja Principal:
+                                        </label>
+                                        <Input
+                                            type="text"
+                                            placeholder="Ej. Caja 1"
+                                            value={nombreCaja}
+                                            onChange={(e) => setNombreCaja(e.target.value)}
+                                            className="h-11"
+                                        />
+                                        <p className="text-[11px] text-slate-500">
+                                            Identificador de la primera estación de cobro o terminal física.
+                                        </p>
+                                    </div>
+
+                                    <div className="space-y-1.5">
+                                        <label className="text-sm font-semibold text-slate-700">
+                                            NIT del Negocio (Opcional):
+                                        </label>
+                                        <Input
+                                            type="text"
+                                            placeholder="Ej. 1023456789"
+                                            value={nitNegocio}
+                                            onChange={(e) => setNitNegocio(e.target.value)}
+                                            className="h-11"
+                                        />
+                                        <p className="text-[11px] text-slate-500">
+                                            Número de Identificación Tributaria para comprobantes.
+                                        </p>
+                                    </div>
+                                </div>
+
+                                <div className="space-y-2">
+                                    <label className="text-sm font-semibold text-slate-700">
+                                        Régimen Tributario:
+                                    </label>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                        <button
+                                            type="button"
+                                            onClick={() => setRegimenTributario('simplificado_control_interno')}
+                                            className={`flex flex-col text-left p-3.5 rounded-lg border transition-all ${
+                                                regimenTributario === 'simplificado_control_interno'
+                                                    ? 'border-primary bg-sky-50/50 shadow-sm ring-1 ring-primary'
+                                                    : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50/50'
+                                            }`}
+                                        >
+                                            <span className="font-semibold text-slate-900 text-sm">
+                                                Régimen Simplificado / Control Interno
+                                            </span>
+                                            <span className="text-xs text-slate-500 mt-1">
+                                                Ventas sin recargo fiscal (IVA 0% / IT 0%). Comprobantes y recibos internos.
+                                            </span>
+                                        </button>
+
+                                        <button
+                                            type="button"
+                                            onClick={() => setRegimenTributario('regimen_general')}
+                                            className={`flex flex-col text-left p-3.5 rounded-lg border transition-all ${
+                                                regimenTributario === 'regimen_general'
+                                                    ? 'border-primary bg-sky-50/50 shadow-sm ring-1 ring-primary'
+                                                    : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50/50'
+                                            }`}
+                                        >
+                                            <span className="font-semibold text-slate-900 text-sm">
+                                                Régimen General
+                                            </span>
+                                            <span className="text-xs text-slate-500 mt-1">
+                                                Cálculo y registro de débito/crédito fiscal (IVA e IT) con facturación formal.
+                                            </span>
+                                        </button>
+                                    </div>
                                 </div>
 
                                 <div className="flex items-center justify-between pt-4 border-t border-slate-100">
@@ -429,6 +569,45 @@ export default function HomePage() {
                                             onChange={(e) => setAdminPin(e.target.value)}
                                             className="h-11"
                                         />
+                                    </div>
+
+                                    <div className="p-4 rounded-xl bg-slate-900 text-white space-y-2.5">
+                                        <div className="flex items-center justify-between gap-2 flex-wrap">
+                                            <span className="text-xs uppercase font-semibold text-sky-400 tracking-wider">
+                                                ID de Equipo (Hardware ID)
+                                            </span>
+                                            <Button
+                                                type="button"
+                                                size="sm"
+                                                variant="outline"
+                                                onClick={() => {
+                                                    if (machineId) {
+                                                        navigator.clipboard.writeText(machineId);
+                                                        setCopiado(true);
+                                                        setTimeout(() => setCopiado(false), 2000);
+                                                    }
+                                                }}
+                                                className="h-7 px-2.5 text-xs bg-slate-800 hover:bg-slate-700 text-white border-slate-700"
+                                            >
+                                                {copiado ? (
+                                                    <>
+                                                        <Check className="w-3.5 h-3.5 mr-1 text-emerald-400" />
+                                                        <span>Copiado</span>
+                                                    </>
+                                                ) : (
+                                                    <>
+                                                        <Copy className="w-3.5 h-3.5 mr-1" />
+                                                        <span>Copiar ID</span>
+                                                    </>
+                                                )}
+                                            </Button>
+                                        </div>
+                                        <div className="font-mono text-sm tracking-widest bg-slate-950/80 px-3 py-2 rounded-lg border border-slate-800 text-sky-300 font-bold select-all">
+                                            {machineId || 'Obteniendo identificador del equipo...'}
+                                        </div>
+                                        <p className="text-xs text-slate-400 leading-relaxed">
+                                            Copia y proporciona este identificador único al proveedor para solicitar tu clave de activación del producto para este equipo.
+                                        </p>
                                     </div>
 
                                     <div className="space-y-1.5">
@@ -547,6 +726,50 @@ export default function HomePage() {
                                         <p className="text-[11px] text-slate-500">
                                             Bandeja donde recibirás los reportes de arqueo al cerrar caja (se enviará un código de verificación).
                                         </p>
+                                    </div>
+
+                                    <div className="pt-2 space-y-2">
+                                        <div className="flex items-center gap-3">
+                                            <Button
+                                                type="button"
+                                                variant="secondary"
+                                                disabled={probandoSmtp || guardando}
+                                                onClick={probarConexionSmtp}
+                                                className="border border-slate-200"
+                                            >
+                                                {probandoSmtp ? (
+                                                    <>
+                                                        <div className="w-3.5 h-3.5 border-2 border-primary border-t-transparent rounded-full animate-spin mr-2" />
+                                                        <span>Probando conexión...</span>
+                                                    </>
+                                                ) : (
+                                                    <>
+                                                        <Mail className="w-4 h-4 mr-2 text-primary" />
+                                                        <span>Probar Conexión SMTP</span>
+                                                    </>
+                                                )}
+                                            </Button>
+                                            <span className="text-xs text-slate-500">
+                                                Verifica la conexión y credenciales con el servidor en tiempo real.
+                                            </span>
+                                        </div>
+
+                                        {smtpFeedback && (
+                                            <div
+                                                className={`p-3 rounded-lg text-xs font-medium flex items-center gap-2 ${
+                                                    smtpFeedback.tipo === 'exito'
+                                                        ? 'bg-emerald-50 border border-emerald-200 text-emerald-800'
+                                                        : 'bg-red-50 border border-red-200 text-red-700'
+                                                }`}
+                                            >
+                                                {smtpFeedback.tipo === 'exito' ? (
+                                                    <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+                                                ) : (
+                                                    <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+                                                )}
+                                                <span>{smtpFeedback.mensaje}</span>
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
 
