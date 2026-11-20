@@ -2,6 +2,8 @@ name: Release Installer
 
 on:
   push:
+    branches:
+      - main
     tags:
       - 'v*'
   workflow_dispatch:
@@ -48,6 +50,23 @@ jobs:
 
       - name: Instalar dependencias
         run: npm ci
+
+      - name: Preparar binarios para instalador autónomo
+        shell: pwsh
+        run: |
+          # 1. Preparar bin/node.exe portable embebido
+          if (-not (Test-Path "bin\node.exe")) {
+            New-Item -ItemType Directory -Force -Path "bin" | Out-Null
+            $nodePath = (Get-Command node).Source
+            Write-Host "Copiando Node.js de CI ($nodePath) hacia bin\node.exe"
+            Copy-Item -Path $nodePath -Destination "bin\node.exe" -Force
+          }
+          # 2. Descargar instalador Microsoft Visual C++ Redistributable si no existe
+          if (-not (Test-Path "redist\vc_redist.x64.exe")) {
+            New-Item -ItemType Directory -Force -Path "redist" | Out-Null
+            Write-Host "Descargando vc_redist.x64.exe..."
+            Invoke-WebRequest -Uri "https://aka.ms/vs/17/release/vc_redist.x64.exe" -OutFile "redist\vc_redist.x64.exe"
+          }
 
       - name: Preparar entorno de producción para el instalador
         shell: pwsh
@@ -108,7 +127,15 @@ jobs:
           "INSTALLER_PATH=$($installer.FullName)" >> $env:GITHUB_ENV
           "INSTALLER_NAME=$($installer.Name)" >> $env:GITHUB_ENV
 
+      - name: Subir instalador como artefacto de GitHub Actions
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.INSTALLER_NAME }}
+          path: ${{ env.INSTALLER_PATH }}
+          if-no-files-found: error
+
       - name: Publicar GitHub Release y adjuntar instalador
+        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.RELEASE_TAG }}

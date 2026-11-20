@@ -8,7 +8,6 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { 
     Package, 
     Sparkles, 
-    FileText, 
     Plus, 
     Trash2, 
     Tag, 
@@ -23,7 +22,6 @@ import {
     ChevronLeft,
     ChevronRight 
 } from 'lucide-react';
-import TabKardex from './TabKardex';
 import {
     crearCategoriaAction,
     crearProductoAction,
@@ -99,7 +97,7 @@ export default function TabCatalogo({
     const usaRecetas = Boolean(configActual.usa_recetas_ensamblaje ?? false);
 
     // Sub-sección interna de Catálogo
-    const [subSeccionCatalogo, setSubSeccionCatalogo] = useState('articulos'); // 'articulos' | 'modificadores' | 'kardex'
+    const [subSeccionCatalogo, setSubSeccionCatalogo] = useState('articulos'); // 'articulos' | 'modificadores'
 
     // Categorías y Pestañas
     const [categoriaTabActiva, setCategoriaTabActiva] = useState('todas');
@@ -667,7 +665,7 @@ export default function TabCatalogo({
 
     return (
         <div className="flex flex-col gap-5">
-            {/* SELECTOR DE SUB-SECCIÓN: ARTÍCULOS, MODIFICADORES O KARDEX */}
+            {/* SELECTOR DE SUB-SECCIÓN: ARTÍCULOS O MODIFICADORES */}
             <div className="flex gap-2 bg-slate-200 p-1.5 rounded-lg self-start flex-wrap">
                 <Button
                     type="button"
@@ -697,33 +695,11 @@ export default function TabCatalogo({
                     <Sparkles className="w-4 h-4" />
                     <span>Complementos y Modificadores ({(datos?.gruposModificadores || []).length})</span>
                 </Button>
-                <Button
-                    type="button"
-                    variant={subSeccionCatalogo === 'kardex' ? 'default' : 'ghost'}
-                    size="sm"
-                    onClick={() => setSubSeccionCatalogo('kardex')}
-                    className={`text-xs font-bold gap-1.5 ${
-                        subSeccionCatalogo === 'kardex'
-                            ? 'bg-white text-emerald-700 shadow-sm hover:bg-white'
-                            : 'text-slate-600 hover:text-emerald-700'
-                    }`}
-                >
-                    <FileText className="w-4 h-4" />
-                    <span>Kardex Cronológico e Integridad</span>
-                </Button>
             </div>
 
-            {/* VISTA 1: KARDEX */}
-            {subSeccionCatalogo === 'kardex' ? (
-                <TabKardex
-                    datos={datos}
-                    cargarTodo={cargarTodo}
-                    setMensaje={setMensaje}
-                    setError={setError}
-                    limpiarAlertas={limpiarAlertas}
-                />
-            ) : subSeccionCatalogo === 'modificadores' ? (
-                /* VISTA 2: MODIFICADORES */
+            {/* VISTA: MODIFICADORES O ARTÍCULOS */}
+            {subSeccionCatalogo === 'modificadores' ? (
+                /* VISTA: MODIFICADORES */
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
                     {/* CREAR NUEVO GRUPO */}
                     <section className="bg-white p-5 rounded-lg border border-slate-200 shadow-sm flex flex-col gap-3">
@@ -1026,7 +1002,7 @@ export default function TabCatalogo({
                     </div>
                 </div>
             ) : (
-                /* VISTA 3: ARTÍCULOS */
+                /* VISTA: ARTÍCULOS Y CATÁLOGO */
                 <>
                     {/* BARRA DE CATEGORÍAS */}
                     <div className="bg-white p-4 rounded-lg shadow-sm border border-slate-200">

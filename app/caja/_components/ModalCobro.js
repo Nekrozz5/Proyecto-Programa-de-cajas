@@ -638,7 +638,8 @@ export default function ModalCobro({
                             </label>
                         )}
 
-                        {(metodoPago === 'pedidos_ya' || metodoPago === 'yango') && (
+                        {/* Campo de orden externa de apps - Oculto temporalmente */}
+                        {false && (metodoPago === 'pedidos_ya' || metodoPago === 'yango') && (
                             <label className="text-xs font-bold text-slate-700 flex flex-col gap-1 sm:col-span-2">
                                 <span className="flex items-center gap-1.5 text-slate-800">
                                     <Smartphone className="w-3.5 h-3.5 text-slate-500" />

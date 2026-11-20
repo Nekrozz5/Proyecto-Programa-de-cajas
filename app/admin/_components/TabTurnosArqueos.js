@@ -553,8 +553,8 @@ export default function TabTurnosArqueos({
                 </div>
             )}
 
-            {/* TARJETA INFORMATIVA DIFERENCIADA DE VENTAS POR APPS DE COMIDA */}
-            {cajaAuditada && (
+            {/* TARJETA INFORMATIVA DIFERENCIADA DE VENTAS POR APPS DE COMIDA (Oculto temporalmente a pedido) */}
+            {false && cajaAuditada && (
                 <div className="p-3.5 rounded-lg border border-purple-200 bg-purple-50 flex justify-between items-center flex-wrap gap-3">
                     <div className="flex items-center gap-2.5 text-xs">
                         <Smartphone className="w-5 h-5 text-purple-600 shrink-0" />
@@ -668,7 +668,8 @@ export default function TabTurnosArqueos({
                                         </TableCell>
                                         <TableCell>
                                             <div className="font-semibold text-slate-800">Bs {Number(c.qr_esperado || 0).toFixed(2)}</div>
-                                            {Number(datos?.cajaAuditada?.id) === Number(c.id) && totalAppsAuditada > 0 && (
+                                            {/* Oculto temporalmente (apps de comida) */}
+                                            {false && Number(datos?.cajaAuditada?.id) === Number(c.id) && totalAppsAuditada > 0 && (
                                                 <span className="text-[11px] text-purple-700 font-bold block" title="Cobro liquidado externamente (no afecta arqueo en efectivo)">
                                                     Apps: Bs {totalAppsAuditada.toFixed(2)}
                                                 </span>
@@ -810,9 +811,9 @@ export default function TabTurnosArqueos({
                                                         <Bike className="w-3 h-3" />
                                                         <span>Despacho Mototaxi</span>
                                                     </Badge>
-                                                ) : m.canal_venta === 'pedidos_ya' ? (
+                                                ) : false && m.canal_venta === 'pedidos_ya' ? (
                                                     <Badge className="bg-red-100 text-red-900 border-red-300 text-[10px]">PedidosYa</Badge>
-                                                ) : m.canal_venta === 'yango' ? (
+                                                ) : false && m.canal_venta === 'yango' ? (
                                                     <Badge className="bg-yellow-100 text-yellow-900 border-yellow-300 text-[10px]">Yango</Badge>
                                                 ) : (
                                                     <span className="text-slate-600">Local</span>

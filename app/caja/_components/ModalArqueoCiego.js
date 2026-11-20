@@ -133,19 +133,21 @@ export default function ModalArqueoCiego({
                 />
             </label>
 
-            {/* Tarjeta informativa diferenciada de ventas por plataformas externas */}
-            <div className="p-3 bg-purple-50 border border-purple-200 rounded-lg flex items-start gap-2.5">
-                <Smartphone className="w-4 h-4 text-purple-600 shrink-0 mt-0.5" />
-                <div className="text-xs text-purple-900 flex-1">
-                    <div className="flex justify-between items-center flex-wrap gap-1">
-                        <span className="font-bold text-purple-950">Ventas por Apps (PedidosYa / Yango):</span>
-                        <span className="font-extrabold text-sm text-purple-900">Bs {totalVentasApps.toFixed(2)}</span>
-                    </div>
-                    <div className="text-[11px] text-purple-700 mt-0.5">
-                        Cobro liquidado externamente (no afecta arqueo en efectivo).
+            {/* Tarjeta informativa diferenciada de ventas por plataformas externas (Oculto temporalmente a pedido) */}
+            {false && (
+                <div className="p-3 bg-purple-50 border border-purple-200 rounded-lg flex items-start gap-2.5">
+                    <Smartphone className="w-4 h-4 text-purple-600 shrink-0 mt-0.5" />
+                    <div className="text-xs text-purple-900 flex-1">
+                        <div className="flex justify-between items-center flex-wrap gap-1">
+                            <span className="font-bold text-purple-950">Ventas por Apps (PedidosYa / Yango):</span>
+                            <span className="font-extrabold text-sm text-purple-900">Bs {totalVentasApps.toFixed(2)}</span>
+                        </div>
+                        <div className="text-[11px] text-purple-700 mt-0.5">
+                            Cobro liquidado externamente (no afecta arqueo en efectivo).
+                        </div>
                     </div>
                 </div>
-            </div>
+            )}
 
             <label className="text-xs font-bold text-slate-700 flex flex-col gap-1">
                 <span>Observaciones de Cierre (Opcional):</span>
