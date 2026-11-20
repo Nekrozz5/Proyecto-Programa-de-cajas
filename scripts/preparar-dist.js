@@ -183,7 +183,7 @@ function recolectarArchivos() {
     }
 
     // Copiar lanzadores y scripts de producción
-    const scripts = ['iniciar-pos.bat', 'detener-pos.bat', 'lanzar-silencioso.vbs', 'iniciar-servidor.vbs', 'backup.js'];
+    const scripts = ['iniciar-pos.bat', 'detener-pos.bat', 'lanzar-silencioso.vbs', 'iniciar-servidor.vbs', 'backup.js', 'inicializar-entorno.js'];
     for (const s of scripts) {
         const src = path.join(ROOT_DIR, 'scripts', s);
         if (fs.existsSync(src)) {

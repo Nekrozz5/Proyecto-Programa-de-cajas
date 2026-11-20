@@ -4,7 +4,7 @@
 ; =====================================================================
 
 #define MyAppName "Sistema POS y Control de Cajas"
-#define MyAppVersion "1.3.3"
+#define MyAppVersion "1.3.4"
 #define MyAppPublisher "POS Cajas"
 #define MyAppExeName "lanzar-silencioso.vbs"
 #define AppGuid "{{A87C39E2-5D4E-49A1-9F16-339281BD510F}"
@@ -16,6 +16,7 @@ AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppVerName={#MyAppName} v{#MyAppVersion}
 AppPublisher={#MyAppPublisher}
+UninstallDisplayName={#MyAppName} v{#MyAppVersion}
 
 ; Directorio de Instalación predeterminado en Program Files
 DefaultDirName={autopf}\POS Cajas
@@ -24,10 +25,19 @@ DisableProgramGroupPage=yes
 
 ; Configuración de salida del compilador
 OutputDir=output
-OutputBaseFilename=Setup-POS-Cajas-v1.3.3
+OutputBaseFilename=Setup-POS-Cajas-v1.3.4
 Compression=lzma2/normal
 SolidCompression=yes
 WizardStyle=modern
+
+; Metadatos embebidos en el binario ejecutable (Windows File Properties)
+VersionInfoVersion={#MyAppVersion}
+VersionInfoCompany={#MyAppPublisher}
+VersionInfoDescription={#MyAppName}
+VersionInfoTextVersion={#MyAppVersion}
+VersionInfoCopyright=Copyright (C) 2026 {#MyAppPublisher}
+VersionInfoProductName={#MyAppName}
+VersionInfoProductVersion={#MyAppVersion}
 
 ; Permisos y Arquitectura
 ArchitecturesInstallIn64BitMode=x64compatible
@@ -42,8 +52,9 @@ RestartApplications=no
 Name: "spanish"; MessagesFile: "compiler:Languages\Spanish.isl"
 
 [Tasks]
-; Tarea para crear acceso directo opcional en el escritorio
+; Opciones de accesos directos y comportamiento
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
+Name: "autostart"; Description: "Iniciar el servidor POS automáticamente al encender el equipo"; GroupDescription: "Opciones avanzadas:"; Flags: unchecked
 
 [Dirs]
 ; Permisos completos a la carpeta de la app para que SQLite WAL y backups puedan escribir sin elevación UAC
@@ -55,7 +66,7 @@ Name: "{app}\.next"; Permissions: users-full
 
 [Files]
 ; 1. Archivos principales de la aplicación recolectados en 'dist' (se excluyen caja.db y variables .env para proteger datos y configuración)
-; Se excluyen archivos de metadatos de desarrollo (*.map, *.d.ts, docs, tests) para reducir 17.000+ archivos y acelerar la instalación a segundos
+; Se excluyen archivos de metadatos de desarrollo (*.map, *.d.ts, docs, tests) para acelerar la instalación a segundos
 Source: "..\dist\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "{#ExclusionesArchivos}"
 
 ; Dependencias node_modules: si no están dentro de dist, se empaquetan directamente desde la raíz
@@ -75,6 +86,10 @@ Source: "..\dist\.env.local"; DestDir: "{app}"; Flags: onlyifdoesntexist uninsne
 Source: "..\dist\.env.production"; DestDir: "{app}"; Flags: onlyifdoesntexist uninsneveruninstall; Permissions: users-full
 #endif
 
+[Registry]
+; Inicio automático opcional con Windows (se elimina automáticamente al desinstalar si se activó)
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "POSCajasServer"; ValueData: """{app}\scripts\lanzar-silencioso.vbs"""; Tasks: autostart; Flags: uninsdeletevalue
+
 [Icons]
 ; Acceso directo en el Menú Inicio apuntando a lanzar-silencioso.vbs
 Name: "{group}\{#MyAppName}"; Filename: "{app}\scripts\lanzar-silencioso.vbs"; WorkingDir: "{app}"; Comment: "Iniciar Sistema POS y Control de Cajas"
@@ -85,14 +100,49 @@ Name: "{group}\{cm:UninstallProgram,{#MyAppName}}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\scripts\lanzar-silencioso.vbs"; WorkingDir: "{app}"; Comment: "Iniciar Sistema POS y Control de Cajas"; Tasks: desktopicon
 
 [Run]
-; Opción para iniciar automáticamente el sistema al finalizar la instalación
+; 1. Asegurar permisos de modificación NTFS (SID *S-1-5-32-545 = Usuarios de Windows en cualquier idioma)
+Filename: "{sys}\icacls.exe"; Parameters: """{app}"" /grant *S-1-5-32-545:(OI)(CI)M /T /C /Q"; Flags: runhidden; StatusMsg: "Asegurando permisos para base de datos y respaldos..."
+
+; 2. Configurar regla de Firewall de Windows para permitir acceso de comandas y móviles por LAN (Puerto 3000)
+Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""POS Cajas - Servidor Local (Puerto 3000)"" dir=in action=allow protocol=TCP localport=3000 profile=private,domain"; Flags: runhidden; StatusMsg: "Configurando acceso en red local (Firewall de Windows)..."
+
+; 3. Inicializar entorno de producción seguro con secretos criptográficos únicos no compartidos
+Filename: "{cmd}"; Parameters: "/c node ""{app}\scripts\inicializar-entorno.js"""; WorkingDir: "{app}"; Flags: runhidden; StatusMsg: "Generando credenciales y secretos criptográficos únicos..."
+
+; 4. Opción para iniciar automáticamente el sistema al finalizar la instalación
 Filename: "{app}\scripts\lanzar-silencioso.vbs"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: shellexec postinstall skipifsilent nowait
 
 [UninstallRun]
-; Detener cualquier proceso del servidor POS antes de desinstalar los archivos
+; 1. Detener cualquier proceso del servidor POS antes de desinstalar los archivos
 Filename: "{app}\scripts\detener-pos.bat"; Flags: runhidden; RunOnceId: "DetenerServidorPOS"
 
+; 2. Eliminar la regla del Firewall de Windows para no dejar residuos en la seguridad del sistema
+Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""POS Cajas - Servidor Local (Puerto 3000)"""; Flags: runhidden; RunOnceId: "EliminarReglaFirewallPOS"
+
 [Code]
+// =====================================================================
+// Validación Previa: Comprobar presencia de Node.js en el sistema
+// =====================================================================
+function InitializeSetup(): Boolean;
+var
+  ResultCode: Integer;
+begin
+  Result := True;
+  
+  // Ejecutar 'node -v' para verificar si el runtime está instalado en el PATH
+  if not Exec(ExpandConstant('{cmd}'), '/c node -v >nul 2>&1', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) or (ResultCode <> 0) then
+  begin
+    if MsgBox('ATENCIÓN: No se detectó Node.js instalado en este equipo.' + #13#10 + #13#10 +
+              'El Sistema POS requiere Node.js (versión 18 LTS o superior) para ejecutar su servidor.' + #13#10 + #13#10 +
+              'Puede continuar con la instalación ahora, pero deberá instalar Node.js antes de abrir el programa.' + #13#10 + #13#10 +
+              '¿Desea continuar con la instalación de todos modos?',
+              mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDNO then
+    begin
+      Result := False;
+    end;
+  end;
+end;
+
 // =====================================================================
 // Lógica de Protección para Actualizaciones y Reinstalaciones
 // =====================================================================
@@ -108,10 +158,6 @@ begin
     Exec(ExpandConstant('{cmd}'), '/c "' + StopBat + '"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   end;
 
-  // Cierre forzoso de cualquier instancia residual de node.exe para liberar módulos nativos de C++ (better-sqlite3)
-  Exec(ExpandConstant('{cmd}'), '/c taskkill /f /im node.exe >nul 2>&1', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  Exec(ExpandConstant('{cmd}'), '/c taskkill /f /im wscript.exe >nul 2>&1', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-
   // Pausa de seguridad para que el kernel de Windows libere los handles de archivos y DLLs en memoria
   Sleep(1500);
 
@@ -126,10 +172,10 @@ begin
     CopyFile(DbFile, BackupFile, False);
   end;
 
-  // 3. Purgar completamente la carpeta .next anterior para eliminar cualquier residuo, chunk o caché vieja
-  if DirExists(ExpandConstant('{app}\.next')) then
+  // 3. Purgar completamente la caché vieja de Next.js para evitar conflictos de chunks webpack
+  if DirExists(ExpandConstant('{app}\.next\cache')) then
   begin
-    DelTree(ExpandConstant('{app}\.next'), True, True, True);
+    DelTree(ExpandConstant('{app}\.next\cache'), True, True, True);
   end;
 
   Result := '';
@@ -158,7 +204,7 @@ begin
                  '• SÍ (Borrar todo):' + #13#10 +
                  '  Se eliminarán permanentemente la base de datos (ventas, arqueos, inventario, catálogo),' + #13#10 +
                  '  todas las copias de seguridad y los archivos de configuración.' + #13#10 + #13#10 +
-                 '• NO (Mantener datos):' + #13#10 +
+                 '• NO (Mantener datos - RECOMENDADO):' + #13#10 +
                  '  Se desinstalará la aplicación pero se conservará la base de datos y respaldos intactos' + #13#10 +
                  '  (recomendado si piensa reinstalar el programa en el futuro o conservar su historial contable).';
 
@@ -184,15 +230,32 @@ begin
       DeleteFile(AppDir + '\.env.local');
       DeleteFile(AppDir + '\.env.production');
 
-      // 3. Eliminar carpeta de copias de seguridad completa
+      // 3. Eliminar logs del servidor
+      DeleteFile(AppDir + '\server.log');
+
+      // 4. Eliminar carpeta de copias de seguridad completa
       DelTree(AppDir + '\backups', True, True, True);
 
-      // 4. Eliminar cualquier resto en la carpeta de la aplicación
+      // 5. Eliminar cualquier resto en la carpeta de la aplicación
       DelTree(AppDir + '\.next', True, True, True);
       DelTree(AppDir + '\node_modules', True, True, True);
       DelTree(AppDir + '\scripts', True, True, True);
       DelTree(AppDir, True, True, True);
       RemoveDir(AppDir);
+    end
+    else
+    begin
+      // Modo conservación: Limpiar código y dependencias pesadas (.next, node_modules),
+      // pero preservar caja.db, transacciones WAL y backups/
+      DelTree(AppDir + '\.next', True, True, True);
+      DelTree(AppDir + '\node_modules', True, True, True);
+      DelTree(AppDir + '\scripts', True, True, True);
+      DelTree(AppDir + '\server', True, True, True);
+      DelTree(AppDir + '\public', True, True, True);
+      DelTree(AppDir + '\database', True, True, True);
+      DeleteFile(AppDir + '\server.log');
+      DeleteFile(AppDir + '\package.json');
+      DeleteFile(AppDir + '\next.config.js');
     end;
   end
   else if CurUninstallStep = usDone then
@@ -203,8 +266,8 @@ begin
     begin
       if FileExists(AppDir + '\caja.db') then
       begin
-        MsgBox('La aplicación ha sido desinstalada.' + #13#10 + #13#10 +
-               'Su base de datos y copias de seguridad se han conservado exitosamente en:' + #13#10 +
+        MsgBox('La aplicación ha sido desinstalada correctamente.' + #13#10 + #13#10 +
+               'Su base de datos (ventas, catálogo, arqueos) y copias de seguridad se han conservado intactas en:' + #13#10 +
                AppDir, mbInformation, MB_OK);
       end;
     end;

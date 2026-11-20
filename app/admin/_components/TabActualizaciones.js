@@ -225,6 +225,21 @@ export default function TabActualizaciones() {
                             )}
                         </div>
 
+                        {/* AVISO DE DESCARGA SEGURA / SMARTSCREEN */}
+                        <div className="rounded-xl bg-amber-100/60 border border-amber-300 p-3.5 text-xs text-amber-900 flex items-start gap-2.5">
+                            <ShieldCheck className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
+                            <div className="space-y-1">
+                                <span className="font-bold text-amber-950 block">¿Edge o Windows marcan el instalador como desconocido o no común?</span>
+                                <p className="text-[11px] text-amber-800 leading-relaxed">
+                                    Al ser una actualización nueva, Microsoft Edge y SmartScreen pueden mostrar una advertencia preventiva:
+                                </p>
+                                <ul className="list-disc list-inside text-[11px] text-amber-900 space-y-0.5 pl-0.5">
+                                    <li><strong>En Edge:</strong> Pasa el ratón sobre la descarga, clic en los tres puntos <strong>(···)</strong> → <em>Conservar</em> → <em>Mostrar más</em> → <em>Conservar de todos modos</em>.</li>
+                                    <li><strong>En Windows:</strong> Si sale la pantalla azul, haz clic en <em>Más información</em> → <em>Ejecutar de todas formas</em>.</li>
+                                </ul>
+                            </div>
+                        </div>
+
                         {/* VISOR DE NOVEDADES / CHANGELOG */}
                         {info.notas && (
                             <div className="rounded-xl bg-white/90 border border-amber-200 p-4 text-xs text-slate-700 space-y-2">
