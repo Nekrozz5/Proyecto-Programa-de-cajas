@@ -8,6 +8,15 @@ const { runQuery, getQuery, allQuery, redondear2, numeroNoNegativo } = require('
 const { obtenerUsuarioPorId, esRolAdministrativo } = require('./auth.repo');
 const { normalizarRegimen } = require('../domain/fiscal');
 
+/**
+ * Determina si el negocio completó su configuración inicial.
+ * Se mantiene como función pura para poder usarla en API, UI y simulaciones
+ * sin abrir otra conexión ni duplicar la regla de negocio.
+ */
+function sistemaEstaInstalado(configuracion) {
+    return Boolean(configuracion && Number(configuracion.configurado) === 1);
+}
+
 async function obtenerConfiguracionNegocio() {
     let config = await getQuery(`SELECT * FROM configuracion_negocio WHERE id = 1`);
     if (!config) {
@@ -346,6 +355,7 @@ async function eliminarDestinatario(id) {
 }
 
 module.exports = {
+    sistemaEstaInstalado,
     obtenerConfiguracionNegocio,
     guardarConfiguracionNegocio,
     actualizarConfiguracionNegocio,

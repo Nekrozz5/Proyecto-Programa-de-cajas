@@ -6,7 +6,8 @@ import {
     generarRCVComprasTXT,
     generarRCVComprasExcel
 } from '../../../server/queries';
-import { exigirUsuarioSesion } from '../../../server/sesion';
+import { exigirUsuarioSesion } from '../../../server/lib/sesion';
+import { ejecutarRequestEnTenant } from '../../../server/tenancy/request-context';
 
 const ROLES_ADMIN = ['admin', 'propietario', 'developer'];
 
@@ -24,7 +25,8 @@ function sanitizarSufijo(cajaId, desde, hasta) {
 }
 
 export async function GET(request) {
-    try {
+    return ejecutarRequestEnTenant(request, async () => {
+      try {
         const usuarioSesion = await exigirUsuarioSesion(request, ROLES_ADMIN);
 
         const { searchParams } = new URL(request.url);
@@ -105,7 +107,8 @@ export async function GET(request) {
 
         const tendencias = await obtenerTendenciasVentas();
         return NextResponse.json(tendencias);
-    } catch (error) {
+      } catch (error) {
         return NextResponse.json({ error: error.message }, { status: error.status || 500 });
-    }
+      }
+    });
 }

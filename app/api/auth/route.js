@@ -1,7 +1,13 @@
 import { NextResponse } from 'next/server';
 import {
-    autenticarUsuarioPorId
+    autenticarUsuarioPorId,
+    verificarUsuarioEnTenant,
+    verificarPruebaDispositivo
 } from '../../../server/queries';
+import {
+    obtenerContextoTenantDesdeRequest
+} from '../../../server/tenancy/tenant-context';
+import { obtenerPoolTenant } from '../../../server/tenancy/tenant-registry';
 import {
     crearTokenSesion,
     obtenerUsuarioSesion,
@@ -58,12 +64,46 @@ export async function POST(request) {
 
         if (accion === 'login') {
             const ip = obtenerIpCliente(request);
-            const usuario = await autenticarUsuarioPorId(
-                Number(body.usuarioId || 0),
-                String(body.pin || ''),
-                body.nombreUsuario || null,
-                ip
-            );
+            const contexto = await obtenerContextoTenantDesdeRequest(request);
+            let usuario;
+
+            if (contexto.modo === 'AWS_MULTI_TENANT') {
+                const nombreUsuario = String(body.nombreUsuario || '').trim();
+                if (!nombreUsuario) {
+                    throw new Error('El nombre de usuario es obligatorio para el acceso multi-negocio.');
+                }
+                usuario = await verificarUsuarioEnTenant(
+                    await obtenerPoolTenant(contexto.tenant),
+                    contexto.tenantId,
+                    nombreUsuario,
+                    String(body.pin || ''),
+                    ip
+                );
+                if (!usuario) throw new Error('Credenciales incorrectas o usuario inactivo.');
+            } else {
+                usuario = await autenticarUsuarioPorId(
+                    Number(body.usuarioId || 0),
+                    String(body.pin || ''),
+                    body.nombreUsuario || null,
+                    ip
+                );
+                if (!usuario) throw new Error('Credenciales incorrectas o usuario inactivo.');
+            }
+
+            // El tenant proviene del host/configuración del servidor, nunca del body.
+            usuario.tenantId = contexto.tenantId;
+            if (usuario.rol === 'user') {
+                const deviceId = body.device_id ?? body.deviceId;
+                const challenge = body.device_challenge ?? body.deviceChallenge ?? body.challenge;
+                const signature = body.device_signature ?? body.deviceSignature ?? body.signature;
+                const dispositivo = await verificarPruebaDispositivo({
+                    tenantId: contexto.tenantId,
+                    deviceId,
+                    challenge,
+                    signature
+                }, contexto.modo === 'AWS_MULTI_TENANT' ? await obtenerPoolTenant(contexto.tenant) : null);
+                usuario.deviceId = dispositivo.id;
+            }
             const token = await crearTokenSesion(usuario);
             const response = NextResponse.json({ ok: true, usuario }, { headers: HEADERS_SIN_CACHE });
             adjuntarCookieSesion(response, token, usuario.rol, request);

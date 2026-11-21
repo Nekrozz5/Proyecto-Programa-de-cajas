@@ -3,9 +3,19 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { obtenerUsuarioPorId } = require('../queries');
+const { obtenerUsuarioPorIdEnTenant } = require('../queries');
+const { obtenerPoolTenant, obtenerTenantPorId } = require('../tenancy/tenant-registry');
+const {
+    obtenerContextoTenantDesdeRequest,
+    obtenerModoTenancy,
+    tenantDelPayload,
+    TENANT_ID_LOCAL_POR_DEFECTO
+} = require('../tenancy/tenant-context');
 const { esProduccion, exigirSecretoSesionProduccion } = require('./secretos');
+const { obtenerEstadoDispositivoParaSesion } = require('../repositories/auth.repo');
 
 const NOMBRE_COOKIE_SESION = 'pos_session';
+const UUID_TENANT = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 // Identificador único en memoria generado por cada arranque del servidor/proyecto.
 // Si el servidor se detiene o reinicia (npm run dev), cualquier sesión previa
@@ -83,12 +93,26 @@ async function crearTokenSesion(usuario) {
     const rol = String(usuario.rol || 'user');
     const esAdminODev = ROLES_ADMINISTRATIVOS_O_TECNICOS.includes(rol);
     const ttlSegundos = TTL_POR_ROL[rol] || TTL_POR_ROL.user;
+    const tenantId = String(usuario.tenantId || usuario.tenant_id || TENANT_ID_LOCAL_POR_DEFECTO).trim();
+    if (!UUID_TENANT.test(tenantId)) {
+        throw new Error('No se puede crear una sesión sin un tenant válido.');
+    }
 
+    // Lista explícita de claims: nunca se serializan PIN, contraseña, hash ni el objeto usuario completo.
     const payload = {
         id: Number(usuario.id),
         nombre: String(usuario.nombre),
-        rol
+        rol,
+        tenantId
     };
+
+    if (rol === 'user') {
+        const deviceId = Number(usuario.deviceId ?? usuario.device_id);
+        if (!Number.isSafeInteger(deviceId) || deviceId <= 0) {
+            throw new Error('No se puede crear una sesión de cajero sin dispositivo válido.');
+        }
+        payload.deviceId = deviceId;
+    }
 
     // Para developer y administradores, vincular la sesión estrictamente a la ejecución actual del servidor.
     // Al reiniciar el proyecto (npm run dev), el bootId cambia y el token anterior queda invalidado.
@@ -112,7 +136,7 @@ async function verificarTokenSesion(token) {
         const { payload } = await jwtVerify(token, secreto, {
             algorithms: ['HS256']
         });
-        if (!payload || !payload.id) return null;
+        if (!payload || !payload.id || !payload.tenantId || !UUID_TENANT.test(String(payload.tenantId))) return null;
 
         // Si es rol administrativo o developer, invalidar inmediatamente si el proceso del servidor se reinició
         if (ROLES_ADMINISTRATIVOS_O_TECNICOS.includes(payload.rol)) {
@@ -120,6 +144,10 @@ async function verificarTokenSesion(token) {
                 console.warn(`[Sesión] Token administrativo invalidado por reinicio de proceso (usuario ${payload.nombre || payload.id}).`);
                 return null;
             }
+        }
+
+        if (payload.rol === 'user' && (!Number.isSafeInteger(Number(payload.deviceId)) || Number(payload.deviceId) <= 0)) {
+            return null;
         }
 
         return payload;
@@ -224,16 +252,29 @@ async function obtenerUsuarioSesion(request) {
     if (!token) return null;
 
     const payload = await verificarTokenSesion(token);
-    if (!payload || !payload.id) return null;
+    if (!payload || !payload.id || !tenantDelPayload(payload)) return null;
+
+    const contexto = await obtenerContextoTenantDesdeRequest(request);
+    if (contexto.tenantId !== tenantDelPayload(payload)) return null;
 
     // Verificar en tiempo real que el usuario exista y siga activo en la base de datos
-    const usuarioActivo = await obtenerUsuarioPorId(Number(payload.id));
+    const usuarioActivo = obtenerModoTenancy() === 'AWS_MULTI_TENANT'
+        ? await obtenerUsuarioPorIdEnTenant(await obtenerPoolTenant(contexto.tenant), contexto.tenantId, Number(payload.id))
+        : await obtenerUsuarioPorId(Number(payload.id));
     if (!usuarioActivo) return null;
+    if (usuarioActivo.rol === 'user' && !await obtenerEstadoDispositivoParaSesion(
+        contexto.tenantId,
+        payload.deviceId,
+        obtenerModoTenancy() === 'AWS_MULTI_TENANT' ? await obtenerPoolTenant(contexto.tenant) : null
+    )) return null;
 
     return {
         id: usuarioActivo.id,
         nombre: usuarioActivo.nombre,
-        rol: usuarioActivo.rol
+        rol: usuarioActivo.rol,
+        tenantId: contexto.tenantId,
+        nombreUsuario: usuarioActivo.nombreUsuario,
+        ...(usuarioActivo.rol === 'user' ? { deviceId: Number(payload.deviceId) } : {})
     };
 }
 
@@ -276,16 +317,38 @@ async function exigirUsuarioSesionAction(rolesPermitidos = null) {
     }
 
     const payload = await verificarTokenSesion(token);
-    if (!payload || !payload.id) {
+    if (!payload || !payload.id || !tenantDelPayload(payload)) {
         const err = new Error('Sesión inválida o expirada. Por favor, inicia sesión nuevamente.');
         err.status = 401;
         throw err;
     }
 
-    // Verificar en tiempo real que el usuario exista y siga activo en la base de datos
-    const usuarioActivo = await obtenerUsuarioPorId(Number(payload.id));
+    let contexto = null;
+    let usuarioActivo;
+    if (obtenerModoTenancy() === 'AWS_MULTI_TENANT') {
+        const tenant = await obtenerTenantPorId(tenantDelPayload(payload));
+        if (!tenant) usuarioActivo = null;
+        else usuarioActivo = await obtenerUsuarioPorIdEnTenant(
+            await obtenerPoolTenant(tenant),
+            tenant.tenant_id,
+            Number(payload.id)
+        );
+        contexto = tenant;
+    } else {
+        usuarioActivo = await obtenerUsuarioPorId(Number(payload.id));
+    }
     if (!usuarioActivo) {
         const err = new Error('Usuario no encontrado o inactivo.');
+        err.status = 401;
+        throw err;
+    }
+
+    if (usuarioActivo.rol === 'user' && !await obtenerEstadoDispositivoParaSesion(
+        tenantDelPayload(payload),
+        payload.deviceId,
+        obtenerModoTenancy() === 'AWS_MULTI_TENANT' ? await obtenerPoolTenant(contexto) : null
+    )) {
+        const err = new Error('La sesión del cajero fue invalidada porque su dispositivo ya no está activo.');
         err.status = 401;
         throw err;
     }
@@ -293,7 +356,10 @@ async function exigirUsuarioSesionAction(rolesPermitidos = null) {
     const usuario = {
         id: usuarioActivo.id,
         nombre: usuarioActivo.nombre,
-        rol: usuarioActivo.rol
+        rol: usuarioActivo.rol,
+        tenantId: tenantDelPayload(payload),
+        nombreUsuario: usuarioActivo.nombreUsuario,
+        ...(usuarioActivo.rol === 'user' ? { deviceId: Number(payload.deviceId) } : {})
     };
 
     if (Array.isArray(rolesPermitidos) && rolesPermitidos.length > 0) {

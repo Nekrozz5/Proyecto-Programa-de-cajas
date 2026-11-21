@@ -5,7 +5,10 @@
  */
 
 const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
 const { runQuery, getQuery, allQuery } = require('./db');
+
+const UUID_TENANT = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const BCRYPT_ROUNDS = 10;
 const MAX_INTENTOS_LOGIN = 5;
@@ -18,6 +21,8 @@ const MAX_INTENTOS_CUENTA = 20;
 const VENTANA_INTENTOS_CUENTA_MS = 15 * 60 * 1000;
 const TIEMPO_BLOQUEO_CUENTA_MS = 15 * 60 * 1000;
 const intentosFallidosCuenta = new Map();
+const pruebasDispositivoUsadas = new Map();
+const PRUEBA_DISPOSITIVO_TTL_MS = 5 * 60 * 1000;
 
 // Límite de entradas en memoria para que nombres aleatorios no hagan crecer los mapas sin control
 const MAX_ENTRADAS_RATE_LIMIT = 10000;
@@ -34,6 +39,238 @@ function purgarEntradasExpiradas(mapa, ventanaMs) {
 
 function esHashBcrypt(valor) {
     return typeof valor === 'string' && /^\$2[aby]\$\d{2}\$/.test(valor);
+}
+
+function exigirTenantId(tenantId) {
+    const valor = String(tenantId || '').trim();
+    if (!UUID_TENANT.test(valor)) {
+        throw new Error('Contexto de tenant inválido o ausente.');
+    }
+    return valor;
+}
+
+function exigirPoolTenant(pool) {
+    if (!pool || typeof pool.query !== 'function') {
+        throw new Error('Conexión PostgreSQL del tenant requerida.');
+    }
+    return pool;
+}
+
+function normalizarDeviceId(deviceId) {
+    const valor = Number(deviceId);
+    if (!Number.isSafeInteger(valor) || valor <= 0) {
+        throw new Error('El identificador del dispositivo no es válido.');
+    }
+    return valor;
+}
+
+function decodificarFirma(firma) {
+    const valor = String(firma || '').trim();
+    if (!valor || valor.length > 8192) return null;
+    try {
+        const buffer = /^[0-9a-f]+$/i.test(valor) && valor.length % 2 === 0
+            ? Buffer.from(valor, 'hex')
+            : Buffer.from(valor.replace(/-/g, '+').replace(/_/g, '/'), 'base64');
+        return buffer.length > 0 ? buffer : null;
+    } catch (_) {
+        return null;
+    }
+}
+
+function purgarPruebasDispositivo() {
+    const ahora = Date.now();
+    for (const [clave, expiraEn] of pruebasDispositivoUsadas) {
+        if (expiraEn <= ahora) pruebasDispositivoUsadas.delete(clave);
+    }
+}
+
+function errorDispositivoNoAutorizado() {
+    const error = new Error('El dispositivo no está activo o la prueba criptográfica no es válida.');
+    error.status = 403;
+    return error;
+}
+
+/**
+ * Comprueba posesión de la clave privada del terminal y su estado en el tenant.
+ * El cliente firma exactamente el texto de `challenge` con la clave privada
+ * correspondiente a `clave_publica` usando SHA-256.
+ */
+async function verificarPruebaDispositivo({ tenantId, deviceId, challenge, signature }, pool = null) {
+    const tenant = exigirTenantId(tenantId);
+    const id = normalizarDeviceId(deviceId);
+    const desafio = String(challenge || '').trim();
+    const firma = decodificarFirma(signature);
+    if (desafio.length < 8 || desafio.length > 2048 || !firma) throw errorDispositivoNoAutorizado();
+
+    let dispositivo;
+    try {
+        if (pool) {
+            const conexion = exigirPoolTenant(pool);
+            const resultado = await conexion.query(`
+                SELECT id, tenant_id, clave_publica, estado
+                FROM dispositivos_pos
+                WHERE tenant_id = $1 AND id = $2
+                LIMIT 1
+            `, [tenant, id]);
+            dispositivo = resultado.rows[0];
+        } else {
+            dispositivo = await getQuery(`
+                SELECT id, tenant_id, clave_publica, estado
+                FROM dispositivos_pos
+                WHERE tenant_id = ? AND id = ?
+                LIMIT 1
+            `, [tenant, id]);
+        }
+    } catch (_) {
+        throw errorDispositivoNoAutorizado();
+    }
+
+    if (!dispositivo || dispositivo.estado !== 'activo') throw errorDispositivoNoAutorizado();
+
+    let válida = false;
+    try {
+        const clave = crypto.createPublicKey(dispositivo.clave_publica);
+        const datos = Buffer.from(desafio, 'utf8');
+        válida = crypto.verify('sha256', datos, clave, firma);
+        // WebCrypto entrega firmas ECDSA en formato IEEE-P1363; Node acepta DER
+        // por defecto, así que se prueba también el formato interoperable.
+        if (!válida) válida = crypto.verify('sha256', datos, { key: clave, dsaEncoding: 'ieee-p1363' }, firma);
+    } catch (_) {
+        válida = false;
+    }
+    if (!válida) throw errorDispositivoNoAutorizado();
+
+    purgarPruebasDispositivo();
+    const clavePrueba = `${tenant}:${id}:${crypto.createHash('sha256').update(desafio).digest('hex')}`;
+    if (pruebasDispositivoUsadas.has(clavePrueba)) throw errorDispositivoNoAutorizado();
+    pruebasDispositivoUsadas.set(clavePrueba, Date.now() + PRUEBA_DISPOSITIVO_TTL_MS);
+
+    if (pool) {
+        await pool.query(`
+            UPDATE dispositivos_pos SET ultimo_acceso = CURRENT_TIMESTAMP
+            WHERE tenant_id = $1 AND id = $2 AND estado = 'activo'
+        `, [tenant, id]);
+    } else {
+        await runQuery(`
+            UPDATE dispositivos_pos SET ultimo_acceso = CURRENT_TIMESTAMP
+            WHERE tenant_id = ? AND id = ? AND estado = 'activo'
+        `, [tenant, id]);
+    }
+
+    return { id, tenantId: tenant, estado: 'activo' };
+}
+
+async function obtenerEstadoDispositivoParaSesion(tenantId, deviceId, pool = null) {
+    const tenant = exigirTenantId(tenantId);
+    const id = normalizarDeviceId(deviceId);
+    let dispositivo;
+    try {
+        dispositivo = pool
+            ? (await exigirPoolTenant(pool).query(`
+                SELECT id, tenant_id, estado FROM dispositivos_pos
+                WHERE tenant_id = $1 AND id = $2 LIMIT 1
+            `, [tenant, id])).rows[0]
+            : await getQuery(`
+                SELECT id, tenant_id, estado FROM dispositivos_pos
+                WHERE tenant_id = ? AND id = ? LIMIT 1
+            `, [tenant, id]);
+    } catch (_) {
+        return false;
+    }
+    return Boolean(dispositivo && dispositivo.estado === 'activo');
+}
+
+async function compararPasswordPostgres(pinPlano, passwordGuardado) {
+    const pinStr = String(pinPlano ?? '');
+    if (!pinStr || !passwordGuardado || !esHashBcrypt(passwordGuardado)) return false;
+    return await bcrypt.compare(pinStr, passwordGuardado);
+}
+
+/**
+ * Variante PostgreSQL. El tenantId y el pool deben provenir del contexto
+ * autenticado del servidor; no deben construirse desde el body del request.
+ */
+async function verificarUsuarioEnTenant(pool, tenantId, nombreUsuario, pin, ip = 'local') {
+    const conexion = exigirPoolTenant(pool);
+    const tenant = exigirTenantId(tenantId);
+    const usuario = String(nombreUsuario || '').trim();
+    const claveRL = obtenerClaveRateLimitLogin(`tenant:${tenant}:usuario:${usuario}`, ip);
+    verificarBloqueoLogin(claveRL);
+
+    const resultado = await conexion.query(`
+        SELECT id, tenant_id, nombre AS nombre_visible, nombre_usuario, rol,
+               pin_o_password, puede_registrar_respaldo_fiscal
+        FROM usuarios
+        WHERE tenant_id = $1
+          AND LOWER(nombre_usuario) = LOWER($2)
+          AND activo = 1
+        LIMIT 1
+    `, [tenant, usuario]);
+    const candidato = resultado.rows[0];
+    const claveCuenta = obtenerClaveCuenta(candidato, `tenant:${tenant}:usuario:${usuario}`);
+    verificarBloqueoCuenta(claveCuenta);
+
+    if (!candidato || !(await compararPasswordPostgres(pin, candidato.pin_o_password))) {
+        registrarFalloLogin(claveRL, claveCuenta);
+        return undefined;
+    }
+
+    limpiarIntentosLogin(claveRL);
+    return {
+        id: candidato.id,
+        tenantId: candidato.tenant_id,
+        nombre: candidato.nombre_visible,
+        nombreUsuario: candidato.nombre_usuario,
+        rol: candidato.rol,
+        puedeRegistrarRespaldoFiscal: candidato.puede_registrar_respaldo_fiscal
+    };
+}
+
+async function crearUsuarioEnTenant(pool, tenantId, nombreVisible, nombreUsuario, pin, rol) {
+    const conexion = exigirPoolTenant(pool);
+    const tenant = exigirTenantId(tenantId);
+    const visible = String(nombreVisible || '').trim();
+    const usuario = String(nombreUsuario || '').trim().toLowerCase();
+    if (!visible || !usuario) throw new Error('El nombre visible y el usuario son obligatorios.');
+    const pinValido = validarPoliticaPin(pin, rol);
+    const hashPin = await bcrypt.hash(pinValido, BCRYPT_ROUNDS);
+
+    try {
+        const resultado = await conexion.query(`
+            INSERT INTO usuarios
+                (tenant_id, nombre, nombre_usuario, pin_o_password, rol)
+            VALUES ($1, $2, $3, $4, $5)
+            RETURNING id
+        `, [tenant, visible, usuario, hashPin, rol]);
+        return resultado.rows[0].id;
+    } catch (err) {
+        if (err && err.code === '23505') {
+            throw new Error(`Ya existe el usuario "${usuario}" en este negocio.`);
+        }
+        throw err;
+    }
+}
+
+async function obtenerUsuarioPorIdEnTenant(pool, tenantId, usuarioId) {
+    const conexion = exigirPoolTenant(pool);
+    const tenant = exigirTenantId(tenantId);
+    const resultado = await conexion.query(`
+        SELECT id, tenant_id, nombre AS nombre_visible, nombre_usuario, rol,
+               puede_registrar_respaldo_fiscal
+        FROM usuarios
+        WHERE tenant_id = $1 AND id = $2 AND activo = 1
+        LIMIT 1
+    `, [tenant, usuarioId]);
+    const usuario = resultado.rows[0];
+    if (!usuario) return null;
+    return {
+        id: usuario.id,
+        tenantId: usuario.tenant_id,
+        nombre: usuario.nombre_visible,
+        nombreUsuario: usuario.nombre_usuario,
+        rol: usuario.rol,
+        puedeRegistrarRespaldoFiscal: usuario.puede_registrar_respaldo_fiscal
+    };
 }
 
 function obtenerClaveRateLimitLogin(identificadorUsuario, ip = 'local') {
@@ -132,23 +369,14 @@ function registrarFalloLogin(claveIp, claveCuenta) {
     registrarIntentoFallidoLogin(claveIp);
 }
 
-async function compararYActualizarPassword(pinPlano, passwordGuardado, usuarioId = null) {
+async function compararPassword(pinPlano, passwordGuardado) {
     const pinStr = String(pinPlano ?? '');
     if (!pinStr || !passwordGuardado) return false;
 
-    if (esHashBcrypt(passwordGuardado)) {
-        return await bcrypt.compare(pinStr, passwordGuardado);
-    }
+    if (!esHashBcrypt(passwordGuardado)) return false;
+    return await bcrypt.compare(pinStr, passwordGuardado);
 
     // Respaldo de transición por si algún registro aún estuviera en texto plano
-    if (pinStr === String(passwordGuardado)) {
-        if (usuarioId) {
-            const nuevoHash = await bcrypt.hash(pinStr, BCRYPT_ROUNDS);
-            await runQuery(`UPDATE usuarios SET pin_o_password = ? WHERE id = ?`, [nuevoHash, usuarioId]);
-        }
-        return true;
-    }
-    return false;
 }
 
 const NIVEL_ROL = {
@@ -180,7 +408,7 @@ async function verificarUsuario(nombre, pin, ip = 'local') {
         return undefined;
     }
 
-    const coincide = await compararYActualizarPassword(pin, candidato.pin_o_password, candidato.id);
+    const coincide = await compararPassword(pin, candidato.pin_o_password);
     if (!coincide) {
         registrarFalloLogin(claveRL, claveCuenta);
         return undefined;
@@ -217,7 +445,7 @@ async function autenticarUsuarioPorId(usuarioId, pin, nombreUsuario = null, ip =
         throw new Error('Credenciales incorrectas o usuario inactivo.');
     }
 
-    const coincide = await compararYActualizarPassword(pin, candidato.pin_o_password, candidato.id);
+    const coincide = await compararPassword(pin, candidato.pin_o_password);
     if (!coincide) {
         registrarFalloLogin(claveRL, claveCuenta);
         throw new Error('Credenciales incorrectas o usuario inactivo.');
@@ -274,14 +502,25 @@ const LONGITUD_MINIMA_PIN_POR_ROL = {
     developer: 8
 };
 
+const ROLES_VALIDOS_CREDENCIALES = ['user', 'admin', 'propietario', 'developer'];
+
 function validarPoliticaPin(pin, rol) {
     const pinStr = String(pin ?? '').trim();
+    if (!ROLES_VALIDOS_CREDENCIALES.includes(rol)) {
+        throw new Error('Rol inválido para crear credenciales.');
+    }
     const minimo = LONGITUD_MINIMA_PIN_POR_ROL[rol] || 8;
     if (pinStr.length < minimo) {
         const etiqueta = rol === 'user'
             ? 'el PIN de un Cajero'
             : `la contraseña de un perfil ${rol === 'propietario' ? 'Propietario(a)' : rol === 'developer' ? 'Desarrollador' : 'Administrador'}`;
         throw new Error(`Contraseña / PIN demasiado corto: ${etiqueta} debe tener al menos ${minimo} caracteres.`);
+    }
+    if (rol === 'user' && !/^\d+$/.test(pinStr)) {
+        throw new Error('El PIN de un Cajero debe contener únicamente dígitos.');
+    }
+    if (rol !== 'user' && (/^\d+$/.test(pinStr) || !/[A-Za-z]/.test(pinStr) || !/[0-9]/.test(pinStr))) {
+        throw new Error('La contraseña administrativa debe tener al menos una letra y un número.');
     }
     return pinStr;
 }
@@ -374,7 +613,7 @@ async function cambiarPasswordConPermiso(ejecutorId, usuarioObjetivoId, nuevoPin
         if (pinActual === null || pinActual === undefined || String(pinActual).trim() === '') {
             throw new Error('Debes ingresar tu contraseña / PIN actual para cambiar tu propia clave.');
         }
-        const coincide = await compararYActualizarPassword(String(pinActual), ejecutor.pin_o_password, ejecutor.id);
+        const coincide = await compararPassword(String(pinActual), ejecutor.pin_o_password);
         if (!coincide) {
             throw new Error('Tu contraseña / PIN actual es incorrecto.');
         }
@@ -410,5 +649,10 @@ module.exports = {
     crearUsuario,
     crearUsuarioConPermiso,
     borrarUsuarioConPermiso,
-    cambiarPasswordConPermiso
+    cambiarPasswordConPermiso,
+    verificarPruebaDispositivo,
+    obtenerEstadoDispositivoParaSesion,
+    verificarUsuarioEnTenant,
+    crearUsuarioEnTenant,
+    obtenerUsuarioPorIdEnTenant
 };

@@ -1,4 +1,6 @@
 const { exigirUsuarioSesionAction } = require('../lib/sesion');
+const { obtenerTenantPorId } = require('../tenancy/tenant-registry');
+const { obtenerModoTenancy, ejecutarConContextoTenant } = require('../tenancy/tenant-context');
 
 /**
  * Wrapper de ejecución segura para Server Actions.
@@ -23,7 +25,18 @@ async function ejecutarAction(rolesPermitidos, fn) {
 
     try {
         const usuario = await exigirUsuarioSesionAction(roles);
-        const resultado = await actionFn(usuario);
+        let resultado;
+        if (obtenerModoTenancy() === 'AWS_MULTI_TENANT') {
+            const tenant = await obtenerTenantPorId(usuario.tenantId);
+            if (!tenant) throw new Error('El negocio no existe o está inactivo.');
+            resultado = await ejecutarConContextoTenant({
+                modo: 'AWS_MULTI_TENANT',
+                tenantId: usuario.tenantId,
+                tenant
+            }, () => actionFn(usuario));
+        } else {
+            resultado = await actionFn(usuario);
+        }
 
         return {
             ok: true,

@@ -1,10 +1,11 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { PasswordInput } from '@/components/ui/password-input';
 import { Badge } from '@/components/ui/badge';
+import QRCode from 'qrcode';
 import {
     crearUsuarioAction,
     borrarUsuarioAction,
@@ -13,7 +14,10 @@ import {
     crearCajaFisicaAction,
     desactivarCajaFisicaAction,
     reactivarCajaFisicaAction,
-    actualizarPermisoFiscalCajaAction
+    actualizarPermisoFiscalCajaAction,
+    listarDispositivosAction,
+    generarCodigoEmparejamientoAction,
+    revocarDispositivoAction
 } from '../../../server/actions/admin.actions';
 
 const NIVEL_ROL = { user: 1, admin: 2, propietario: 3, developer: 4 };
@@ -38,6 +42,70 @@ export default function TabUsuariosCajas({
 
     // Estado Estaciones Físicas de Caja
     const [nuevaCajaFisicaNombre, setNuevaCajaFisicaNombre] = useState('');
+    const [dispositivos, setDispositivos] = useState([]);
+    const [desafioEmparejamiento, setDesafioEmparejamiento] = useState(null);
+    const [qrEmparejamiento, setQrEmparejamiento] = useState('');
+    const [cargandoDispositivos, setCargandoDispositivos] = useState(false);
+
+    async function cargarDispositivos() {
+        setCargandoDispositivos(true);
+        try {
+            const res = await listarDispositivosAction();
+            if (!res.ok) throw new Error(res.error || 'No se pudieron cargar las terminales.');
+            setDispositivos(res.data || []);
+        } catch (err) {
+            setError?.(err.message);
+        } finally {
+            setCargandoDispositivos(false);
+        }
+    }
+
+    useEffect(() => {
+        if (adminAutenticado) cargarDispositivos();
+    }, [adminAutenticado]);
+
+    useEffect(() => {
+        let cancelado = false;
+        if (!desafioEmparejamiento?.codigo) {
+            setQrEmparejamiento('');
+            return undefined;
+        }
+        QRCode.toDataURL(JSON.stringify({ codigo: desafioEmparejamiento.codigo }), {
+            width: 220,
+            margin: 1,
+            errorCorrectionLevel: 'M'
+        }).then((url) => {
+            if (!cancelado) setQrEmparejamiento(url);
+        }).catch(() => {
+            if (!cancelado) setQrEmparejamiento('');
+        });
+        return () => { cancelado = true; };
+    }, [desafioEmparejamiento]);
+
+
+    async function generarCodigo() {
+        limpiarAlertas?.();
+        try {
+            const res = await generarCodigoEmparejamientoAction();
+            if (!res.ok) throw new Error(res.error || 'No se pudo generar el código.');
+            setDesafioEmparejamiento(res.data.desafio);
+        } catch (err) {
+            setError?.(err.message);
+        }
+    }
+
+    async function revocarTerminal(dispositivo) {
+        if (!confirm(`¿Revocar inmediatamente la terminal "${dispositivo.nombre}"? Se cerrarán sus sesiones activas.`)) return;
+        limpiarAlertas?.();
+        try {
+            const res = await revocarDispositivoAction({ dispositivoId: dispositivo.id });
+            if (!res.ok) throw new Error(res.error || 'No se pudo revocar la terminal.');
+            setMensaje?.(`Terminal "${dispositivo.nombre}" revocada inmediatamente.`);
+            await cargarDispositivos();
+        } catch (err) {
+            setError?.(err.message);
+        }
+    }
 
     async function handleCrearUsuario(e) {
         e.preventDefault();
@@ -437,6 +505,79 @@ export default function TabUsuariosCajas({
                         );
                     })}
                 </div>
+            </section>
+
+            <section className="bg-white p-5 rounded-lg border border-slate-200 shadow-sm">
+                <div className="flex justify-between items-start flex-wrap gap-3 mb-4">
+                    <div>
+                        <h3 className="text-lg font-bold text-slate-900 m-0">Terminales POS emparejadas</h3>
+                        <p className="text-xs text-slate-500 mt-1 mb-0">
+                            Controla los dispositivos de este negocio. Revocar una terminal invalida sus sesiones de cajero.
+                        </p>
+                    </div>
+                    <Button type="button" size="sm" onClick={generarCodigo} className="bg-slate-900 hover:bg-slate-800 text-white font-bold">
+                        Generar código / QR de emparejamiento
+                    </Button>
+                </div>
+
+                {desafioEmparejamiento && (
+                    <div className="mb-4 rounded-lg border border-sky-200 bg-sky-50 p-4 flex flex-col sm:flex-row gap-4 items-center">
+                        {qrEmparejamiento ? (
+                            <img
+                                className="h-36 w-36 rounded bg-white p-2 border border-sky-100"
+                                alt="QR de emparejamiento"
+                                src={qrEmparejamiento}
+                            />
+                        ) : (
+                            <div className="h-36 w-36 rounded bg-white border border-sky-100 flex items-center justify-center text-xs text-slate-500">
+                                Generando QR...
+                            </div>
+                        )}
+                        <div className="text-center sm:text-left">
+                            <p className="text-xs font-semibold text-sky-900 mb-1">Código temporal / QR (válido por 10 minutos)</p>
+                            <p className="text-3xl tracking-[0.35em] font-mono font-bold text-slate-900">{desafioEmparejamiento.codigo}</p>
+                            <p className="text-[11px] text-slate-600 mt-2">Escanea el QR desde la terminal nueva o introduce el código manualmente.</p>
+                            <Button type="button" size="sm" variant="outline" className="mt-2 h-7 text-xs" onClick={() => setDesafioEmparejamiento(null)}>
+                                Ocultar código
+                            </Button>
+                        </div>
+                    </div>
+                )}
+
+                {cargandoDispositivos ? (
+                    <p className="text-sm text-slate-500">Cargando terminales...</p>
+                ) : dispositivos.length === 0 ? (
+                    <p className="text-sm text-slate-500 rounded-lg bg-slate-50 border border-dashed border-slate-300 p-4">Todavía no hay terminales emparejadas.</p>
+                ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        {dispositivos.map((dispositivo) => {
+                            const estado = {
+                                activo: ['ACTIVO', 'bg-emerald-100 text-emerald-800 border-emerald-200'],
+                                pendiente: ['PENDIENTE', 'bg-amber-100 text-amber-800 border-amber-200'],
+                                revocado: ['REVOCADO', 'bg-red-100 text-red-800 border-red-200']
+                            }[dispositivo.estado] || ['DESCONOCIDO', 'bg-slate-100 text-slate-700 border-slate-200'];
+                            return (
+                                <div key={dispositivo.id} className="rounded-lg border border-slate-200 p-3.5 flex justify-between gap-3">
+                                    <div className="min-w-0">
+                                        <div className="flex items-center gap-2 flex-wrap">
+                                            <strong className="text-sm text-slate-900 truncate">{dispositivo.nombre}</strong>
+                                            <Badge className={`text-[10px] font-bold border ${estado[1]}`}>{estado[0]}</Badge>
+                                        </div>
+                                        <p className="text-[11px] text-slate-500 mt-1 mb-0">ID #{dispositivo.id}</p>
+                                        <p className="text-[11px] text-slate-500 mt-0.5 mb-0">
+                                            Último acceso: {dispositivo.ultimoAcceso ? new Date(dispositivo.ultimoAcceso).toLocaleString() : 'Nunca'}
+                                        </p>
+                                    </div>
+                                    {dispositivo.estado !== 'revocado' && (
+                                        <Button type="button" size="sm" variant="destructive" onClick={() => revocarTerminal(dispositivo)} className="h-7 text-[11px] shrink-0">
+                                            Revocar
+                                        </Button>
+                                    )}
+                                </div>
+                            );
+                        })}
+                    </div>
+                )}
             </section>
         </div>
     );

@@ -6,6 +6,7 @@ import {
 import {
     obtenerUsuarioSesion
 } from '../../../server/lib/sesion';
+import { ejecutarRequestEnTenant } from '../../../server/tenancy/request-context';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,7 +18,8 @@ const HEADERS_SIN_CACHE = {
 
 // GET /api/configuracion -> Devuelve la configuración general del negocio
 export async function GET(request) {
-    try {
+    return ejecutarRequestEnTenant(request, async () => {
+      try {
         const sesion = await obtenerUsuarioSesion(request);
         const configuracion = await obtenerConfiguracionNegocio();
         return NextResponse.json({
@@ -26,17 +28,19 @@ export async function GET(request) {
             configuracionNegocio: configuracion,
             sesion: sesion ? { id: sesion.id, nombre: sesion.nombre, rol: sesion.rol } : null
         }, { headers: HEADERS_SIN_CACHE });
-    } catch (error) {
+      } catch (error) {
         return NextResponse.json(
             { ok: false, error: error.message },
             { status: error.status || 500, headers: HEADERS_SIN_CACHE }
         );
-    }
+      }
+    });
 }
 
 // Manejador central de mutaciones de configuración
 async function manejarMutacion(request) {
-    try {
+    return ejecutarRequestEnTenant(request, async () => {
+      try {
         const sesion = await obtenerUsuarioSesion(request);
         if (!sesion) {
             return NextResponse.json(
@@ -77,12 +81,13 @@ async function manejarMutacion(request) {
             configuracion,
             configuracionNegocio: configuracion
         }, { headers: HEADERS_SIN_CACHE });
-    } catch (error) {
+      } catch (error) {
         return NextResponse.json(
             { ok: false, error: error.message },
             { status: error.status || 500, headers: HEADERS_SIN_CACHE }
         );
-    }
+      }
+    });
 }
 
 // POST /api/configuracion

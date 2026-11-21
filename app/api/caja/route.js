@@ -31,6 +31,7 @@ import {
     adjuntarCookieSesion
 } from '../../../server/lib/sesion';
 import { verificarEstadoEmail } from '../../../server/lib/mailer';
+import { ejecutarRequestEnTenant } from '../../../server/tenancy/request-context';
 
 export const dynamic = 'force-dynamic';
 
@@ -42,7 +43,8 @@ const HEADERS_SIN_CACHE = {
 
 // GET /api/caja -> Devuelve configuración, sesión activa y datos según el estado de autenticación (lectura / polling)
 export async function GET(request) {
-    try {
+    return ejecutarRequestEnTenant(request, async () => {
+      try {
         const [usuarioSesion, configuracionNegocio, categorias] = await Promise.all([
             obtenerUsuarioSesion(request),
             obtenerConfiguracionNegocio(),
@@ -177,7 +179,8 @@ export async function GET(request) {
         }
 
         return respuesta;
-    } catch (error) {
+      } catch (error) {
         return NextResponse.json({ error: error.message }, { status: error.status || 500, headers: HEADERS_SIN_CACHE });
-    }
+      }
+    });
 }
