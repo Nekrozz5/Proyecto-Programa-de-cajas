@@ -2,11 +2,26 @@
 
 Lista de verificación manual para validar arranque, seguridad, control de caja, stock atómico, arqueo ciego, recetas, modificadores, combos, régimen fiscal, pagos mixtos, Kardex dual cronológico, anulaciones, multicaja, reportes y notificaciones en AWS.
 
+## Suite automatizada sobre PostgreSQL
+
+Configura `POSTGRES_TEST_URL` en `.env.local` con una base de mantenimiento
+separada, por ejemplo `postgres`, y un rol con permiso `CREATEDB`. Las pruebas
+crean y eliminan bases propias. Para E2E, instala Chromium con
+`npx playwright install chromium`.
+
+```bash
+npm run test:all
+```
+
+El comando ejecuta `test:postgres` (migraciones, aprovisionamiento, identidad,
+operación, reportes y aislamiento), `simular` (flujo comercial y auditoría) y
+`test:e2e` (navegador y autenticación de dispositivos POS).
+
 ---
 
 ## 1. Arranque y Migraciones
-- [ ] Cierra y vuelve a correr `npm run dev`. No debe haber errores rojos en la terminal.
-- [ ] Reinícialo una segunda vez: las migraciones no deben volver a ejecutarse ni arrojar errores (`PRAGMA user_version` controlado hasta v17).
+- [ ] Aprovisiona un tenant de pruebas, inicia `npm run dev` y abre su subdominio.
+- [ ] Repite el aprovisionamiento y verifica que `schema_migrations` conserva una fila por versión y que los datos operativos permanecen intactos.
 
 ## 2. Seguridad y Sesión
 - [ ] Inicia sesión con una clave correcta y luego con una incorrecta. Después de 5 fallos seguidos debe bloquear temporalmente por rate limiting.
@@ -28,7 +43,7 @@ Lista de verificación manual para validar arranque, seguridad, control de caja,
 - [ ] Vende `4`: debe ser rechazado por falta de stock.
 - [ ] Vende el mismo producto en dos líneas del carrito (`2 + 2 = 4`): la validación atómica total debe rechazarlo.
 - [ ] Venta de dos productos donde el segundo no tiene stock suficiente: la transacción debe hacer rollback completo y no descontar el primero.
-- [ ] Abre la pantalla de venta en dos pestañas del navegador e intenta vender la última unidad disponible en ambas casi al mismo tiempo: solo una debe completarse (descuento atómico con `WHERE stock >= ?`).
+- [ ] Abre la pantalla de venta en dos pestañas del navegador e intenta vender la última unidad disponible en ambas casi al mismo tiempo: solo una debe completarse (descuento atómico con una condición parametrizada sobre el stock).
 
 ## 5. Efectivo, Cambio y Arqueo Ciego
 - [ ] Venta de `25 Bs` recibiendo `50 Bs`: el cálculo reactivo debe indicar un cambio de `25 Bs`.

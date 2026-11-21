@@ -1,74 +1,49 @@
 /**
- * Acceso común para SQLite local y PostgreSQL multi-tenant.
- * En AWS_MULTI_TENANT todas las consultas requieren un contexto AsyncLocalStorage.
+ * Acceso a PostgreSQL operativo con aislamiento por tenant y transacción.
  */
-const db = require('../../database/database');
+const { types } = require('pg');
 const { obtenerPoolTenant } = require('../tenancy/tenant-registry');
 const {
-    obtenerModoTenancy,
-    obtenerContextoTenantActual,
+    exigirContextoTenant,
     ejecutarConContextoTenant
 } = require('../tenancy/tenant-context');
 const { redondear2 } = require('../domain/costos');
-const {
-    db: drizzleDb, schema, eq, ne, gt, gte, lt, lte, and, or, sql,
-    desc, asc, like, inArray, notInArray, isNull, isNotNull
-} = require('../../database/drizzle');
 
-function usaPostgres() {
-    return obtenerModoTenancy() === 'AWS_MULTI_TENANT';
-}
+const tiposPos = {
+    getTypeParser(oid, formato = 'text') {
+        // El POS devuelve importes como números. PostgreSQL conserva los decimales al operar.
+        if (oid === types.builtins.NUMERIC && formato === 'text') return Number;
+        return types.getTypeParser(oid, formato);
+    }
+};
 
 async function obtenerPoolOperativo() {
-    const contexto = obtenerContextoTenantActual();
-    if (!contexto || !contexto.tenantId || !contexto.tenant) {
-        throw new Error('Contexto de tenant obligatorio para acceder a PostgreSQL.');
-    }
-    if (contexto.pool) return contexto.pool;
-    return await obtenerPoolTenant(contexto.tenant);
+    const { pool, tenant } = exigirContextoTenant();
+    return pool || obtenerPoolTenant(tenant);
 }
 
-function convertirParametrosPostgres(sqlTexto) {
-    let indice = 0;
-    return String(sqlTexto)
-        .replace(/INSERT\s+OR\s+IGNORE/gi, 'INSERT')
-        .replace(/COLLATE\s+NOCASE/gi, '')
-        .replace(/\?/g, () => `$${++indice}`);
+async function consultaPostgres(sqlTexto, params) {
+    const contexto = exigirContextoTenant();
+    const cliente = contexto.client || await obtenerPoolOperativo();
+    return cliente.query({ text: sqlTexto, values: params, types: tiposPos });
 }
 
-async function consultaPostgres(sqlTexto, params = []) {
-    const contexto = obtenerContextoTenantActual();
-    const cliente = contexto && contexto.client ? contexto.client : await obtenerPoolOperativo();
-    return await cliente.query(convertirParametrosPostgres(sqlTexto), params);
+async function runQuery(sqlTexto, params = []) {
+    const resultado = await consultaPostgres(sqlTexto, params);
+    return {
+        lastID: resultado.rows[0]?.id ?? null,
+        changes: resultado.rowCount ?? 0
+    };
 }
 
-function runQuery(sqlTexto, params = []) {
-    if (usaPostgres()) {
-        return consultaPostgres(sqlTexto, params).then((resultado) => ({
-            lastID: resultado.rows && resultado.rows[0] ? resultado.rows[0].id || null : null,
-            changes: resultado.rowCount || 0
-        }));
-    }
-    return new Promise((resolve, reject) => {
-        db.run(sqlTexto, params, function (err) {
-            if (err) reject(err);
-            else resolve({ lastID: this.lastID, changes: this.changes });
-        });
-    });
+async function getQuery(sqlTexto, params = []) {
+    const { rows } = await consultaPostgres(sqlTexto, params);
+    return rows[0];
 }
 
-function getQuery(sqlTexto, params = []) {
-    if (usaPostgres()) return consultaPostgres(sqlTexto, params).then((r) => r.rows[0]);
-    return new Promise((resolve, reject) => {
-        db.get(sqlTexto, params, (err, row) => err ? reject(err) : resolve(row));
-    });
-}
-
-function allQuery(sqlTexto, params = []) {
-    if (usaPostgres()) return consultaPostgres(sqlTexto, params).then((r) => r.rows);
-    return new Promise((resolve, reject) => {
-        db.all(sqlTexto, params, (err, rows) => err ? reject(err) : resolve(rows));
-    });
+async function allQuery(sqlTexto, params = []) {
+    const { rows } = await consultaPostgres(sqlTexto, params);
+    return rows;
 }
 
 function numeroPositivo(valor, nombreCampo = 'El valor') {
@@ -89,45 +64,30 @@ function numeroNoNegativo(valor, nombreCampo = 'El valor') {
     return num;
 }
 
-let colaTransaccion = Promise.resolve();
 async function enTransaccion(fn) {
-    if (usaPostgres()) {
-        const pool = await obtenerPoolOperativo();
-        const client = await pool.connect();
-        const contexto = obtenerContextoTenantActual();
-        try {
-            await client.query('BEGIN');
-            const resultado = await ejecutarConContextoTenant({ ...contexto, client }, fn);
-            await client.query('COMMIT');
-            return resultado;
-        } catch (err) {
-            await client.query('ROLLBACK').catch(() => {});
-            throw err;
-        } finally {
-            client.release();
-        }
-    }
+    const contexto = exigirContextoTenant();
+    if (contexto.client) return fn();
 
-    const anterior = colaTransaccion;
-    let liberar;
-    colaTransaccion = new Promise((resolve) => { liberar = resolve; });
-    await anterior;
-    await runQuery('BEGIN IMMEDIATE');
+    const pool = await obtenerPoolOperativo();
+    const client = await pool.connect();
+    let errorRollback;
     try {
-        const resultado = await fn();
-        await runQuery('COMMIT');
+        await client.query('BEGIN');
+        const resultado = await ejecutarConContextoTenant({ ...contexto, client }, fn);
+        const cierre = await client.query('COMMIT');
+        if (cierre.command === 'ROLLBACK') {
+            throw new Error('PostgreSQL revirtió la transacción al intentar confirmarla.');
+        }
         return resultado;
     } catch (err) {
-        await runQuery('ROLLBACK').catch(() => {});
+        await client.query('ROLLBACK').catch((error) => { errorRollback = error; });
         throw err;
     } finally {
-        liberar();
+        client.release(errorRollback);
     }
 }
 
 module.exports = {
-    db, drizzleDb, schema, eq, ne, gt, gte, lt, lte, and, or, sql,
-    desc, asc, like, inArray, notInArray, isNull, isNotNull,
     runQuery, getQuery, allQuery, enTransaccion,
     ejecutarConContextoTenant, obtenerPoolOperativo,
     redondear2, numeroPositivo, numeroNoNegativo

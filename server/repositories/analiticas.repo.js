@@ -11,12 +11,18 @@ const {
     redondear2
 } = require('./db');
 
+const ZONA_REPORTES = 'America/La_Paz';
+const calendarioBolivia = new Intl.DateTimeFormat('en', {
+    timeZone: ZONA_REPORTES, year: 'numeric', month: 'numeric', day: 'numeric'
+});
+const redondeoSql = (expresion) => `ROUND((${expresion})::numeric, 2)::double precision`;
+
 /**
  * Normaliza y calcula los días restantes para una fecha de vencimiento dada (YYYY-MM-DD).
  * @param {string} fechaStr 
  * @returns {number|null} Diferencia en días enteros (negativo si está vencido, 0 si vence hoy).
  */
-function calcularDiasHastaVencimiento(fechaStr) {
+function calcularDiasHastaVencimiento(fechaStr, hoy) {
     if (!fechaStr) return null;
     const str = String(fechaStr).trim();
     const match = str.match(/^(\d{4})-(\d{2})-(\d{2})/);
@@ -26,11 +32,7 @@ function calcularDiasHastaVencimiento(fechaStr) {
     const mes = parseInt(match[2], 10) - 1;
     const dia = parseInt(match[3], 10);
 
-    const fechaVenc = new Date(anio, mes, dia);
-    const ahora = new Date();
-    const hoy = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate());
-
-    const diffMs = fechaVenc.getTime() - hoy.getTime();
+    const diffMs = Date.UTC(anio, mes, dia) - hoy;
     return Math.round(diffMs / (1000 * 60 * 60 * 24));
 }
 
@@ -49,35 +51,34 @@ function calcularDiasHastaVencimiento(fechaStr) {
  */
 async function obtenerMatrizRendimiento(dias = 30) {
     const diasValidados = Math.max(1, parseInt(dias, 10) || 30);
-    const intervaloModificador = `-${diasValidados} days`;
-
     const sqlMatriz = `
         SELECT 
             p.id as producto_id,
             p.nombre as producto_nombre,
             p.categoria,
             p.tipo_inventario,
-            ROUND(SUM(d.cantidad), 2) as unidades_vendidas,
-            ROUND(SUM(
+            ${redondeoSql('SUM(d.cantidad)')} as unidades_vendidas,
+            ${redondeoSql(`SUM(
                 CASE 
                     WHEN COALESCE(m.subtotal_bruto, 0) > 0 AND COALESCE(m.descuento_total, 0) > 0 
                     THEN d.subtotal * (1.0 - (m.descuento_total * 1.0 / m.subtotal_bruto))
                     ELSE d.subtotal 
                 END
-            ), 2) as ingresos_totales,
-            ROUND(SUM(d.cantidad * d.costo_unitario), 2) as costo_total
+            )`)} as ingresos_totales,
+            ${redondeoSql('SUM(d.cantidad * d.costo_unitario)')} as costo_total
         FROM detalle_movimientos d
         INNER JOIN movimientos m ON d.movimiento_id = m.id
         INNER JOIN productos p ON d.producto_id = p.id
         WHERE m.tipo = 'ingreso'
           AND m.estado = 'completado'
           AND COALESCE(m.categoria_contable, 'venta') = 'venta'
-          AND datetime(m.fecha_hora, 'localtime') >= datetime('now', 'localtime', ?)
+          AND (m.fecha_hora AT TIME ZONE '${ZONA_REPORTES}') >=
+              date_trunc('second', CURRENT_TIMESTAMP AT TIME ZONE '${ZONA_REPORTES}') - ($1::double precision * INTERVAL '1 day')
         GROUP BY p.id, p.nombre, p.categoria, p.tipo_inventario
-        ORDER BY unidades_vendidas DESC, ingresos_totales DESC
+        ORDER BY unidades_vendidas DESC, ingresos_totales DESC, p.id ASC
     `;
 
-    const rows = await allQuery(sqlMatriz, [intervaloModificador]);
+    const rows = await allQuery(sqlMatriz, [diasValidados]);
 
     const productos = rows.map((r) => {
         const unidades = Number(r.unidades_vendidas || 0);
@@ -87,7 +88,7 @@ async function obtenerMatrizRendimiento(dias = 30) {
         const margenUnitario = unidades > 0 ? redondear2(margen / unidades) : 0;
 
         return {
-            producto_id: r.producto_id,
+            producto_id: Number(r.producto_id),
             producto_nombre: r.producto_nombre,
             categoria: r.categoria || 'General',
             tipo_inventario: r.tipo_inventario,
@@ -203,8 +204,8 @@ async function obtenerSemaforoReposicion() {
         const costoEstimadoInversion = redondear2(sugerenciaCompra * costoUnitario);
 
         return {
-            id: p.id,
-            producto_id: p.id,
+            id: Number(p.id),
+            producto_id: Number(p.id),
             nombre: p.nombre,
             tipo: 'producto',
             tipo_inventario: p.tipo_inventario,
@@ -227,8 +228,8 @@ async function obtenerSemaforoReposicion() {
         const costoEstimadoInversion = redondear2(sugerenciaCompra * costoUnitario);
 
         return {
-            id: i.id,
-            insumo_id: i.id,
+            id: Number(i.id),
+            insumo_id: Number(i.id),
             nombre: i.nombre,
             tipo: 'insumo',
             tipo_inventario: 'insumo',
@@ -273,6 +274,9 @@ async function obtenerSemaforoReposicion() {
  * - 'vigente_mas_30d' (> 30 días)
  */
 async function obtenerRadarVencimientos() {
+    const partes = calendarioBolivia.formatToParts(new Date());
+    const { year, month, day } = Object.fromEntries(partes.map(({ type, value }) => [type, value]));
+    const hoy = Date.UTC(Number(year), Number(month) - 1, Number(day));
     const sqlLotes = `
         SELECT 
             pl.id as lote_id,
@@ -318,7 +322,7 @@ async function obtenerRadarVencimientos() {
     const items = [];
 
     for (const l of rowsLotes) {
-        const diasRestantes = calcularDiasHastaVencimiento(l.fecha_vencimiento);
+        const diasRestantes = calcularDiasHastaVencimiento(l.fecha_vencimiento, hoy);
         let urgencia;
         if (diasRestantes === null) {
             urgencia = 'atencion_30d';
@@ -338,9 +342,9 @@ async function obtenerRadarVencimientos() {
         const costo = Number(l.costo_unitario || 0);
 
         items.push({
-            id: l.lote_id,
-            lote_id: l.lote_id,
-            producto_id: l.producto_id,
+            id: Number(l.lote_id),
+            lote_id: Number(l.lote_id),
+            producto_id: Number(l.producto_id),
             nombre: l.item_nombre,
             tipo: 'producto',
             origen: 'producto_lotes',
@@ -357,7 +361,7 @@ async function obtenerRadarVencimientos() {
     }
 
     for (const i of rowsInsumos) {
-        const diasRestantes = calcularDiasHastaVencimiento(i.fecha_vencimiento);
+        const diasRestantes = calcularDiasHastaVencimiento(i.fecha_vencimiento, hoy);
         let urgencia;
         if (diasRestantes === null) {
             urgencia = 'atencion_30d';
@@ -377,8 +381,8 @@ async function obtenerRadarVencimientos() {
         const costo = Number(i.costo_unitario || 0);
 
         items.push({
-            id: i.insumo_id,
-            insumo_id: i.insumo_id,
+            id: Number(i.insumo_id),
+            insumo_id: Number(i.insumo_id),
             nombre: i.item_nombre,
             tipo: 'insumo',
             origen: 'insumos',

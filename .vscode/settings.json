@@ -1,10 +1,7 @@
 {
   "files.exclude": {
     "**/.git": true,
-    "**/.next": false,
-    "**/caja.db-journal": true,
-    "**/caja.db-shm": true,
-    "**/caja.db-wal": false
+    "**/.next": false
   },
   "files.watcherExclude": {
     "**/.next/**": true,

@@ -3,7 +3,7 @@
  * SIMULADOR INTEGRAL DE CICLO DE VIDA Y AUDITORÍA DE INVARIANTES (E2E)
  *
  * Simula el funcionamiento completo del sistema POS desde cero en un entorno
- * 100% aislado (base de datos temporal virgen), sin tocar caja.db ni datos reales:
+ * 100% aislado (base PostgreSQL temporal):
  *  1. Setup inicial de usuarios (developer, admin, cajeros) y autenticación con rate limiting.
  *  2. Configuración del negocio, régimen tributario (IVA/IT), y estaciones físicas de caja.
  *  3. Creación de catálogo: Insumos métricos, recetas compuestas, modificadores, combos y lotes PEPS.
@@ -19,7 +19,7 @@
  *  6. Detección de casos límite y robustez (ventas sin stock, caja cerrada, reglas de integridad).
  *  7. Anulación de ventas con restitución atómica de inventario y Kardex.
  *  8. Arqueo ciego de caja (efectivo y QR) y cierre formal de turno.
- *  9. Auditoría de consistencia: Kardex algebraico, integridad SQLite y generación de reportes Excel/PDF.
+ *  9. Auditoría de consistencia: Kardex algebraico, integridad PostgreSQL y generación del libro Excel.
  *
  * RESILIENCIA A FALLOS:
  *  Si un paso no registra o falla, el simulador NO crashea abruptamente.
@@ -33,29 +33,15 @@
 
 const path = require('path');
 const fs = require('fs');
+const assert = require('node:assert/strict');
 
-// 1. Configuración de entorno de ejecución aislado
-const TMP_DIR = path.join(__dirname, 'tmp');
-const BACKUPS_DIR = path.join(TMP_DIR, 'backups_simulacion');
-if (!fs.existsSync(TMP_DIR)) fs.mkdirSync(TMP_DIR, { recursive: true });
-if (!fs.existsSync(BACKUPS_DIR)) fs.mkdirSync(BACKUPS_DIR, { recursive: true });
-
-const DB_PATH = path.join(TMP_DIR, 'simulacion_e2e.db');
-for (const ext of ['', '-wal', '-shm', '-journal']) {
-    try { fs.unlinkSync(DB_PATH + ext); } catch (_) {}
-}
-
-process.env.DATABASE_PATH = DB_PATH;
-process.env.BACKUP_DIR = BACKUPS_DIR;
-process.env.NODE_ENV = 'development';
-
-// 2. Importación de módulos y fachada central
+const { randomBytes, randomInt } = require('node:crypto');
+const { ejecutarMigracionesEnPool } = require('../database/migraciones-tenant');
+const { allQuery: allSql, getQuery: getSql, enTransaccion, runQuery,
+    ejecutarConContextoTenant } = require('../server/repositories/db');
+const { conBasesPostgres, contextoOperativo } = require('./postgres-fixture');
 const q = require('../server/queries');
-const db = require('../database/database');
-
-// Helpers de consulta SQL directa para aserciones de auditoría
-const allSql = (sql, p = []) => new Promise((res, rej) => db.all(sql, p, (err, rows) => (err ? rej(err) : res(rows))));
-const getSql = async (sql, p = []) => (await allSql(sql, p))[0];
+const ExcelJS = require('exceljs');
 
 // 3. Estructura de telemetría y recolección de eventos
 const bitacora = [];
@@ -76,7 +62,7 @@ async function simularPaso(categoria, nombre, accionFn, opciones = {}) {
     contadores.total++;
     const num = contadorPasos;
     const t0 = Date.now();
-    const esperaError = !!opciones.esperaError;
+    const esperaError = opciones.esperaError;
 
     let resultadoAccion = null;
     let errorCapturado = null;
@@ -92,7 +78,7 @@ async function simularPaso(categoria, nombre, accionFn, opciones = {}) {
         paso: num,
         categoria,
         nombre,
-        esperaError,
+        esperaError: Boolean(esperaError),
         duracionMs,
         estado: 'OK',
         diagnostico: '',
@@ -100,20 +86,20 @@ async function simularPaso(categoria, nombre, accionFn, opciones = {}) {
     };
 
     if (esperaError) {
-        if (errorCapturado) {
+        if (errorCapturado && esperaError.test(errorCapturado.message)) {
             evento.estado = 'OK';
             evento.diagnostico = `Rechazo controlado correcto: "${errorCapturado.message}"`;
             contadores.ok++;
         } else {
             evento.estado = 'FALLA_LOGICA';
-            evento.diagnostico = 'Se esperaba que la operación fuera rechazada por reglas de negocio, pero fue permitida indebidamente.';
+            evento.diagnostico = 'La operación no produjo el rechazo de negocio esperado.';
             contadores.fallaLogica++;
         }
     } else {
         if (errorCapturado) {
             evento.estado = 'CRASH_ERROR';
-            evento.diagnostico = `Excepción no controlada: ${errorCapturado.message}`;
-            evento.detalles = errorCapturado.stack;
+            evento.diagnostico = errorCapturado.code
+                ? `PostgreSQL rechazó la operación (${errorCapturado.code}).` : errorCapturado.message;
             contadores.crash++;
         } else {
             // Si la acción corrió sin explotar, ejecutamos validaciones de negocio personalizadas
@@ -159,41 +145,26 @@ async function simularPaso(categoria, nombre, accionFn, opciones = {}) {
 // =====================================================================
 // FUNCIÓN PRINCIPAL DEL SIMULADOR
 // =====================================================================
-async function ejecutarSimulador() {
+async function ejecutarSimulador(base) {
     console.log('\n\x1b[1m\x1b[36m========================================================================\x1b[0m');
     console.log('\x1b[1m\x1b[36m   INICIANDO SIMULADOR INTEGRAL E2E Y AUDITORÍA DE INVARIANTES (v12)   \x1b[0m');
     console.log('\x1b[1m\x1b[36m========================================================================\x1b[0m');
-    console.log(`Base de datos temporal: ${DB_PATH}`);
+    console.log(`Base de datos temporal: ${base}`);
     console.log(`Modo: Transaccional Aislado | Verificación Continua\n`);
 
-    const ctx = {}; // Contexto compartido en memoria entre pasos
-
-    // Asegurar limpieza absoluta de tablas para garantizar un inicio 100% desde cero en cada ejecución
-    await allSql('PRAGMA foreign_keys = OFF;');
-    const tablasLimpieza = [
-        'detalle_movimientos_combos', 'detalle_movimientos_modificadores',
-        'combo_componentes', 'producto_grupos_modificadores',
-        'modificadores_opciones', 'grupos_modificadores',
-        'movimientos_productos_directos', 'movimientos_insumos',
-        'movimientos_pagos', 'detalle_movimientos', 'movimientos',
-        'recetas', 'producto_lotes', 'productos', 'insumos',
-        'cajas', 'cajas_fisicas', 'categorias', 'usuarios'
-    ];
-    for (const t of tablasLimpieza) {
-        try { await allSql(`DELETE FROM ${t};`); } catch (_) {}
-    }
-    await allSql('UPDATE configuracion_negocio SET configurado = 0 WHERE id = 1;');
-    await allSql('PRAGMA foreign_keys = ON;');
+    const ctx = {};
+    const clave = 'A1' + randomBytes(12).toString('hex');
+    const pin = String(randomInt(1000, 10000));
 
     // -----------------------------------------------------------------
     // FASE 1: USUARIOS Y AUTENTICACIÓN
     // -----------------------------------------------------------------
     await simularPaso('AUTH', 'Crear usuario Developer técnico', async () => {
-        return await q.crearUsuario('developer_sim', 'DevPass2026!', 'developer');
+        return await q.crearUsuario('developer_sim', clave, 'developer');
     }, {
         validar: async (id) => {
             ctx.devId = id;
-            const u = await getSql('SELECT * FROM usuarios WHERE id = ?', [id]);
+            const u = await getSql('SELECT * FROM usuarios WHERE id = $1', [id]);
             return {
                 ok: !!u && u.rol === 'developer' && u.activo === 1,
                 motivo: u ? `Usuario dev ID ${u.id} creado con hash bcrypt.` : 'No se encontró en base de datos.'
@@ -202,21 +173,21 @@ async function ejecutarSimulador() {
     });
 
     await simularPaso('AUTH', 'Crear usuario Administrador', async () => {
-        return await q.crearUsuario('admin_principal', 'AdminPass2026!', 'admin');
+        return await q.crearUsuario('admin_principal', clave, 'admin');
     }, {
         validar: async (id) => {
             ctx.adminId = id;
-            const u = await getSql('SELECT * FROM usuarios WHERE id = ?', [id]);
+            const u = await getSql('SELECT * FROM usuarios WHERE id = $1', [id]);
             return { ok: !!u && u.rol === 'admin', motivo: `Administrador creado con ID ${id}` };
         }
     });
 
     await simularPaso('AUTH', 'Crear usuario Cajero Operativo', async () => {
-        return await q.crearUsuario('cajero_maria', '1234', 'user');
+        return await q.crearUsuario('cajero_maria', pin, 'user');
     }, {
         validar: async (id) => {
             ctx.cajeroId = id;
-            const u = await getSql('SELECT * FROM usuarios WHERE id = ?', [id]);
+            const u = await getSql('SELECT * FROM usuarios WHERE id = $1', [id]);
             return { ok: !!u && u.rol === 'user', motivo: `Cajero creado con PIN validado (ID ${id})` };
         }
     });
@@ -233,7 +204,7 @@ async function ejecutarSimulador() {
     });
 
     await simularPaso('AUTH', 'Autenticación legítima de Cajero', async () => {
-        return await q.verificarUsuario('cajero_maria', '1234');
+        return await q.verificarUsuario('cajero_maria', pin);
     }, {
         validar: async (usuario) => {
             return {
@@ -291,7 +262,7 @@ async function ejecutarSimulador() {
     }, {
         validar: async (id) => {
             ctx.cajaFisicaPrincipalId = id;
-            const cf = await getSql('SELECT * FROM cajas_fisicas WHERE id = ?', [id]);
+            const cf = await getSql('SELECT * FROM cajas_fisicas WHERE id = $1', [id]);
             return { ok: !!cf && cf.activa === 1, motivo: `Caja física activa creada (ID ${id})` };
         }
     });
@@ -301,7 +272,7 @@ async function ejecutarSimulador() {
     }, {
         validar: async (id) => {
             ctx.cajaFisicaSecundariaId = id;
-            const cf = await getSql('SELECT * FROM cajas_fisicas WHERE id = ?', [id]);
+            const cf = await getSql('SELECT * FROM cajas_fisicas WHERE id = $1', [id]);
             return { ok: !!cf && cf.activa === 1, motivo: `Caja secundaria creada (ID ${id})` };
         }
     });
@@ -314,7 +285,7 @@ async function ejecutarSimulador() {
     }, {
         validar: async (id) => {
             ctx.insumoCafeId = id;
-            const ins = await getSql('SELECT * FROM insumos WHERE id = ?', [id]);
+            const ins = await getSql('SELECT * FROM insumos WHERE id = $1', [id]);
             return { ok: !!ins && Number(ins.stock_actual) === 1000, motivo: `Insumo Café creado con 1000g a Bs ${ins.costo_por_unidad}/g` };
         }
     });
@@ -342,13 +313,13 @@ async function ejecutarSimulador() {
         // CPP nuevo = (1000 * 0.05 + 70) / 2000 = 120 / 2000 = Bs 0.06/g
         return await q.registrarCompraInsumo(ctx.insumoCafeId, 1000, 70.0, 'Compra de reposición', 'Distribuidora Yungas', {
             conFactura: true,
-            numeroFactura: 'F-9021',
+            nroFacturaCompra: 'F-9021',
             proveedorNit: '908273645'
         });
     }, {
         validar: async () => {
-            const ins = await getSql('SELECT * FROM insumos WHERE id = ?', [ctx.insumoCafeId]);
-            const kardex = await getSql('SELECT * FROM movimientos_insumos WHERE insumo_id = ? ORDER BY id DESC LIMIT 1', [ctx.insumoCafeId]);
+            const ins = await getSql('SELECT * FROM insumos WHERE id = $1', [ctx.insumoCafeId]);
+            const kardex = await getSql('SELECT * FROM movimientos_insumos WHERE insumo_id = $1 ORDER BY id DESC LIMIT 1', [ctx.insumoCafeId]);
             const stockOk = Number(ins.stock_actual) === 2000;
             const cppOk = Math.abs(Number(ins.costo_por_unidad) - 0.06) < 0.001;
             return {
@@ -373,7 +344,7 @@ async function ejecutarSimulador() {
     }, {
         validar: async (prod) => {
             ctx.prodCappuccinoId = prod.id;
-            const p = await getSql('SELECT * FROM productos WHERE id = ?', [prod.id]);
+            const p = await getSql('SELECT * FROM productos WHERE id = $1', [prod.id]);
             const costoOk = Math.abs(Number(p.costo) - 2.28) < 0.05;
             return {
                 ok: !!p && p.tipo_inventario === 'receta' && costoOk,
@@ -404,7 +375,7 @@ async function ejecutarSimulador() {
         return grupoId;
     }, {
         validar: async (grupoId) => {
-            const opc = await getSql('SELECT * FROM modificadores_opciones WHERE grupo_id = ?', [grupoId]);
+            const opc = await getSql('SELECT * FROM modificadores_opciones WHERE grupo_id = $1', [grupoId]);
             ctx.modAlmendrasId = opc.id;
             return {
                 ok: !!opc && Number(opc.precio_adicional) === 4.0,
@@ -429,7 +400,7 @@ async function ejecutarSimulador() {
         return prod;
     }, {
         validar: async (id) => {
-            const p = await getSql('SELECT * FROM productos WHERE id = ?', [id]);
+            const p = await getSql('SELECT * FROM productos WHERE id = $1', [id]);
             return { ok: !!p && p.tipo_inventario === 'directo', motivo: `Producto directo creado (ID ${id})` };
         }
     });
@@ -439,11 +410,11 @@ async function ejecutarSimulador() {
         ctx.fechaLoteA = fechaCercana;
         return await q.registrarCompraProductoDirecto(ctx.prodMuffinId, 10, 50.0, fechaCercana, {
             conFactura: true,
-            numeroFactura: 'F-LOTE-A'
+            nroFacturaCompra: 'F-LOTE-A'
         });
     }, {
         validar: async () => {
-            const lote = await getSql('SELECT * FROM producto_lotes WHERE producto_id = ? AND fecha_vencimiento = ?', [ctx.prodMuffinId, ctx.fechaLoteA]);
+            const lote = await getSql('SELECT * FROM producto_lotes WHERE producto_id = $1 AND fecha_vencimiento = $2', [ctx.prodMuffinId, ctx.fechaLoteA]);
             ctx.loteAId = lote?.id;
             return {
                 ok: !!lote && Number(lote.stock) === 10,
@@ -457,12 +428,12 @@ async function ejecutarSimulador() {
         ctx.fechaLoteB = fechaLejana;
         return await q.registrarCompraProductoDirecto(ctx.prodMuffinId, 20, 100.0, fechaLejana, {
             conFactura: true,
-            numeroFactura: 'F-LOTE-B'
+            nroFacturaCompra: 'F-LOTE-B'
         });
     }, {
         validar: async () => {
-            const prod = await getSql('SELECT stock FROM productos WHERE id = ?', [ctx.prodMuffinId]);
-            const lotes = await allSql('SELECT * FROM producto_lotes WHERE producto_id = ?', [ctx.prodMuffinId]);
+            const prod = await getSql('SELECT stock FROM productos WHERE id = $1', [ctx.prodMuffinId]);
+            const lotes = await allSql('SELECT * FROM producto_lotes WHERE producto_id = $1', [ctx.prodMuffinId]);
             return {
                 ok: Number(prod.stock) === 30 && lotes.length === 2,
                 motivo: `Stock consolidado: ${prod.stock} unidades distribuidas en 2 lotes.`
@@ -486,9 +457,9 @@ async function ejecutarSimulador() {
     }, {
         validar: async (combo) => {
             ctx.comboDuoId = combo.id;
-            const c = await getSql('SELECT * FROM productos WHERE id = ?', [combo.id]);
+            const c = await getSql('SELECT * FROM productos WHERE id = $1', [combo.id]);
             return {
-                ok: c.tipo_inventario === 'combo' && c.limite_unidades_restante === 5,
+                ok: c.tipo_inventario === 'combo' && Number(c.limite_unidades_restante) === 5,
                 motivo: `Combo creado (ID ${c.id}) con límite restante de 5 unidades.`
             };
         }
@@ -502,7 +473,7 @@ async function ejecutarSimulador() {
     }, {
         validar: async (caja) => {
             ctx.cajaId = typeof caja === 'object' ? (caja.id || caja.cajaId) : caja;
-            const c = await getSql('SELECT * FROM cajas WHERE id = ?', [ctx.cajaId]);
+            const c = await getSql('SELECT * FROM cajas WHERE id = $1', [ctx.cajaId]);
             return {
                 ok: c.estado === 'abierta' && Number(c.monto_inicial) === 100.0,
                 motivo: `Turno ID ${c.id} ABIERTO. Fondo inicial: Bs ${c.monto_inicial}`
@@ -523,9 +494,9 @@ async function ejecutarSimulador() {
         validar: async (v) => {
             ctx.venta1Id = v.movimientoId || v.id;
             const cambioOk = Math.abs(Number(v.cambio) - 32.0) < 0.01;
-            const mov = await getSql('SELECT * FROM movimientos WHERE id = ?', [ctx.venta1Id]);
-            const pago = await getSql('SELECT * FROM movimientos_pagos WHERE movimiento_id = ?', [ctx.venta1Id]);
-            const kardexCafe = await getSql('SELECT * FROM movimientos_insumos WHERE insumo_id = ? ORDER BY id DESC LIMIT 1', [ctx.insumoCafeId]);
+            const mov = await getSql('SELECT * FROM movimientos WHERE id = $1', [ctx.venta1Id]);
+            const pago = await getSql('SELECT * FROM movimientos_pagos WHERE movimiento_id = $1', [ctx.venta1Id]);
+            const kardexCafe = await getSql('SELECT * FROM movimientos_insumos WHERE insumo_id = $1 ORDER BY id DESC LIMIT 1', [ctx.insumoCafeId]);
 
             const ok = cambioOk && Number(mov.monto) === 18.0 && pago.metodo_pago === 'efectivo' && kardexCafe.tipo === 'consumo_venta';
             return {
@@ -547,8 +518,8 @@ async function ejecutarSimulador() {
     }, {
         validar: async (v) => {
             ctx.venta2Id = v.movimientoId || v.id;
-            const loteA = await getSql('SELECT stock FROM producto_lotes WHERE id = ?', [ctx.loteAId]);
-            const movPago = await getSql('SELECT * FROM movimientos_pagos WHERE movimiento_id = ?', [ctx.venta2Id]);
+            const loteA = await getSql('SELECT stock FROM producto_lotes WHERE id = $1', [ctx.loteAId]);
+            const movPago = await getSql('SELECT * FROM movimientos_pagos WHERE movimiento_id = $1', [ctx.venta2Id]);
 
             const pepsOk = Number(loteA.stock) === 9; // De 10 a 9
             const qrOk = movPago.metodo_pago === 'qr' && Number(movPago.monto) === 12.0;
@@ -570,7 +541,7 @@ async function ejecutarSimulador() {
         );
     }, {
         validar: async () => {
-            const combo = await getSql('SELECT limite_unidades_restante FROM productos WHERE id = ?', [ctx.comboDuoId]);
+            const combo = await getSql('SELECT limite_unidades_restante FROM productos WHERE id = $1', [ctx.comboDuoId]);
             return {
                 ok: Number(combo.limite_unidades_restante) === 4,
                 motivo: `Combo vendido: límite restante decrementado exactamente a ${combo.limite_unidades_restante} unidades.`
@@ -595,11 +566,11 @@ async function ejecutarSimulador() {
     }, {
         validar: async (v) => {
             const movId = v.movimientoId || v.id;
-            const mov = await getSql('SELECT monto FROM movimientos WHERE id = ?', [movId]);
+            const mov = await getSql('SELECT monto FROM movimientos WHERE id = $1', [movId]);
             const modHist = await getSql(
                 `SELECT dmm.* FROM detalle_movimientos_modificadores dmm
                  JOIN detalle_movimientos dm ON dmm.detalle_movimiento_id = dm.id
-                 WHERE dm.movimiento_id = ?`,
+                 WHERE dm.movimiento_id = $1`,
                 [movId]
             );
             const precioCorrecto = Number(mov.monto) === 22.0;
@@ -633,17 +604,20 @@ async function ejecutarSimulador() {
     }, {
         validar: async (v) => {
             const movId = v.movimientoId || v.id;
-            const mov = await getSql('SELECT * FROM movimientos WHERE id = ?', [movId]);
-            const pagos = await allSql('SELECT * FROM movimientos_pagos WHERE movimiento_id = ?', [movId]);
-            const lineas = await allSql('SELECT * FROM detalle_movimientos WHERE movimiento_id = ?', [movId]);
+            const mov = await getSql('SELECT * FROM movimientos WHERE id = $1', [movId]);
+            const pagos = await allSql('SELECT * FROM movimientos_pagos WHERE movimiento_id = $1', [movId]);
+            const lineas = await allSql('SELECT * FROM detalle_movimientos WHERE movimiento_id = $1', [movId]);
 
             const sumaPagos = pagos.reduce((acc, p) => acc + Number(p.monto), 0);
-            const sumaLineasNetas = lineas.reduce((acc, l) => acc + Number(l.subtotal_neto ?? (l.subtotal - (l.descuento_aplicado || 0))), 0);
+            const sumaLineasNetas = lineas.reduce((acc, l) => acc + Number(l.subtotal), 0) - Number(mov.descuento_total);
+            const descuentosOk = mov.descuento_total === 12 && Math.abs(sumaLineasNetas - 30) < 0.01;
+            const pagoExacto = pagos.some((p) => p.metodo_pago === 'efectivo' && p.monto === 10)
+                && pagos.some((p) => p.metodo_pago === 'qr' && p.monto === 20);
 
             const balancePagosOk = Math.abs(sumaPagos - 30.0) < 0.01;
             const montoNetoOk = Math.abs(Number(mov.monto) - 30.0) < 0.01;
             return {
-                ok: balancePagosOk && montoNetoOk && pagos.length === 2,
+                ok: balancePagosOk && montoNetoOk && descuentosOk && pagoExacto && pagos.length === 2,
                 motivo: `Pago mixto cuadrado: Efectivo Bs 10 + QR Bs 20 = Bs 30.00 | Prorrateo de descuento verificado.`
             };
         }
@@ -654,7 +628,7 @@ async function ejecutarSimulador() {
     }, {
         validar: async (movId) => {
             ctx.inyeccionId = movId;
-            const mov = await getSql('SELECT * FROM movimientos WHERE id = ?', [movId]);
+            const mov = await getSql('SELECT * FROM movimientos WHERE id = $1', [movId]);
             return {
                 ok: mov.tipo === 'ingreso' && mov.categoria_contable === 'aporte_cambio' && Number(mov.monto) === 50.0,
                 motivo: 'Aporte de efectivo registrado. Incrementa dinero físico sin inflar ventas operativas.'
@@ -665,13 +639,13 @@ async function ejecutarSimulador() {
     await simularPaso('CAJA', 'Registro de Egreso Menor con Factura (Crédito Fiscal IVA)', async () => {
         return await q.registrarEgreso(ctx.cajaId, 15.0, 'Compra urgente de servilletas', 'efectivo', ctx.cajeroId, {
             conFactura: true,
-            numeroFactura: 'FAC-SERV-01',
+            nroFactura: 'FAC-SERV-01',
             proveedorNit: '88776655'
         });
     }, {
         validar: async (movId) => {
             ctx.egresoId = movId;
-            const mov = await getSql('SELECT * FROM movimientos WHERE id = ?', [movId]);
+            const mov = await getSql('SELECT * FROM movimientos WHERE id = $1', [movId]);
             // Con 13% IVA, crédito fiscal = 15 * 0.13 = Bs 1.95
             const ivaCreditoOk = Math.abs(Number(mov.iva_monto) - 1.95) < 0.05;
             return {
@@ -693,14 +667,15 @@ async function ejecutarSimulador() {
             'Venta Ilegal',
             ctx.cajeroId
         );
-    }, { esperaError: true });
+    }, { esperaError: /cantidad.+mayor a 0/i });
 
     await simularPaso('ROBUSTEZ', 'Rechazo: Intentar desactivar la única caja física activa restante', async () => {
+        await assert.rejects(q.desactivarCajaFisica(ctx.cajaFisicaPrincipalId, ctx.adminId), /turno.+abierto/i);
         // Desactivamos primero la secundaria
-        await q.actualizarEstadoCajaFisica(ctx.cajaFisicaSecundariaId, false, ctx.adminId);
+        await q.desactivarCajaFisica(ctx.cajaFisicaSecundariaId, ctx.adminId);
         // Ahora intentamos desactivar la principal (debe impedirlo)
-        return await q.actualizarEstadoCajaFisica(ctx.cajaFisicaPrincipalId, false, ctx.adminId);
-    }, { esperaError: true });
+        return await q.desactivarCajaFisica(ctx.cajaFisicaPrincipalId, ctx.adminId);
+    }, { esperaError: /única caja física|al menos una caja física/i });
 
     // -----------------------------------------------------------------
     // FASE 6: ANULACIÓN DE VENTA AUDITADA
@@ -709,9 +684,9 @@ async function ejecutarSimulador() {
         return await q.anularMovimientoConPermiso(ctx.adminId, ctx.venta1Id, 'Error de digitación en mostrador');
     }, {
         validar: async () => {
-            const mov = await getSql('SELECT * FROM movimientos WHERE id = ?', [ctx.venta1Id]);
+            const mov = await getSql('SELECT * FROM movimientos WHERE id = $1', [ctx.venta1Id]);
             const reingresoKardex = await getSql(
-                'SELECT * FROM movimientos_insumos WHERE insumo_id = ? AND tipo = ? ORDER BY id DESC LIMIT 1',
+                'SELECT * FROM movimientos_insumos WHERE insumo_id = $1 AND tipo = $2 ORDER BY id DESC LIMIT 1',
                 [ctx.insumoCafeId, 'reingreso_anulacion']
             );
             return {
@@ -748,7 +723,7 @@ async function ejecutarSimulador() {
         return await q.cerrarCaja(ctx.cajaId, 192.0, ctx.cajeroId, 32.0, 'Turno concluido en orden sin novedades');
     }, {
         validar: async () => {
-            const c = await getSql('SELECT * FROM cajas WHERE id = ?', [ctx.cajaId]);
+            const c = await getSql('SELECT * FROM cajas WHERE id = $1', [ctx.cajaId]);
             const cerrada = c.estado === 'cerrada';
             const difEfvo = Math.abs(Number(c.diferencia_efectivo || 0)) < 0.01;
             const difQr = Math.abs(Number(c.diferencia_qr || 0)) < 0.01;
@@ -768,19 +743,18 @@ async function ejecutarSimulador() {
             'Venta tras cierre',
             ctx.cajeroId
         );
-    }, { esperaError: true });
+    }, { esperaError: /caja.+no está abierta/i });
 
     // -----------------------------------------------------------------
-    // FASE 8: AUDITORÍA DE INVARIANTES CONTABLES Y MOTOR SQLITE
+    // FASE 8: AUDITORÍA DE INVARIANTES CONTABLES Y POSTGRESQL
     // -----------------------------------------------------------------
     await simularPaso('AUDITORIA', 'Verificar Integridad Algebraica de Kardex de Insumos', async () => {
         return await q.verificarIntegridadKardexInsumos();
     }, {
         validar: async (diagnosticos) => {
-            const desfasados = Array.isArray(diagnosticos) ? diagnosticos.filter((d) => !d.es_coherente) : [];
             return {
-                ok: desfasados.length === 0,
-                motivo: desfasados.length === 0 ? 'Kardex de insumos 100% coherente con existencias físicas.' : `${desfasados.length} insumos con descuadre.`
+                ok: diagnosticos.integridadOk === true && diagnosticos.totalDescuadres === 0,
+                motivo: `Descuadres detectados: ${diagnosticos.totalDescuadres}.`
             };
         }
     });
@@ -789,42 +763,64 @@ async function ejecutarSimulador() {
         return await q.verificarIntegridadKardexDirecto();
     }, {
         validar: async (diagnosticos) => {
-            const desfasados = Array.isArray(diagnosticos) ? diagnosticos.filter((d) => !d.es_coherente) : [];
             return {
-                ok: desfasados.length === 0,
-                motivo: desfasados.length === 0 ? 'Kardex de productos directos y lotes PEPS 100% coherente.' : `${desfasados.length} productos con descuadre.`
+                ok: diagnosticos.integridadOk === true && diagnosticos.totalDescuadres === 0,
+                motivo: `Descuadres detectados: ${diagnosticos.totalDescuadres}.`
             };
         }
     });
 
-    await simularPaso('AUDITORIA', 'Verificar Salud Física de Base de Datos (PRAGMA integrity_check)', async () => {
-        return await allSql('PRAGMA integrity_check;');
-    }, {
-        validar: async (rows) => {
-            const ok = rows.length === 1 && rows[0].integrity_check === 'ok';
-            return { ok, motivo: `SQLite integrity_check: ${rows[0]?.integrity_check}` };
+    await simularPaso('AUDITORIA', 'Verificar lectura de tablas y validez de índices PostgreSQL', async () => {
+        const tablas = await allSql(`
+            SELECT c.relname AS nombre, pg_relation_size(c.oid) >= 0 AS legible
+            FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+            WHERE n.nspname = current_schema() AND c.relkind = 'r'
+        `);
+        for (const { nombre } of tablas) {
+            await getSql(`SELECT COUNT(*) FROM "${nombre.replaceAll('"', '""')}"`);
         }
+        const { invalidos } = await getSql(`
+            SELECT COUNT(*)::int AS invalidos FROM pg_index i
+            JOIN pg_class c ON c.oid = i.indrelid
+            JOIN pg_namespace n ON n.oid = c.relnamespace
+            WHERE n.nspname = current_schema() AND NOT i.indisvalid
+        `);
+        return { tablas, invalidos };
+    }, {
+        validar: ({ tablas, invalidos }) => ({
+            ok: tablas.some(({ nombre }) => nombre === 'movimientos')
+                && tablas.every(({ legible }) => legible) && invalidos === 0,
+            motivo: `${tablas.length} tablas consultadas e índices inválidos: ${invalidos}.`
+        })
     });
 
-    await simularPaso('AUDITORIA', 'Verificar Integridad Referencial de Claves Foráneas (PRAGMA foreign_key_check)', async () => {
-        return await allSql('PRAGMA foreign_key_check;');
+    await simularPaso('AUDITORIA', 'Verificar integridad referencial de claves foráneas', async () => {
+        const { total, noValidadas } = await getSql(`
+            SELECT COUNT(*)::int AS total,
+                   COUNT(*) FILTER (WHERE NOT convalidated)::int AS "noValidadas"
+            FROM pg_constraint WHERE contype = 'f' AND connamespace = current_schema()::regnamespace
+        `);
+        const codigo = await enTransaccion(() => runQuery(
+            'INSERT INTO recetas (producto_id, insumo_id, cantidad_requerida) VALUES (-1, $1, 1)',
+            [ctx.insumoCafeId]
+        )).then(() => null, (error) => error.code);
+        return { total, noValidadas, codigo };
     }, {
-        validar: async (rows) => {
-            return {
-                ok: rows.length === 0,
-                motivo: rows.length === 0 ? 'Cero violaciones de claves foráneas detectadas.' : `${rows.length} violaciones de FK detectadas.`
-            };
-        }
+        validar: ({ total, noValidadas, codigo }) => ({
+            ok: total > 0 && noValidadas === 0 && codigo === '23503',
+            motivo: `${total} claves foráneas, ${noValidadas} sin validar y rechazo de fila huérfana (${codigo}).`
+        })
     });
 
     await simularPaso('REPORTES', 'Generación de Libro Contable Excel (10 hojas) en Memoria', async () => {
         return await q.generarReporteExcel(ctx.cajaId);
     }, {
         validar: async (buffer) => {
-            const esBuffer = Buffer.isBuffer(buffer) || (buffer && buffer.byteLength > 0);
+            const libro = new ExcelJS.Workbook();
+            await libro.xlsx.load(buffer);
             const tamanioKb = buffer ? (buffer.byteLength / 1024).toFixed(1) : 0;
             return {
-                ok: esBuffer && buffer.byteLength > 5000,
+                ok: libro.worksheets.length === 10 && buffer.byteLength > 5000,
                 motivo: `Libro Excel .xlsx binario compilado exitosamente (${tamanioKb} KB con 10 hojas contables completas).`
             };
         }
@@ -852,7 +848,7 @@ async function ejecutarSimulador() {
     const fechaISO = new Date().toLocaleString();
     let md = `# 📊 Reporte Forense y Auditoría de Simulación E2E\n\n`;
     md += `- **Fecha de Ejecución:** ${fechaISO}\n`;
-    md += `- **Entorno:** Base de datos temporal aislada (\`${DB_PATH}\`)\n`;
+    md += `- **Entorno:** Base de datos temporal aislada (\`${base}\`)\n`;
     md += `- **Total de Pasos:** ${total}\n`;
     md += `- **Aprobados [OK]:** ${ok} (${tasaExito}%)\n`;
     md += `- **Inconsistencias Lógicas:** ${fallas}\n`;
@@ -886,18 +882,17 @@ async function ejecutarSimulador() {
     fs.writeFileSync(MD_FILE, md, 'utf-8');
     fs.writeFileSync(JSON_FILE, JSON.stringify({ fecha: fechaISO, contadores, bitacora }, null, 2), 'utf-8');
 
-    await allSql('PRAGMA wal_checkpoint(TRUNCATE);');
-
-    console.log(`💾 Base de datos SQLite del test consolidada en: file:///${DB_PATH.replace(/\\/g, '/')}`);
     console.log(`📄 Reporte Markdown guardado en: file:///${MD_FILE.replace(/\\/g, '/')}`);
     console.log(`📄 Reporte JSON guardado en:     file:///${JSON_FILE.replace(/\\/g, '/')}`);
     console.log('\x1b[1m\x1b[36m========================================================================\x1b[0m\n');
 }
 
-// Ejecución
-ejecutarSimulador()
-    .then(() => process.exit(contadores.crash > 0 || contadores.fallaLogica > 0 ? 1 : 0))
-    .catch((err) => {
-        console.error('Fallo estructural fatal en el ejecutor del simulador:', err);
-        process.exit(1);
-    });
+conBasesPostgres(['operativa'], async ({ operativa }, plan) => {
+    await ejecutarMigracionesEnPool(operativa);
+    await ejecutarConContextoTenant(contextoOperativo(operativa), () => ejecutarSimulador(plan.operativa.base));
+    if (contadores.total !== 37 || contadores.ok !== 37) process.exitCode = 1;
+}).catch((error) => {
+    const detalle = error.code ? ` (${error.code})` : '';
+    console.error(`Fallo estructural del simulador PostgreSQL${detalle}.`);
+    process.exitCode = 1;
+});

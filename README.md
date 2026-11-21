@@ -2,6 +2,8 @@
 
 Aplicación web integral de Punto de Venta (POS), control de turnos/arqueo ciego, estaciones multicaja, motor fiscal modular (IVA / IT / RCV SIAT), canales de delivery (PedidosYa / Yango), trazabilidad de lotes PEPS (FIFO), combos/promociones, modificadores de recetas, Kardex dual cronológico (NIC 2), notificaciones SMTP dinámicas con verificación de código y reportes contables en Excel (10 hojas) y PDF, construida con **Next.js (App Router)** y desplegada en **AWS**.
 
+PostgreSQL es el único motor de persistencia. El registro central y cada negocio usan bases independientes, tanto en desarrollo como en producción.
+
 ---
 
 ## Documentación
@@ -11,7 +13,8 @@ Aplicación web integral de Punto de Venta (POS), control de turnos/arqueo ciego
 | [GUIA_DESARROLLO.md](GUIA_DESARROLLO.md) | **Guía Rápida: Frontend vs Backend.** Mapa visual del proyecto, qué carpetas tocar según lo que quieras programar y reglas clave para colaboradores. |
 | [docs/ARQUITECTURA.md](docs/ARQUITECTURA.md) | Diseño técnico, modelo de seguridad, base de datos relacional, migraciones, motor fiscal, Kardex dual, lotes PEPS, delivery, SMTP dinámico y reportes. |
 | [docs/PRUEBAS.md](docs/PRUEBAS.md) | Batería de escenarios de verificación funcional, concurrencia, stock, lotes, arqueo, combos, modificadores, régimen fiscal, pagos mixtos, delivery y SMTP. |
-| [GEMINI.md](GEMINI.md) | Reglas de negocio obligatorias, directrices técnicas, variables de entorno y estado actual del proyecto (fuente de verdad para desarrollo y agentes). |
+| [docs/ARQUITECTURA_MULTI_TENANT.md](docs/ARQUITECTURA_MULTI_TENANT.md) | Resolución de tenants, aislamiento y respaldo por negocio. |
+| [.agents/PROJECT_CONTEXT.md](.agents/PROJECT_CONTEXT.md) | Reglas de negocio, directrices técnicas y variables de entorno. |
 
 ---
 
@@ -64,10 +67,10 @@ Aplicación web integral de Punto de Venta (POS), control de turnos/arqueo ciego
 │   ├── layout.js                    # Layout raíz de Next.js (protección notranslate)
 │   └── page.js                      # Portal principal del sistema
 ├── database/
-│   ├── database.js                  # Conexión SQLite (WAL, busy_timeout, foreign_keys, DATABASE_PATH)
-│   ├── schema.js                    # Esquema Drizzle ORM (20 tablas tipadas y relaciones)
-│   ├── drizzle.js                   # Cliente Drizzle singleton sobre better-sqlite3
-│   └── migraciones.js               # Esquema versionado transaccional (PRAGMA user_version)
+│   ├── postgres.js                  # Pools de conexión con pg
+│   ├── migraciones-control.js       # Registro central de tenants
+│   ├── migraciones-tenant.js        # Esquema operativo versionado
+│   └── provisionar-tenant.js        # Inicialización y actualización de un negocio
 ├── server/
 │   ├── actions/                     # Server Actions protegidas ('use server')
 │   │   ├── admin.actions.js         # Administración de usuarios, cajas físicas y negocio
@@ -89,12 +92,12 @@ Aplicación web integral de Punto de Venta (POS), control de turnos/arqueo ciego
 │   ├── manifest.json                # Especificación PWA para móviles y tablets
 │   └── icons/                       # Iconos de la aplicación en múltiples resoluciones
 ├── scripts/
-│   ├── backup.js                    # Respaldo atómico en caliente (VACUUM INTO) con retención
+│   ├── backup-postgres.js           # Respaldo lógico por tenant con pg_dump y retención
 │   └── seed_cafeteria.js            # Sembrado integral con catálogo, lotes, fiscal y Kardex
 ├── tests/
-│   ├── simulador_integral.js        # Simulador E2E integral de flujo comercial completo
-│   ├── test_migracion_v8_v9.js      # Verificaciones contables y de migración v8->v9
-│   └── test_ventas_v9.js            # Suite de pruebas de ventas, Kardex y concurrencia
+│   ├── postgres-*.test.js           # Integración PostgreSQL con bases temporales
+│   ├── simulador_integral.js        # Flujo comercial completo sobre PostgreSQL
+│   └── e2e/                        # Escenarios de navegador con Playwright
 ├── docs/                            # Documentación técnica y pruebas
 ├── ecosystem.config.js              # Configuración de PM2 para ejecución continua
 ├── instrumentation.js               # Validación temprana de seguridad en arranque de Next.js
@@ -105,31 +108,46 @@ Aplicación web integral de Punto de Venta (POS), control de turnos/arqueo ciego
 
 ## Inicio Rápido (Desarrollo)
 
-1. **Instalar dependencias:**
+1. **Preparar Node.js y PostgreSQL.** Crea la base de control `control_plane` y una base operativa vacía `negocio_001` en el servidor local. Instala las dependencias con el lockfile.
    ```bash
-   npm install
+   npm ci
    ```
 
-2. **Configurar variables de entorno:**
-   Crea un archivo `.env.local` en la raíz con al menos:
+2. **Configurar el entorno local.** Crea `.env.local` en la raíz con estas variables.
    ```env
    NODE_ENV=development
    PORT=3000
-   DATABASE_PATH=./caja.db
+   TENANCY_MODE=AWS_MULTI_TENANT
+   TENANT_HOST_SUFFIX=localhost
+   CONTROL_DATABASE_URL=postgresql://usuario:contraseña@localhost:5432/control_plane
+   TENANT_DATABASE_URLS_JSON={"cafeteria":"postgresql://usuario:contraseña@localhost:5432/negocio_001"}
+   PG_SSL=false
    SESSION_SECRET=un_secreto_largo_de_al_menos_32_caracteres_para_desarrollo
    DEVELOPER_PASSWORD=TuPasswordDeveloperLocal
    ```
 
-3. **Cargar datos de prueba integrales (Opcional):**
+3. **Inicializar el registro y el tenant.** Aplica el esquema de control.
    ```bash
-   npm run seed
+   node --env-file=.env.local database/migraciones-control.js
+   ```
+   Ejecuta esta consulta en `control_plane` para registrar un tenant local nuevo.
+   ```sql
+   INSERT INTO control_tenants (tenant_id, nombre, slug, database_name)
+   VALUES (gen_random_uuid(), 'Cafetería', 'cafeteria', 'negocio_001')
+   ON CONFLICT (slug) DO NOTHING;
+   ```
+   Aplica el esquema operativo y crea la cuenta técnica.
+   ```bash
+   node --env-file=.env.local database/provisionar-tenant.js cafeteria
    ```
 
-4. **Iniciar el servidor de desarrollo:**
+4. **Cargar datos de prueba (opcional).** En un tenant local de pruebas ya aprovisionado, define `CAFETERIA_SEED_PASSWORD` y `CAFETERIA_SEED_PIN` y ejecuta `npm run seed`.
+
+5. **Iniciar el servidor de desarrollo.**
    ```bash
    npm run dev
    ```
-   Abre [http://localhost:3000](http://localhost:3000) en el navegador.
+   Abre el subdominio del tenant en el navegador. [http://cafeteria.localhost:3000](http://cafeteria.localhost:3000)
 
 ---
 
@@ -140,6 +158,7 @@ Aplicación web integral de Punto de Venta (POS), control de turnos/arqueo ciego
 | `npm run dev` | Inicia el servidor de desarrollo de Next.js. |
 | `npm run build` | Compila la aplicación para producción (`next build --webpack`). |
 | `npm run start` | Inicia la aplicación compilada en modo producción. |
+| `npm run test:all` | Ejecuta integración PostgreSQL, simulador comercial y E2E. La configuración está en [docs/PRUEBAS.md](docs/PRUEBAS.md). |
 | `npm run seed` | Carga el seed integral de prueba con régimen fiscal, combos, modificadores, compras con factura, pagos mixtos y auditoría de Kardex. |
 | `npm run simular` | Ejecuta la simulación integral automatizada de punta a punta (turnos, ventas, recetas, arqueos y reportes). |
-| `npm run backup` | Ejecuta un respaldo atómico en caliente en `backups/` con retención automática. |
+| `npm run backup -- <slug>` | Genera un respaldo PostgreSQL por tenant en `backups/` con `pg_dump` y retención por negocio. |

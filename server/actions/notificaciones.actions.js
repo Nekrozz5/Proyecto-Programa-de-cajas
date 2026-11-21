@@ -11,7 +11,7 @@ import {
     eliminarDestinatario,
     obtenerConfiguracionNegocio
 } from '../repositories/configuracion.repo';
-import { runQuery, getQuery } from '../repositories/db';
+import { regenerarCodigoDestinatario } from '../repositories/notificaciones.repo';
 import { enviarCodigoVerificacionEmail } from '../lib/mailer';
 
 const ROLES_PERMITIDOS = ['propietario', 'developer'];
@@ -118,26 +118,9 @@ export async function reenviarCodigoAction(datos) {
             throw new Error('ID de destinatario inválido.');
         }
 
-        const destinatario = await getQuery(`SELECT * FROM notificacion_destinatarios WHERE id = ?`, [id]);
-        if (!destinatario) {
-            throw new Error('Destinatario no encontrado.');
-        }
-        if (Number(destinatario.verificado) === 1) {
-            throw new Error('Este destinatario ya ha sido verificado previamente.');
-        }
-
-        // Generar nuevo código de 4 dígitos (1000-9999) y expiración de 15 minutos
         const codigo = String(Math.floor(1000 + Math.random() * 9000));
         const expira = new Date(Date.now() + 15 * 60 * 1000).toISOString();
-
-        await runQuery(
-            `UPDATE notificacion_destinatarios
-             SET codigo_verificacion = ?,
-                 codigo_expira = ?,
-                 intentos_fallidos = 0
-             WHERE id = ?`,
-            [codigo, expira, id]
-        );
+        const destinatario = await regenerarCodigoDestinatario(id, codigo, expira);
 
         const configNeg = await obtenerConfiguracionNegocio();
         const nombreNegocio = configNeg?.nombre_negocio || 'Sistema POS';

@@ -30,24 +30,15 @@ import {
     revocarDispositivo
 } from '../repositories/dispositivos.repo';
 import { crearDesafioEmparejamiento } from '../tenancy/device-auth';
-import { obtenerModoTenancy, ejecutarConContextoTenant } from '../tenancy/tenant-context';
-import { obtenerTenantPorId } from '../tenancy/tenant-registry';
 
 const ROLES_ADMIN = ['admin', 'propietario', 'developer'];
 const ROLES_DEVELOPER = ['developer'];
 const ROLES_CONFIG_NEGOCIO = ['developer', 'propietario'];
 
-async function ejecutarEnTenant(usuario, fn) {
-    if (obtenerModoTenancy() !== 'AWS_MULTI_TENANT') return fn();
-    const tenant = await obtenerTenantPorId(usuario.tenantId);
-    if (!tenant) throw new Error('El negocio no existe o está inactivo.');
-    return ejecutarConContextoTenant({ modo: 'AWS_MULTI_TENANT', tenantId: usuario.tenantId, tenant }, fn);
-}
-
 export async function listarDispositivosAction() {
-    return ejecutarAction(ROLES_ADMIN, (usuario) => ejecutarEnTenant(usuario, () =>
+    return ejecutarAction(ROLES_ADMIN, (usuario) =>
         listarDispositivos({ tenantId: usuario.tenantId })
-    ));
+    );
 }
 
 export async function generarCodigoEmparejamientoAction() {
@@ -58,7 +49,7 @@ export async function generarCodigoEmparejamientoAction() {
 }
 
 export async function revocarDispositivoAction(datos) {
-    return ejecutarAction(ROLES_ADMIN, (usuario) => ejecutarEnTenant(usuario, async () => {
+    return ejecutarAction(ROLES_ADMIN, async (usuario) => {
         const dispositivo = await revocarDispositivo({
             tenantId: usuario.tenantId,
             dispositivoId: datos && datos.dispositivoId,
@@ -66,7 +57,7 @@ export async function revocarDispositivoAction(datos) {
         });
         revalidatePath('/admin');
         return { dispositivo };
-    }));
+    });
 }
 
 /**

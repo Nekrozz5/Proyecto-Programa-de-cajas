@@ -1,16 +1,14 @@
 /**
- * Esquema operativo completo de una base PostgreSQL de tenant.
- * Cada negocio ejecuta esta migración sobre su propia base; no mezcla datos.
+ * Historial canónico del esquema operativo PostgreSQL.
+ * Las versiones publicadas son inmutables y se aplican en orden por base.
  */
-const { obtenerPool } = require('./postgres');
+const { obtenerPool, cerrarPoolsPostgres, enTransaccionPostgres } = require('./postgres');
 const { obtenerPoolTenant } = require('../server/tenancy/tenant-registry');
 
-async function ejecutarMigracionesEnPool(pool) {
-    const client = await pool.connect();
-
-    try {
-        await client.query('BEGIN');
-        await client.query(`
+const migraciones = [
+    {
+        version: 1,
+        sql: `
             CREATE TABLE IF NOT EXISTS configuracion_negocio (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 nombre_negocio TEXT DEFAULT 'Mi Negocio',
@@ -331,14 +329,137 @@ async function ejecutarMigracionesEnPool(pool) {
             CREATE INDEX IF NOT EXISTS detalle_movimientos_movimiento_idx ON detalle_movimientos (movimiento_id);
             CREATE INDEX IF NOT EXISTS producto_lotes_producto_vencimiento_idx ON producto_lotes (producto_id, fecha_vencimiento);
             CREATE INDEX IF NOT EXISTS dispositivos_pos_tenant_estado_idx ON dispositivos_pos (tenant_id, estado);
-        `);
-        await client.query('COMMIT');
-    } catch (err) {
-        await client.query('ROLLBACK').catch(() => {});
-        throw err;
-    } finally {
-        client.release();
+        `
+    },
+    {
+        version: 2,
+        sql: `
+            ALTER TABLE configuracion_negocio
+                ALTER COLUMN iva_porcentaje TYPE NUMERIC,
+                ALTER COLUMN it_porcentaje TYPE NUMERIC;
+            ALTER TABLE usuarios
+                ADD CONSTRAINT usuarios_rol_ck CHECK (rol IN ('user', 'admin', 'propietario', 'developer'));
+            ALTER TABLE productos
+                ALTER COLUMN precio TYPE NUMERIC,
+                ALTER COLUMN costo TYPE NUMERIC,
+                ALTER COLUMN fecha_inicio_vigencia TYPE TIMESTAMPTZ
+                    USING NULLIF(BTRIM(fecha_inicio_vigencia), '')::timestamptz,
+                ALTER COLUMN fecha_fin_vigencia TYPE TIMESTAMPTZ
+                    USING NULLIF(BTRIM(fecha_fin_vigencia), '')::timestamptz,
+                ADD CONSTRAINT productos_tipo_inventario_ck
+                    CHECK (tipo_inventario IN ('libre', 'directo', 'receta', 'combo'));
+            ALTER TABLE insumos ALTER COLUMN costo_por_unidad TYPE NUMERIC;
+            ALTER TABLE grupos_modificadores
+                ADD CONSTRAINT grupos_modificadores_tipo_ck CHECK (tipo_seleccion IN ('unica', 'multiple'));
+            ALTER TABLE modificadores_opciones ALTER COLUMN precio_adicional TYPE NUMERIC;
+            ALTER TABLE combo_componentes
+                ADD CONSTRAINT combo_componentes_cantidad_ck CHECK (cantidad > 0);
+            ALTER TABLE cajas
+                ALTER COLUMN caja_fisica_id SET DEFAULT 1,
+                ALTER COLUMN monto_inicial TYPE NUMERIC,
+                ALTER COLUMN efectivo_esperado TYPE NUMERIC,
+                ALTER COLUMN efectivo_real TYPE NUMERIC,
+                ALTER COLUMN qr_esperado TYPE NUMERIC,
+                ALTER COLUMN qr_real TYPE NUMERIC,
+                ALTER COLUMN diferencia_efectivo TYPE NUMERIC,
+                ALTER COLUMN diferencia_qr TYPE NUMERIC,
+                ADD CONSTRAINT cajas_estado_ck CHECK (estado IN ('abierta', 'cerrada'));
+            ALTER TABLE movimientos
+                ALTER COLUMN subtotal_bruto TYPE NUMERIC,
+                ALTER COLUMN descuento_total TYPE NUMERIC,
+                ALTER COLUMN monto TYPE NUMERIC,
+                ALTER COLUMN monto_efectivo TYPE NUMERIC,
+                ALTER COLUMN monto_qr TYPE NUMERIC,
+                ALTER COLUMN monto_recibido TYPE NUMERIC,
+                ALTER COLUMN cambio TYPE NUMERIC,
+                ALTER COLUMN iva_porcentaje TYPE NUMERIC,
+                ALTER COLUMN it_porcentaje TYPE NUMERIC,
+                ALTER COLUMN iva_monto TYPE NUMERIC,
+                ALTER COLUMN it_monto TYPE NUMERIC,
+                ADD CONSTRAINT movimientos_tipo_ck CHECK (tipo IN ('ingreso', 'egreso')),
+                ADD CONSTRAINT movimientos_categoria_ck CHECK (categoria_contable IN (
+                    'venta', 'aporte_cambio', 'gasto_operativo', 'compra_insumo', 'pago_proveedor', 'retiro_dueno', 'otro'
+                )),
+                ADD CONSTRAINT movimientos_metodo_pago_ck CHECK (metodo_pago IN ('efectivo', 'qr', 'mixto')),
+                ADD CONSTRAINT movimientos_comprobante_ck CHECK (tipo_comprobante IN ('recibo', 'factura', 'sin_respaldo')),
+                ADD CONSTRAINT movimientos_estado_ck CHECK (estado IN ('completado', 'anulado'));
+            ALTER TABLE movimientos_pagos
+                ALTER COLUMN monto TYPE NUMERIC,
+                ADD CONSTRAINT movimientos_pagos_metodo_ck CHECK (metodo_pago IN ('efectivo', 'qr', 'pedidos_ya', 'yango')),
+                ADD CONSTRAINT movimientos_pagos_monto_ck CHECK (monto > 0);
+            ALTER TABLE detalle_movimientos
+                ALTER COLUMN precio_unitario TYPE NUMERIC,
+                ALTER COLUMN costo_unitario TYPE NUMERIC,
+                ALTER COLUMN subtotal TYPE NUMERIC;
+            ALTER TABLE detalle_movimientos_combos ALTER COLUMN costo_unitario_congelado TYPE NUMERIC;
+            ALTER TABLE detalle_movimientos_modificadores
+                ALTER COLUMN precio_adicional TYPE NUMERIC,
+                ALTER COLUMN costo_adicional TYPE NUMERIC;
+            ALTER TABLE movimientos_productos_directos
+                ALTER COLUMN costo_unitario TYPE NUMERIC,
+                ALTER COLUMN costo_promedio_resultante TYPE NUMERIC,
+                ALTER COLUMN monto_total TYPE NUMERIC,
+                ADD CONSTRAINT movimientos_productos_directos_tipo_ck CHECK (tipo IN (
+                    'inventario_inicial', 'compra', 'venta', 'merma', 'reingreso_anulacion', 'ajuste'
+                ));
+            ALTER TABLE movimientos_insumos
+                ALTER COLUMN costo_unitario TYPE NUMERIC,
+                ALTER COLUMN costo_promedio_resultante TYPE NUMERIC,
+                ALTER COLUMN monto_total_compra TYPE NUMERIC,
+                ADD CONSTRAINT movimientos_insumos_tipo_ck CHECK (tipo IN (
+                    'inventario_inicial', 'compra', 'consumo_venta', 'merma', 'reingreso_anulacion', 'ajuste'
+                ));
+            ALTER TABLE producto_lotes ALTER COLUMN costo_unitario TYPE NUMERIC;
+            ALTER TABLE configuracion_smtp ADD CONSTRAINT configuracion_smtp_singleton_ck CHECK (id = 1);
+            ALTER TABLE notificacion_destinatarios
+                DROP CONSTRAINT notificacion_destinatarios_creado_por_fkey,
+                ADD CONSTRAINT notificacion_destinatarios_creado_por_fkey
+                    FOREIGN KEY (creado_por) REFERENCES usuarios(id) ON DELETE SET NULL;
+
+            CREATE UNIQUE INDEX usuarios_tenant_nombre_visible_ci_uq ON usuarios (tenant_id, LOWER(nombre));
+            CREATE UNIQUE INDEX usuarios_tenant_nombre_usuario_ci_uq ON usuarios (tenant_id, LOWER(nombre_usuario));
+            CREATE UNIQUE INDEX categorias_nombre_ci_uq ON categorias (LOWER(nombre));
+            CREATE UNIQUE INDEX una_caja_abierta_por_usuario ON cajas (usuario_id) WHERE estado = 'abierta';
+            CREATE UNIQUE INDEX una_caja_abierta_por_estacion ON cajas (caja_fisica_id) WHERE estado = 'abierta';
+            CREATE INDEX idx_mod_opc_grupo ON modificadores_opciones (grupo_id);
+            CREATE INDEX idx_det_mov_mod ON detalle_movimientos_modificadores (detalle_movimiento_id);
+            CREATE INDEX idx_combo_comp_combo ON combo_componentes (combo_producto_id);
+            CREATE INDEX idx_combo_comp_prod ON combo_componentes (componente_producto_id);
+            CREATE INDEX idx_det_mov_combos ON detalle_movimientos_combos (detalle_movimiento_id);
+            CREATE INDEX idx_movimientos_cat ON movimientos (categoria_contable);
+            CREATE INDEX idx_mov_pagos_movimiento ON movimientos_pagos (movimiento_id);
+            CREATE INDEX idx_mov_prod_dir_prod ON movimientos_productos_directos (producto_id);
+            CREATE INDEX idx_mov_prod_dir_mov ON movimientos_productos_directos (movimiento_id);
+            CREATE INDEX idx_movimientos_insumos_insumo_id ON movimientos_insumos (insumo_id);
+            CREATE INDEX idx_movimientos_insumos_movimiento_id ON movimientos_insumos (movimiento_id);
+            CREATE INDEX idx_producto_lotes_fecha_vencimiento ON producto_lotes (fecha_vencimiento);
+        `
     }
+];
+
+async function ejecutarMigracionesEnPool(pool, inicializar) {
+    return enTransaccionPostgres(pool, async (client) => {
+        // Serializa tanto la creación del historial como su lectura y actualización.
+        await client.query("SELECT pg_advisory_xact_lock(hashtextextended(current_schema() || ':migraciones-tenant', 0))");
+        await client.query(`
+            SET LOCAL TIME ZONE 'UTC';
+            CREATE TABLE IF NOT EXISTS schema_migrations (
+                version INTEGER PRIMARY KEY CHECK (version > 0),
+                applied_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        const { rows: aplicadas } = await client.query('SELECT version FROM schema_migrations ORDER BY version');
+        if (aplicadas.some(({ version }, indice) => version !== migraciones[indice]?.version)) {
+            throw new Error('El historial de migraciones del tenant no coincide con esta versión de la aplicación.');
+        }
+
+        for (const { version, sql } of migraciones.slice(aplicadas.length)) {
+            await client.query(sql);
+            await client.query('INSERT INTO schema_migrations (version) VALUES ($1)', [version]);
+        }
+        if (inicializar) await inicializar(client);
+        return migraciones.at(-1).version;
+    });
 }
 
 async function ejecutarMigracionesTenant(databaseUrl = process.env.TENANT_DATABASE_URL) {
@@ -352,9 +473,10 @@ async function ejecutarMigracionesTenantRegistrado(tenant) {
 
 if (require.main === module) {
     ejecutarMigracionesTenant()
-        .then(() => console.log('Migraciones completas del tenant ejecutadas.'))
-        .catch((err) => {
-            console.error('Error en migraciones del tenant:', err.message);
+        .finally(cerrarPoolsPostgres)
+        .then((version) => console.log(`Migraciones del tenant completadas (versión ${version}).`))
+        .catch(() => {
+            console.error('No se pudieron completar las migraciones del tenant.');
             process.exitCode = 1;
         });
 }

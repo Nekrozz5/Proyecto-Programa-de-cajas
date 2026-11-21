@@ -21,6 +21,7 @@ import {
     Phone
 } from 'lucide-react';
 import { PasswordInput } from '@/components/ui/password-input';
+import { crearPruebaDispositivo } from '../_lib/dispositivo-pos';
 
 export default function ModalCobro({
     isOpen,
@@ -322,15 +323,16 @@ export default function ModalCobro({
         try {
             setReautenticando(true);
             setErrorLocal(null);
+            const pruebaDispositivo = await crearPruebaDispositivo({ obligatoria: usuario?.rol === 'user' });
 
             const resAuth = await fetch('/api/auth', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     accion: 'login',
-                    usuarioId: usuarioActual?.id,
-                    nombreUsuario: usuarioActual?.nombre,
-                    pin: pinReconexion
+                    nombreUsuario: usuario?.nombreUsuario,
+                    pin: pinReconexion,
+                    ...pruebaDispositivo
                 })
             });
 

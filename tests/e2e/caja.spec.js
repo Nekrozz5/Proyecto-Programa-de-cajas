@@ -3,14 +3,11 @@ const { test, expect } = require('@playwright/test');
 test.describe('Punto de Venta POS y Control de Acceso', () => {
   test('Página de inicio (/) debe responder y cargar el portal', async ({ page }) => {
     const response = await page.goto('/');
-    expect(response.status()).toBeLessThan(400);
-
-    // Verificar que no se dispare la pantalla de error boundary
+    expect(response.status()).toBe(200);
+    expect(new URL(page.url()).hostname).toBe('cafeteria.localhost');
     await expect(page.locator('text=Ha ocurrido un error inesperado')).not.toBeVisible();
-    
-    // Verificar elementos base del landing / setup
-    const contenidoVisible = await page.locator('body').textContent();
-    expect(contenidoVisible.length).toBeGreaterThan(50);
+    await expect(page.getByText('Cafetería de prueba', { exact: true })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Ir a Caja (Ventas)' })).toBeVisible();
   });
 
   test('Página de Caja (/caja) monta la terminal sin errores críticos', async ({ page }) => {

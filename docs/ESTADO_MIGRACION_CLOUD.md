@@ -1,10 +1,10 @@
 # Estado de migración cloud multi-tenant
 
-Última actualización: 2026-11-20
+Última actualización: 2026-11-21
 
 ## Decisión arquitectónica
 
-El sistema será 100% cloud:
+La plataforma opera exclusivamente sobre PostgreSQL:
 
 - Aplicación Next.js compartida.
 - PostgreSQL como motor operativo.
@@ -14,7 +14,8 @@ El sistema será 100% cloud:
 - Cajeros restringidos a dispositivos POS registrados.
 - Administradores y propietarios con acceso multidispositivo.
 
-No se implementará un instalador local ni un modo offline para negocios.
+`cafeteria` es el tenant piloto. La decisión de migrar a PostgreSQL se conserva
+en el [ADR-001](ADR-001-POSTGRES-ONLY.md).
 
 ## Cambios realizados
 
@@ -28,7 +29,7 @@ No se implementará un instalador local ni un modo offline para negocios.
 
 ### Persistencia y sesiones
 
-- `server/repositories/db.js`: soporte inicial para SQLite local y PostgreSQL multi-tenant.
+- `server/repositories/db.js`: acceso a PostgreSQL, con transacciones ligadas a la conexión del tenant.
 - `server/actions/_wrapper.js`: las Server Actions resuelven automáticamente el tenant.
 - `app/api/caja/route.js`, `app/api/configuracion/route.js` y `app/api/reportes/route.js`: ejecutan sus consultas dentro del contexto tenant.
 - `server/lib/sesion.js`: JWT con `tenantId`, validación de tenant y exclusión de credenciales del token.
@@ -56,14 +57,21 @@ No se implementará un instalador local ni un modo offline para negocios.
 
 ### PostgreSQL operativo
 
-- `database/postgres-schema.js`: esquema Drizzle inicial de identidad y dispositivos.
-- `database/migraciones-tenant.js`: migración SQL completa de las tablas operativas del POS.
+- `database/migraciones-tenant.js`: migraciones SQL versionadas de las tablas operativas del POS.
+- `database/provisionar-tenant.js`: inicialización de cada base operativa y sincronización de la versión con el registro central.
 - La migración incluye configuración, usuarios, cajas, productos, insumos, recetas, ventas, pagos, kardex, lotes, SMTP, notificaciones y dispositivos.
 
-### Regresión corregida
+### Reportes y analíticas
 
-- Se agregó `sistemaEstaInstalado()` a `server/repositories/configuracion.repo.js`.
-- El simulador integral pasó de 36/37 a 37/37 pasos exitosos.
+- Consultas PostgreSQL para tendencias, filtros por fecha, modificadores, CSV, Excel, RCV de compras y analíticas comerciales.
+- Los instantes se conservan como `TIMESTAMPTZ` y los períodos de reporte usan `America/La_Paz`.
+- `tests/postgres-reportes.test.js` verifica resultados financieros, Kardex y aislamiento en dos bases temporales con IDs de turno coincidentes y ventas distintas.
+
+### Semilla y respaldos
+
+- `npm run seed` carga los datos de prueba en el tenant PostgreSQL ya aprovisionado.
+- `npm run backup -- <slug>` genera un respaldo por tenant con `pg_dump`.
+- En la Fase 3 se verificó la semilla y se restauró un respaldo en una base temporal con `pg_restore`. Coincidieron los movimientos y sus importes.
 
 ## Dependencias añadidas
 
@@ -77,7 +85,7 @@ No se implementará un instalador local ni un modo offline para negocios.
 3. Ejecutar:
 
 ```powershell
-npm install
+npm ci
 ```
 
 4. Instalar PostgreSQL 16 o 17 para Windows desde el instalador oficial:
@@ -99,7 +107,7 @@ psql --version
 Get-Service -Name 'postgresql*'
 ```
 
-## Variables de entorno pendientes
+## Configuración local de referencia
 
 Crear `.env.local` para desarrollo, sin subirlo a Git:
 
@@ -108,7 +116,7 @@ NODE_ENV=development
 TENANCY_MODE=AWS_MULTI_TENANT
 TENANT_HOST_SUFFIX=localhost
 CONTROL_DATABASE_URL=postgresql://postgres:CONTRASEÑA@localhost:5432/control_plane
-TENANT_DATABASE_URLS_JSON={"tenant-id":"postgresql://postgres:CONTRASEÑA@localhost:5432/negocio_001"}
+TENANT_DATABASE_URLS_JSON={"cafeteria":"postgresql://postgres:CONTRASEÑA@localhost:5432/negocio_001"}
 PG_SSL=false
 PG_POOL_MAX=10
 SESSION_SECRET=una-clave-local-de-al-menos-32-caracteres
@@ -124,52 +132,32 @@ No guardar contraseñas reales en este documento.
 
 ## Pendiente de realizar
 
-### Prioridad alta
+### Migración de datos y operación cloud
 
-1. Crear las bases `control_plane` y `negocio_001` en PostgreSQL.
-2. Ejecutar `migraciones-control.js` sobre `control_plane`.
-3. Registrar el primer tenant en `control_tenants`.
-4. Ejecutar `migraciones-tenant.js` usando la conexión del tenant registrado.
-5. Adaptar los repositorios SQL de SQLite a PostgreSQL.
-
-### Incompatibilidades conocidas
-
-`server/repositories/db.js` todavía hace una conversión inicial de SQL, pero no resuelve todas las diferencias entre SQLite y PostgreSQL. Deben revisarse:
-
-- `lastID` y sentencias `RETURNING`.
-- `INSERT OR IGNORE`.
-- `datetime`, `strftime` y funciones SQLite.
-- `last_insert_rowid`.
-- Consultas con `COLLATE NOCASE`.
-- Tipos de fechas y números.
-- Repositorios de ventas, inventario, cajas y reportes.
+- Migrar una copia de los datos del piloto, conciliar sus saldos y reportes históricos y definir el corte operativo.
+- Validar respaldo y restauración por negocio en la infraestructura de destino antes del corte.
 
 ### Dispositivos
 
+- Verificar el inicio de sesión desde la pantalla de caja. Los casos E2E de autenticación POS ejercitan el flujo por API.
 - Mover los desafíos de emparejamiento desde memoria a Redis o PostgreSQL para soportar varias instancias AWS y reinicios.
 - Validar claves públicas durante el emparejamiento, no solo durante el login.
-
-### Verificación
-
-- Probar las migraciones contra PostgreSQL real.
-- Crear dos tenants reales y comprobar aislamiento de usuarios, ventas, inventario y reportes.
-- Ejecutar `npm test` después de cada adaptación.
-- Ejecutar `npm run test:e2e` con PostgreSQL y tenants preparados.
-- Corregir cualquier diferencia encontrada por reportes financieros.
 
 ## Comandos útiles
 
 ```powershell
-npm test
-node database/migraciones-control.js
-node database/migraciones-tenant.js
+npm run test:all
+node --env-file=.env.local database/migraciones-control.js
+node --env-file=.env.local database/provisionar-tenant.js cafeteria
 npm run build
-npm run test:e2e
 ```
+
+Para ejecutar las pruebas, configurar `POSTGRES_TEST_URL` con una base de
+mantenimiento separada y un rol con permiso `CREATEDB`. La suite crea y elimina
+sus bases temporales.
 
 ## Estado actual
 
-- SQLite: simulador integral funcionando, 37/37 pasos correctos.
-- PostgreSQL: código de conexión y migraciones preparados, aún no ejecutados contra un servidor real.
-- AWS: todavía no desplegado.
-- Git: no se creó commit ni se hizo push.
+- La Fase 3 pasó 20 pruebas PostgreSQL, 37 pasos del simulador y 7 E2E en Chromium, sin omisiones.
+- La Fase 4 retiró los módulos, dependencias y pruebas del motor anterior. Con una instalación limpia, pasaron `npm run build` y `npm run test:all` (20 pruebas PostgreSQL, 37 pasos del simulador y 7 E2E en Chromium, sin omisiones).
+- El despliegue en AWS y la migración de los datos del piloto siguen pendientes.

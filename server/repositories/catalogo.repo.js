@@ -15,6 +15,8 @@ const {
 } = require('./db');
 const { obtenerUsuarioPorId, esRolAdministrativo } = require('./auth.repo');
 
+const INSERTAR_CATEGORIA = 'INSERT INTO categorias (nombre, activo) VALUES ($1, 1) ON CONFLICT DO NOTHING';
+
 // Tabla de factores de conversión métrica para recetas y almacén
 const FACTORES_CONVERSION_METRICA = {
     // Masa (base: gramos)
@@ -59,21 +61,22 @@ function convertirCantidadMedida(cantidad, unidadOrigen, unidadDestino) {
 
 // Recalcula el costo de un combo sumando el costo de sus componentes
 async function recalcularCostoCombo(comboId) {
+    await getQuery('SELECT id FROM productos WHERE id = $1 FOR NO KEY UPDATE', [comboId]);
     const calculo = await getQuery(
         `SELECT COALESCE(SUM(cc.cantidad * p.costo), 0) as nuevo_costo
          FROM combo_componentes cc
          INNER JOIN productos p ON cc.componente_producto_id = p.id
-         WHERE cc.combo_producto_id = ?`,
+         WHERE cc.combo_producto_id = $1`,
         [comboId]
     );
     const costoActualizado = Number((calculo.nuevo_costo || 0).toFixed(4));
-    await runQuery(`UPDATE productos SET costo = ? WHERE id = ?`, [costoActualizado, comboId]);
+    await runQuery(`UPDATE productos SET costo = $1 WHERE id = $2`, [costoActualizado, comboId]);
     return costoActualizado;
 }
 
 async function recalcularCostoCombosQueContienenProducto(productoId) {
     const combosAfectados = await allQuery(
-        `SELECT DISTINCT combo_producto_id FROM combo_componentes WHERE componente_producto_id = ?`,
+        `SELECT DISTINCT combo_producto_id FROM combo_componentes WHERE componente_producto_id = $1`,
         [productoId]
     );
     for (const c of combosAfectados) {
@@ -83,15 +86,16 @@ async function recalcularCostoCombosQueContienenProducto(productoId) {
 
 // Recalcula el costo de un producto sumando el costo de todos los ingredientes de su receta
 async function recalcularCostoProductoPorReceta(productoId) {
+    await getQuery('SELECT id FROM productos WHERE id = $1 FOR NO KEY UPDATE', [productoId]);
     const calculo = await getQuery(
         `SELECT COALESCE(SUM(r.cantidad_requerida * i.costo_por_unidad), 0) as nuevo_costo
          FROM recetas r
          INNER JOIN insumos i ON r.insumo_id = i.id
-         WHERE r.producto_id = ?`,
+         WHERE r.producto_id = $1`,
         [productoId]
     );
     const costoActualizado = Number((calculo.nuevo_costo || 0).toFixed(4));
-    await runQuery(`UPDATE productos SET costo = ? WHERE id = ?`, [costoActualizado, productoId]);
+    await runQuery(`UPDATE productos SET costo = $1 WHERE id = $2`, [costoActualizado, productoId]);
     await recalcularCostoCombosQueContienenProducto(productoId);
     return costoActualizado;
 }
@@ -100,46 +104,48 @@ async function recalcularCostoProductoPorReceta(productoId) {
 async function asignarIngredienteReceta(productoId, insumoId, cantidadRequerida, unidadReceta = null) {
     const cantValidada = numeroPositivo(cantidadRequerida, 'La cantidad en la receta');
 
-    const prod = await getQuery(`SELECT * FROM productos WHERE id = ? AND activo = 1`, [productoId]);
-    if (!prod) throw new Error('Producto no encontrado o inactivo.');
+    return await enTransaccion(async () => {
+        const prod = await getQuery(`SELECT * FROM productos WHERE id = $1 AND activo = 1 FOR NO KEY UPDATE`, [productoId]);
+        if (!prod) throw new Error('Producto no encontrado o inactivo.');
 
-    if (prod.tipo_inventario === 'directo' && Number(prod.stock) > 0) {
-        throw new Error(
-            `No se puede convertir el producto "${prod.nombre}" a modalidad de receta porque es de inventario directo y aún tiene ${prod.stock} ${prod.unidad_medida || 'unidades'} en stock. Primero debe quedar con stock en 0 o debes crear un producto nuevo para manejarlo por receta.`
+        if (prod.tipo_inventario === 'directo' && Number(prod.stock) > 0) {
+            throw new Error(
+                `No se puede convertir el producto "${prod.nombre}" a modalidad de receta porque es de inventario directo y aún tiene ${prod.stock} ${prod.unidad_medida || 'unidades'} en stock. Primero debe quedar con stock en 0 o debes crear un producto nuevo para manejarlo por receta.`
+            );
+        }
+
+        const insumo = await getQuery(`SELECT * FROM insumos WHERE id = $1 AND activo = 1`, [insumoId]);
+        if (!insumo) throw new Error('Insumo no encontrado.');
+
+        const cantidadConvertidaAlmacen = unidadReceta
+            ? convertirCantidadMedida(cantValidada, unidadReceta, insumo.unidad_medida)
+            : cantValidada;
+
+        await runQuery(
+            `INSERT INTO recetas (producto_id, insumo_id, cantidad_requerida)
+             VALUES ($1, $2, $3)
+             ON CONFLICT(producto_id, insumo_id) DO UPDATE SET cantidad_requerida = excluded.cantidad_requerida`,
+            [productoId, insumoId, cantidadConvertidaAlmacen]
         );
-    }
 
-    const insumo = await getQuery(`SELECT * FROM insumos WHERE id = ? AND activo = 1`, [insumoId]);
-    if (!insumo) throw new Error('Insumo no encontrado.');
+        // Cambiar automáticamente el producto a modalidad 'receta'
+        await runQuery(`UPDATE productos SET tipo_inventario = 'receta', stock = NULL WHERE id = $1`, [productoId]);
 
-    const cantidadConvertidaAlmacen = unidadReceta
-        ? convertirCantidadMedida(cantValidada, unidadReceta, insumo.unidad_medida)
-        : cantValidada;
-
-    await runQuery(
-        `INSERT INTO recetas (producto_id, insumo_id, cantidad_requerida)
-         VALUES (?, ?, ?)
-         ON CONFLICT(producto_id, insumo_id) DO UPDATE SET cantidad_requerida = excluded.cantidad_requerida`,
-        [productoId, insumoId, cantidadConvertidaAlmacen]
-    );
-
-    // Cambiar automáticamente el producto a modalidad 'receta'
-    await runQuery(`UPDATE productos SET tipo_inventario = 'receta', stock = NULL WHERE id = ?`, [productoId]);
-
-    // Actualizar el costo del producto según su nueva receta
-    const nuevoCosto = await recalcularCostoProductoPorReceta(productoId);
-    return {
-        productoId,
-        insumoId,
-        cantidadRequerida: cantidadConvertidaAlmacen,
-        unidadAlmacen: insumo.unidad_medida,
-        nuevoCostoProducto: nuevoCosto
-    };
+        // Actualizar el costo del producto según su nueva receta
+        const nuevoCosto = await recalcularCostoProductoPorReceta(productoId);
+        return {
+            productoId,
+            insumoId,
+            cantidadRequerida: cantidadConvertidaAlmacen,
+            unidadAlmacen: insumo.unidad_medida,
+            nuevoCostoProducto: nuevoCosto
+        };
+    });
 }
 
 // Calcula cuántos productos se pueden fabricar hoy según el insumo más escaso (Cuello de botella)
 async function calcularDisponibilidadProducto(productoId) {
-    const prod = await getQuery(`SELECT * FROM productos WHERE id = ? AND activo = 1`, [productoId]);
+    const prod = await getQuery(`SELECT * FROM productos WHERE id = $1 AND activo = 1`, [productoId]);
     if (!prod) throw new Error('Producto no encontrado.');
 
     if (prod.tipo_inventario === 'libre') {
@@ -153,7 +159,7 @@ async function calcularDisponibilidadProducto(productoId) {
         `SELECT r.cantidad_requerida, i.nombre as insumo_nombre, i.stock_actual, i.unidad_medida
          FROM recetas r
          INNER JOIN insumos i ON r.insumo_id = i.id
-         WHERE r.producto_id = ?`,
+         WHERE r.producto_id = $1`,
         [productoId]
     );
 
@@ -192,9 +198,11 @@ async function crearCategoria(nombre) {
     if (nombreLimpio.toLowerCase() === 'todas') {
         throw new Error('"Todas" es una vista general del sistema y no puede usarse como nombre de categoría.');
     }
-    await runQuery(`INSERT OR IGNORE INTO categorias (nombre, activo) VALUES (?, 1)`, [nombreLimpio]);
-    const cat = await getQuery(`SELECT id, nombre FROM categorias WHERE LOWER(nombre) = LOWER(?) AND activo = 1`, [nombreLimpio]);
-    return cat || { id: null, nombre: nombreLimpio };
+    return await enTransaccion(async () => {
+        await runQuery(INSERTAR_CATEGORIA, [nombreLimpio]);
+        const cat = await getQuery(`SELECT id, nombre FROM categorias WHERE LOWER(nombre) = LOWER($1) AND activo = 1`, [nombreLimpio]);
+        return cat || { id: null, nombre: nombreLimpio };
+    });
 }
 
 async function crearProductoConInsumos({
@@ -241,14 +249,14 @@ async function crearProductoConInsumos({
     return await enTransaccion(async () => {
         // Asegurar que cada categoría seleccionada exista en la tabla categorias
         for (const c of catsUnicas) {
-            await runQuery(`INSERT OR IGNORE INTO categorias (nombre, activo) VALUES (?, 1)`, [c]);
+            await runQuery(INSERTAR_CATEGORIA, [c]);
         }
 
         if (tipoComposicion === 'unitario') {
             if (!insumoUnitarioId) {
                 throw new Error('Debes seleccionar el insumo del inventario para la venta unitaria.');
             }
-            const insumo = await getQuery(`SELECT id, nombre, costo_por_unidad, unidad_medida FROM insumos WHERE id = ? AND activo = 1`, [insumoUnitarioId]);
+            const insumo = await getQuery(`SELECT id, nombre, costo_por_unidad, unidad_medida FROM insumos WHERE id = $1 AND activo = 1`, [insumoUnitarioId]);
             if (!insumo) {
                 throw new Error('El insumo seleccionado para el producto unitario no existe o está inactivo.');
             }
@@ -256,14 +264,14 @@ async function crearProductoConInsumos({
 
             const resProd = await runQuery(
                 `INSERT INTO productos (nombre, precio, costo, categoria, unidad_medida, tipo_inventario, stock, stock_minimo, fecha_vencimiento)
-                 VALUES (?, ?, ?, ?, 'unidades', 'receta', NULL, 0, NULL)`,
+                 VALUES ($1, $2, $3, $4, 'unidades', 'receta', NULL, 0, NULL) RETURNING id`,
                 [nombre.trim(), precioValidado, costoInicial, catFinal]
             );
             const productoId = resProd.lastID;
 
             // Relación 1 a 1: 1 unidad del insumo
             await runQuery(
-                `INSERT INTO recetas (producto_id, insumo_id, cantidad_requerida) VALUES (?, ?, 1)`,
+                `INSERT INTO recetas (producto_id, insumo_id, cantidad_requerida) VALUES ($1, $2, 1)`,
                 [productoId, insumo.id]
             );
 
@@ -280,7 +288,7 @@ async function crearProductoConInsumos({
 
             const resProd = await runQuery(
                 `INSERT INTO productos (nombre, precio, costo, categoria, unidad_medida, tipo_inventario, stock, stock_minimo, fecha_vencimiento)
-                 VALUES (?, ?, 0, ?, 'unidades', 'receta', NULL, 0, NULL)`,
+                 VALUES ($1, $2, 0, $3, 'unidades', 'receta', NULL, 0, NULL) RETURNING id`,
                 [nombre.trim(), precioValidado, catFinal]
             );
             const productoId = resProd.lastID;
@@ -294,7 +302,7 @@ async function crearProductoConInsumos({
                 }
                 insumosUnicos.add(insumoId);
 
-                const insumo = await getQuery(`SELECT id, nombre, unidad_medida FROM insumos WHERE id = ? AND activo = 1`, [insumoId]);
+                const insumo = await getQuery(`SELECT id, nombre, unidad_medida FROM insumos WHERE id = $1 AND activo = 1`, [insumoId]);
                 if (!insumo) throw new Error(`El insumo con ID ${insumoId} no existe.`);
 
                 const cantVal = numeroPositivo(ing.cantidad, `La cantidad del insumo ${insumo.nombre}`);
@@ -303,7 +311,7 @@ async function crearProductoConInsumos({
                     : cantVal;
 
                 await runQuery(
-                    `INSERT INTO recetas (producto_id, insumo_id, cantidad_requerida) VALUES (?, ?, ?)`,
+                    `INSERT INTO recetas (producto_id, insumo_id, cantidad_requerida) VALUES ($1, $2, $3)`,
                     [productoId, insumoId, cantidadConvertidaAlmacen]
                 );
             }
@@ -346,7 +354,7 @@ async function crearProductoConInsumos({
                     stock, stock_minimo, fecha_vencimiento,
                     limite_maximo_activo, limite_unidades_total, limite_unidades_restante,
                     fecha_inicio_vigencia, fecha_fin_vigencia
-                ) VALUES (?, ?, 0, ?, 'unidades', 'combo', NULL, 0, NULL, ?, ?, ?, ?, ?)`,
+                ) VALUES ($1, $2, 0, $3, 'unidades', 'combo', NULL, 0, NULL, $4, $5, $6, $7, $8) RETURNING id`,
                 [
                     nombre.trim(),
                     precioValidado,
@@ -363,7 +371,7 @@ async function crearProductoConInsumos({
             const componentesUnicos = new Set();
             for (const comp of componentesLimpios) {
                 const compProdId = Number(comp.productoId);
-                if (compProdId === comboId) {
+                if (compProdId === Number(comboId)) {
                     throw new Error('Un combo no puede contenerse a sí mismo.');
                 }
                 if (componentesUnicos.has(compProdId)) {
@@ -371,7 +379,7 @@ async function crearProductoConInsumos({
                 }
                 componentesUnicos.add(compProdId);
 
-                const productoComp = await getQuery(`SELECT id, nombre, tipo_inventario, costo FROM productos WHERE id = ? AND activo = 1`, [compProdId]);
+                const productoComp = await getQuery(`SELECT id, nombre, tipo_inventario, costo FROM productos WHERE id = $1 AND activo = 1`, [compProdId]);
                 if (!productoComp) {
                     throw new Error(`El producto componente con ID ${compProdId} no existe o está inactivo.`);
                 }
@@ -382,7 +390,7 @@ async function crearProductoConInsumos({
                 const cantVal = numeroPositivo(comp.cantidad, `La cantidad del componente ${productoComp.nombre}`);
                 await runQuery(
                     `INSERT INTO combo_componentes (combo_producto_id, componente_producto_id, cantidad)
-                     VALUES (?, ?, ?)`,
+                     VALUES ($1, $2, $3)`,
                     [comboId, compProdId, cantVal]
                 );
             }
@@ -417,7 +425,7 @@ async function crearProductoConInsumos({
 
             const resProd = await runQuery(
                 `INSERT INTO productos (nombre, precio, costo, categoria, unidad_medida, tipo_inventario, stock, stock_minimo, fecha_vencimiento)
-                 VALUES (?, ?, ?, ?, ?, 'directo', ?, ?, ?)`,
+                 VALUES ($1, $2, $3, $4, $5, 'directo', $6, $7, $8) RETURNING id`,
                 [nombre.trim(), precioValidado, costoInicial, catFinal, unidadMedida, stockInicial, stockMinimo, fechaVenc]
             );
             const productoId = resProd.lastID;
@@ -425,7 +433,7 @@ async function crearProductoConInsumos({
             if (fechaVenc && stockInicial > 0) {
                 await runQuery(
                     `INSERT INTO producto_lotes (producto_id, fecha_vencimiento, stock, costo_unitario, activo)
-                     VALUES (?, ?, ?, ?, 1)`,
+                     VALUES ($1, $2, $3, $4, 1)`,
                     [productoId, fechaVenc, stockInicial, costoInicial]
                 );
             }
@@ -433,7 +441,7 @@ async function crearProductoConInsumos({
             await runQuery(
                 `INSERT INTO movimientos_productos_directos (
                     producto_id, usuario_id, tipo, cantidad, stock_resultante, costo_unitario, costo_promedio_resultante, monto_total, motivo
-                 ) VALUES (?, ?, 'inventario_inicial', ?, ?, ?, ?, ?, 'Inventario inicial de creación')`,
+                 ) VALUES ($1, $2, 'inventario_inicial', $3, $4, $5, $6, $7, 'Inventario inicial de creación')`,
                 [productoId, usuarioId, stockInicial, stockInicial, costoInicial, costoInicial, redondear2(stockInicial * costoInicial)]
             );
 
@@ -451,7 +459,7 @@ async function crearProductoConInsumos({
             // Venta libre / servicio sin insumo
             const resProd = await runQuery(
                 `INSERT INTO productos (nombre, precio, costo, categoria, unidad_medida, tipo_inventario, stock, stock_minimo, fecha_vencimiento)
-                 VALUES (?, ?, 0, ?, 'unidades', 'libre', NULL, 0, NULL)`,
+                 VALUES ($1, $2, 0, $3, 'unidades', 'libre', NULL, 0, NULL) RETURNING id`,
                 [nombre.trim(), precioValidado, catFinal]
             );
             return { id: resProd.lastID, nombre: nombre.trim(), precio: precioValidado, costo: 0, categoria: catFinal };
@@ -474,7 +482,7 @@ async function crearProducto(nombre, precio, costo = 0, categoria = '', stock = 
     return await enTransaccion(async () => {
         const res = await runQuery(
             `INSERT INTO productos (nombre, precio, costo, categoria, unidad_medida, tipo_inventario, stock, stock_minimo, fecha_vencimiento)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
             [nombre.trim(), precioValidado, costoValidado, categoria ? String(categoria).trim() : '', unidadMedida ? String(unidadMedida).trim().toLowerCase() : 'unidades', tipoInventario, stockValidado, stockMinimoValidado, fechaVencimiento || null]
         );
         const prodId = res.lastID;
@@ -486,7 +494,7 @@ async function crearProducto(nombre, precio, costo = 0, categoria = '', stock = 
             if (fechaVencLimpia && stockValidado > 0) {
                 await runQuery(
                     `INSERT INTO producto_lotes (producto_id, fecha_vencimiento, stock, costo_unitario, activo)
-                     VALUES (?, ?, ?, ?, 1)`,
+                     VALUES ($1, $2, $3, $4, 1)`,
                     [prodId, fechaVencLimpia, stockValidado, costoValidado]
                 );
             }
@@ -494,7 +502,7 @@ async function crearProducto(nombre, precio, costo = 0, categoria = '', stock = 
             await runQuery(
                 `INSERT INTO movimientos_productos_directos (
                     producto_id, usuario_id, tipo, cantidad, stock_resultante, costo_unitario, costo_promedio_resultante, monto_total, motivo
-                 ) VALUES (?, ?, 'inventario_inicial', ?, ?, ?, ?, ?, 'Inventario inicial de creación')`,
+                 ) VALUES ($1, $2, 'inventario_inicial', $3, $4, $5, $6, $7, 'Inventario inicial de creación')`,
                 [prodId, usuarioId, stockValidado, stockValidado, costoValidado, costoValidado, redondear2(stockValidado * costoValidado)]
             );
         }
@@ -574,7 +582,7 @@ async function crearGrupoModificadores(datos, adminId) {
     return await enTransaccion(async () => {
         const res = await runQuery(
             `INSERT INTO grupos_modificadores (nombre, tipo_seleccion, es_obligatorio, activo)
-             VALUES (?, ?, ?, 1)`,
+             VALUES ($1, $2, $3, 1) RETURNING id`,
             [nombreLimpio, tipoSeleccion, esObligatorio]
         );
         const grupoId = res.lastID;
@@ -590,7 +598,7 @@ async function crearGrupoModificadores(datos, adminId) {
 
             await runQuery(
                 `INSERT INTO modificadores_opciones (grupo_id, nombre, insumo_id, cantidad_insumo, precio_adicional, insumo_reemplazado_id, es_default, activo)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, 1)`,
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, 1)`,
                 [grupoId, opNombre, insumoId, cantidadInsumo, precioAdicional, insumoReemplazadoId, esDefault]
             );
         }
@@ -622,13 +630,13 @@ async function actualizarGrupoModificadores(grupoId, datos, adminId) {
     return await enTransaccion(async () => {
         await runQuery(
             `UPDATE grupos_modificadores
-             SET nombre = ?, tipo_seleccion = ?, es_obligatorio = ?
-             WHERE id = ?`,
+             SET nombre = $1, tipo_seleccion = $2, es_obligatorio = $3
+             WHERE id = $4`,
             [nombreLimpio, tipoSeleccion, esObligatorio, idNum]
         );
 
         // Desactivar opciones anteriores del grupo
-        await runQuery(`UPDATE modificadores_opciones SET activo = 0 WHERE grupo_id = ?`, [idNum]);
+        await runQuery(`UPDATE modificadores_opciones SET activo = 0 WHERE grupo_id = $1`, [idNum]);
 
         for (const op of opciones) {
             if (!op || !String(op.nombre || '').trim()) continue;
@@ -642,15 +650,15 @@ async function actualizarGrupoModificadores(grupoId, datos, adminId) {
             if (op.id) {
                 await runQuery(
                     `UPDATE modificadores_opciones
-                     SET nombre = ?, insumo_id = ?, cantidad_insumo = ?, precio_adicional = ?,
-                         insumo_reemplazado_id = ?, es_default = ?, activo = 1
-                     WHERE id = ? AND grupo_id = ?`,
+                     SET nombre = $1, insumo_id = $2, cantidad_insumo = $3, precio_adicional = $4,
+                         insumo_reemplazado_id = $5, es_default = $6, activo = 1
+                     WHERE id = $7 AND grupo_id = $8`,
                     [opNombre, insumoId, cantidadInsumo, precioAdicional, insumoReemplazadoId, esDefault, op.id, idNum]
                 );
             } else {
                 await runQuery(
                     `INSERT INTO modificadores_opciones (grupo_id, nombre, insumo_id, cantidad_insumo, precio_adicional, insumo_reemplazado_id, es_default, activo)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, 1)`,
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, 1)`,
                     [idNum, opNombre, insumoId, cantidadInsumo, precioAdicional, insumoReemplazadoId, esDefault]
                 );
             }
@@ -667,9 +675,9 @@ async function eliminarGrupoModificadores(grupoId, adminId) {
     }
     const idNum = Number(grupoId);
     return await enTransaccion(async () => {
-        await runQuery(`UPDATE grupos_modificadores SET activo = 0 WHERE id = ?`, [idNum]);
-        await runQuery(`UPDATE modificadores_opciones SET activo = 0 WHERE grupo_id = ?`, [idNum]);
-        await runQuery(`DELETE FROM producto_grupos_modificadores WHERE grupo_id = ?`, [idNum]);
+        await runQuery(`UPDATE grupos_modificadores SET activo = 0 WHERE id = $1`, [idNum]);
+        await runQuery(`UPDATE modificadores_opciones SET activo = 0 WHERE grupo_id = $1`, [idNum]);
+        await runQuery(`DELETE FROM producto_grupos_modificadores WHERE grupo_id = $1`, [idNum]);
         return true;
     });
 }
@@ -688,10 +696,12 @@ async function asignarModificadoresAProducto(productoId, grupoIds, adminId) {
         : [];
 
     return await enTransaccion(async () => {
-        await runQuery(`DELETE FROM producto_grupos_modificadores WHERE producto_id = ?`, [prodId]);
+        await getQuery(`SELECT id FROM productos WHERE id = $1 FOR NO KEY UPDATE`, [prodId]);
+        await runQuery(`DELETE FROM producto_grupos_modificadores WHERE producto_id = $1`, [prodId]);
         for (const gId of idsValidados) {
             await runQuery(
-                `INSERT OR IGNORE INTO producto_grupos_modificadores (producto_id, grupo_id) VALUES (?, ?)`,
+                `INSERT INTO producto_grupos_modificadores (producto_id, grupo_id) VALUES ($1, $2)
+                ON CONFLICT (producto_id, grupo_id) DO NOTHING`,
                 [prodId, gId]
             );
         }
@@ -702,17 +712,20 @@ async function asignarModificadoresAProducto(productoId, grupoIds, adminId) {
 async function obtenerProductos() {
     const [productos, gruposModificadores, enlaces, todosInsumos, recetasTodas, componentesCombos, lotesActivos] = await Promise.all([
         allQuery(`
-            SELECT p.*,
-                   COUNT(r.id) as num_ingredientes,
-                   MIN(i.stock_actual / NULLIF(r.cantidad_requerida, 0)) as min_disponible,
-                   i.nombre as limitante_nombre,
-                   i.stock_actual as limitante_stock,
-                   i.unidad_medida as limitante_unidad
+            SELECT p.*, (SELECT COUNT(*) FROM recetas WHERE producto_id = p.id)::int AS num_ingredientes,
+                   limite.*
             FROM productos p
-            LEFT JOIN recetas r ON p.id = r.producto_id
-            LEFT JOIN insumos i ON r.insumo_id = i.id
+            LEFT JOIN LATERAL (
+                SELECT i.stock_actual / NULLIF(r.cantidad_requerida, 0) AS min_disponible,
+                       i.nombre AS limitante_nombre, i.stock_actual AS limitante_stock,
+                       i.unidad_medida AS limitante_unidad
+                FROM recetas r
+                JOIN insumos i ON r.insumo_id = i.id
+                WHERE r.producto_id = p.id
+                ORDER BY min_disponible ASC NULLS LAST, r.id ASC
+                LIMIT 1
+            ) limite ON TRUE
             WHERE p.activo = 1
-            GROUP BY p.id
             ORDER BY p.categoria, p.nombre
         `),
         obtenerGruposModificadores(true),
@@ -942,7 +955,7 @@ async function actualizarProducto(productoId, datos = {}, usuarioId = null) {
     }
 
     return await enTransaccion(async () => {
-        const prod = await getQuery(`SELECT * FROM productos WHERE id = ? AND activo = 1`, [prodId]);
+        const prod = await getQuery(`SELECT * FROM productos WHERE id = $1 AND activo = 1 FOR NO KEY UPDATE`, [prodId]);
         if (!prod) {
             throw new Error('Producto no encontrado o inactivo.');
         }
@@ -983,7 +996,7 @@ async function actualizarProducto(productoId, datos = {}, usuarioId = null) {
             catFinal = catsUnicas.join(', ');
 
             for (const c of catsUnicas) {
-                await runQuery(`INSERT OR IGNORE INTO categorias (nombre, activo) VALUES (?, 1)`, [c]);
+                await runQuery(INSERTAR_CATEGORIA, [c]);
             }
         }
 
@@ -998,8 +1011,8 @@ async function actualizarProducto(productoId, datos = {}, usuarioId = null) {
 
         await runQuery(
             `UPDATE productos
-             SET nombre = ?, precio = ?, categoria = ?, stock_minimo = ?, fecha_vencimiento = ?
-             WHERE id = ?`,
+             SET nombre = $1, precio = $2, categoria = $3, stock_minimo = $4, fecha_vencimiento = $5
+             WHERE id = $6`,
             [nombreFinal, precioFinal, catFinal, stockMinimoFinal, fechaVencimientoFinal ? String(fechaVencimientoFinal).trim() : null, prodId]
         );
 
@@ -1017,7 +1030,7 @@ async function actualizarProducto(productoId, datos = {}, usuarioId = null) {
                     throw new Error('Límite excedido: No se pueden agregar más de 30 insumos en una sola receta.');
                 }
 
-                await runQuery(`DELETE FROM recetas WHERE producto_id = ?`, [prodId]);
+                await runQuery(`DELETE FROM recetas WHERE producto_id = $1`, [prodId]);
                 const insumosUnicos = new Set();
 
                 for (const ing of insumosReceta) {
@@ -1029,7 +1042,7 @@ async function actualizarProducto(productoId, datos = {}, usuarioId = null) {
                     }
                     insumosUnicos.add(insumoId);
 
-                    const insumo = await getQuery(`SELECT id, nombre, unidad_medida FROM insumos WHERE id = ? AND activo = 1`, [insumoId]);
+                    const insumo = await getQuery(`SELECT id, nombre, unidad_medida FROM insumos WHERE id = $1 AND activo = 1`, [insumoId]);
                     if (!insumo) {
                         throw new Error(`El insumo con ID ${insumoId} no existe o está inactivo.`);
                     }
@@ -1041,7 +1054,7 @@ async function actualizarProducto(productoId, datos = {}, usuarioId = null) {
                         : cantVal;
 
                     await runQuery(
-                        `INSERT INTO recetas (producto_id, insumo_id, cantidad_requerida) VALUES (?, ?, ?)`,
+                        `INSERT INTO recetas (producto_id, insumo_id, cantidad_requerida) VALUES ($1, $2, $3)`,
                         [prodId, insumoId, cantidadConvertidaAlmacen]
                     );
                 }
@@ -1066,7 +1079,7 @@ async function actualizarProducto(productoId, datos = {}, usuarioId = null) {
                     throw new Error('Límite excedido: No se pueden agregar más de 20 componentes en un solo combo.');
                 }
 
-                await runQuery(`DELETE FROM combo_componentes WHERE combo_producto_id = ?`, [prodId]);
+                await runQuery(`DELETE FROM combo_componentes WHERE combo_producto_id = $1`, [prodId]);
                 const componentesUnicos = new Set();
 
                 for (const comp of componentesLimpios) {
@@ -1079,7 +1092,7 @@ async function actualizarProducto(productoId, datos = {}, usuarioId = null) {
                     }
                     componentesUnicos.add(compProdId);
 
-                    const productoComp = await getQuery(`SELECT id, nombre, tipo_inventario FROM productos WHERE id = ? AND activo = 1`, [compProdId]);
+                    const productoComp = await getQuery(`SELECT id, nombre, tipo_inventario FROM productos WHERE id = $1 AND activo = 1`, [compProdId]);
                     if (!productoComp) {
                         throw new Error(`El producto componente con ID ${compProdId} no existe o está inactivo.`);
                     }
@@ -1089,7 +1102,7 @@ async function actualizarProducto(productoId, datos = {}, usuarioId = null) {
 
                     const cantVal = numeroPositivo(comp.cantidad, `La cantidad del componente ${productoComp.nombre}`);
                     await runQuery(
-                        `INSERT INTO combo_componentes (combo_producto_id, componente_producto_id, cantidad) VALUES (?, ?, ?)`,
+                        `INSERT INTO combo_componentes (combo_producto_id, componente_producto_id, cantidad) VALUES ($1, $2, $3)`,
                         [prodId, compProdId, cantVal]
                     );
                 }
@@ -1112,7 +1125,7 @@ async function actualizarProducto(productoId, datos = {}, usuarioId = null) {
                     limiteRestante = null;
                 }
                 await runQuery(
-                    `UPDATE productos SET limite_maximo_activo = ?, limite_unidades_total = ?, limite_unidades_restante = ? WHERE id = ?`,
+                    `UPDATE productos SET limite_maximo_activo = $1, limite_unidades_total = $2, limite_unidades_restante = $3 WHERE id = $4`,
                     [limiteActivo, limiteTotal, limiteRestante, prodId]
                 );
             }
@@ -1125,7 +1138,7 @@ async function actualizarProducto(productoId, datos = {}, usuarioId = null) {
                     throw new Error('La fecha y hora de inicio de vigencia no puede ser posterior a la fecha y hora final.');
                 }
                 await runQuery(
-                    `UPDATE productos SET fecha_inicio_vigencia = ?, fecha_fin_vigencia = ? WHERE id = ?`,
+                    `UPDATE productos SET fecha_inicio_vigencia = $1, fecha_fin_vigencia = $2 WHERE id = $3`,
                     [fIni ? String(fIni).trim() : null, fFin ? String(fFin).trim() : null, prodId]
                 );
             }
@@ -1134,7 +1147,7 @@ async function actualizarProducto(productoId, datos = {}, usuarioId = null) {
         // Si otros combos contienen a este producto (directo o receta), recalcular sus costos
         await recalcularCostoCombosQueContienenProducto(prodId);
 
-        return await getQuery(`SELECT * FROM productos WHERE id = ?`, [prodId]);
+        return await getQuery(`SELECT * FROM productos WHERE id = $1`, [prodId]);
     });
 }
 
@@ -1147,7 +1160,7 @@ async function eliminarProducto(productoId, adminId) {
     if (!prodId || isNaN(prodId)) throw new Error('ID de producto inválido.');
 
     return await enTransaccion(async () => {
-        const prod = await getQuery(`SELECT * FROM productos WHERE id = ? AND activo = 1`, [prodId]);
+        const prod = await getQuery(`SELECT * FROM productos WHERE id = $1 AND activo = 1 FOR NO KEY UPDATE`, [prodId]);
         if (!prod) throw new Error('El artículo no existe o ya fue eliminado del catálogo.');
 
         // Verificar si forma parte de algún combo activo
@@ -1155,7 +1168,7 @@ async function eliminarProducto(productoId, adminId) {
             `SELECT p.nombre 
              FROM combo_componentes cc
              JOIN productos p ON cc.combo_producto_id = p.id
-             WHERE cc.componente_producto_id = ? AND p.activo = 1`,
+             WHERE cc.componente_producto_id = $1 AND p.activo = 1`,
             [prodId]
         );
         if (combosQueLoUsan.length > 0) {
@@ -1164,7 +1177,7 @@ async function eliminarProducto(productoId, adminId) {
         }
 
         // Baja lógica: preservar trazabilidad contable y de movimientos
-        await runQuery(`UPDATE productos SET activo = 0 WHERE id = ?`, [prodId]);
+        await runQuery(`UPDATE productos SET activo = 0 WHERE id = $1`, [prodId]);
 
         return { id: prodId, nombre: prod.nombre, eliminado: true };
     });

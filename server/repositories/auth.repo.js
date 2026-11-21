@@ -6,7 +6,8 @@
 
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
-const { runQuery, getQuery, allQuery } = require('./db');
+const { runQuery, getQuery, allQuery, enTransaccion } = require('./db');
+const { obtenerContextoTenantActual, exigirContextoTenant, ejecutarConContextoTenant } = require('../tenancy/tenant-context');
 
 const UUID_TENANT = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -43,10 +44,24 @@ function esHashBcrypt(valor) {
 
 function exigirTenantId(tenantId) {
     const valor = String(tenantId || '').trim();
-    if (!UUID_TENANT.test(valor)) {
+    const contexto = obtenerContextoTenantActual();
+    if (!UUID_TENANT.test(valor) || (contexto && valor !== contexto.tenantId)) {
         throw new Error('Contexto de tenant inválido o ausente.');
     }
     return valor;
+}
+
+function obtenerTenantId() {
+    return exigirTenantId(exigirContextoTenant().tenantId);
+}
+
+function consultarConPoolTenant(pool, tenantId, sql, params) {
+    const tenant = exigirTenantId(tenantId);
+    const conexion = exigirPoolTenant(pool);
+    const activo = obtenerContextoTenantActual();
+    if (activo) return conexion.query(sql, params);
+    return ejecutarConContextoTenant({ tenantId: tenant, tenant: { tenant_id: tenant }, pool: conexion },
+        () => conexion.query(sql, params));
 }
 
 function exigirPoolTenant(pool) {
@@ -58,10 +73,7 @@ function exigirPoolTenant(pool) {
 
 function normalizarDeviceId(deviceId) {
     const valor = Number(deviceId);
-    if (!Number.isSafeInteger(valor) || valor <= 0) {
-        throw new Error('El identificador del dispositivo no es válido.');
-    }
-    return valor;
+    return Number.isSafeInteger(valor) && valor > 0 ? valor : null;
 }
 
 function decodificarFirma(firma) {
@@ -100,27 +112,18 @@ async function verificarPruebaDispositivo({ tenantId, deviceId, challenge, signa
     const id = normalizarDeviceId(deviceId);
     const desafio = String(challenge || '').trim();
     const firma = decodificarFirma(signature);
-    if (desafio.length < 8 || desafio.length > 2048 || !firma) throw errorDispositivoNoAutorizado();
+    if (!id || desafio.length < 8 || desafio.length > 2048 || !firma) throw errorDispositivoNoAutorizado();
 
+    const consultar = pool
+        ? async (sql, params) => (await consultarConPoolTenant(pool, tenant, sql, params)).rows[0]
+        : getQuery;
     let dispositivo;
     try {
-        if (pool) {
-            const conexion = exigirPoolTenant(pool);
-            const resultado = await conexion.query(`
-                SELECT id, tenant_id, clave_publica, estado
-                FROM dispositivos_pos
-                WHERE tenant_id = $1 AND id = $2
-                LIMIT 1
-            `, [tenant, id]);
-            dispositivo = resultado.rows[0];
-        } else {
-            dispositivo = await getQuery(`
-                SELECT id, tenant_id, clave_publica, estado
-                FROM dispositivos_pos
-                WHERE tenant_id = ? AND id = ?
-                LIMIT 1
-            `, [tenant, id]);
-        }
+        dispositivo = await consultar(`
+            SELECT id, tenant_id, clave_publica, estado
+            FROM dispositivos_pos
+            WHERE tenant_id = $1 AND id = $2
+        `, [tenant, id]);
     } catch (_) {
         throw errorDispositivoNoAutorizado();
     }
@@ -145,17 +148,15 @@ async function verificarPruebaDispositivo({ tenantId, deviceId, challenge, signa
     if (pruebasDispositivoUsadas.has(clavePrueba)) throw errorDispositivoNoAutorizado();
     pruebasDispositivoUsadas.set(clavePrueba, Date.now() + PRUEBA_DISPOSITIVO_TTL_MS);
 
-    if (pool) {
-        await pool.query(`
-            UPDATE dispositivos_pos SET ultimo_acceso = CURRENT_TIMESTAMP
-            WHERE tenant_id = $1 AND id = $2 AND estado = 'activo'
-        `, [tenant, id]);
-    } else {
-        await runQuery(`
-            UPDATE dispositivos_pos SET ultimo_acceso = CURRENT_TIMESTAMP
-            WHERE tenant_id = ? AND id = ? AND estado = 'activo'
-        `, [tenant, id]);
-    }
+    const sqlActualizacion = `
+        UPDATE dispositivos_pos SET ultimo_acceso = CURRENT_TIMESTAMP
+        WHERE tenant_id = $1 AND id = $2 AND estado = 'activo' AND clave_publica = $3
+    `;
+    const parametros = [tenant, id, dispositivo.clave_publica];
+    const cambios = pool
+        ? (await consultarConPoolTenant(pool, tenant, sqlActualizacion, parametros)).rowCount
+        : (await runQuery(sqlActualizacion, parametros)).changes;
+    if (!cambios) throw errorDispositivoNoAutorizado();
 
     return { id, tenantId: tenant, estado: 'activo' };
 }
@@ -163,27 +164,20 @@ async function verificarPruebaDispositivo({ tenantId, deviceId, challenge, signa
 async function obtenerEstadoDispositivoParaSesion(tenantId, deviceId, pool = null) {
     const tenant = exigirTenantId(tenantId);
     const id = normalizarDeviceId(deviceId);
+    if (!id) return false;
     let dispositivo;
     try {
+        const sql = `
+            SELECT id, tenant_id, estado FROM dispositivos_pos
+            WHERE tenant_id = $1 AND id = $2
+        `;
         dispositivo = pool
-            ? (await exigirPoolTenant(pool).query(`
-                SELECT id, tenant_id, estado FROM dispositivos_pos
-                WHERE tenant_id = $1 AND id = $2 LIMIT 1
-            `, [tenant, id])).rows[0]
-            : await getQuery(`
-                SELECT id, tenant_id, estado FROM dispositivos_pos
-                WHERE tenant_id = ? AND id = ? LIMIT 1
-            `, [tenant, id]);
+            ? (await consultarConPoolTenant(pool, tenant, sql, [tenant, id])).rows[0]
+            : await getQuery(sql, [tenant, id]);
     } catch (_) {
         return false;
     }
     return Boolean(dispositivo && dispositivo.estado === 'activo');
-}
-
-async function compararPasswordPostgres(pinPlano, passwordGuardado) {
-    const pinStr = String(pinPlano ?? '');
-    if (!pinStr || !passwordGuardado || !esHashBcrypt(passwordGuardado)) return false;
-    return await bcrypt.compare(pinStr, passwordGuardado);
 }
 
 /**
@@ -191,13 +185,18 @@ async function compararPasswordPostgres(pinPlano, passwordGuardado) {
  * autenticado del servidor; no deben construirse desde el body del request.
  */
 async function verificarUsuarioEnTenant(pool, tenantId, nombreUsuario, pin, ip = 'local') {
-    const conexion = exigirPoolTenant(pool);
-    const tenant = exigirTenantId(tenantId);
+    return verificarUsuarioPostgres(
+        async (sql, params) => (await consultarConPoolTenant(pool, tenantId, sql, params)).rows[0],
+        exigirTenantId(tenantId), nombreUsuario, pin, ip
+    );
+}
+
+async function verificarUsuarioPostgres(consultar, tenant, nombreUsuario, pin, ip) {
     const usuario = String(nombreUsuario || '').trim();
     const claveRL = obtenerClaveRateLimitLogin(`tenant:${tenant}:usuario:${usuario}`, ip);
     verificarBloqueoLogin(claveRL);
 
-    const resultado = await conexion.query(`
+    const candidato = await consultar(`
         SELECT id, tenant_id, nombre AS nombre_visible, nombre_usuario, rol,
                pin_o_password, puede_registrar_respaldo_fiscal
         FROM usuarios
@@ -206,11 +205,10 @@ async function verificarUsuarioEnTenant(pool, tenantId, nombreUsuario, pin, ip =
           AND activo = 1
         LIMIT 1
     `, [tenant, usuario]);
-    const candidato = resultado.rows[0];
     const claveCuenta = obtenerClaveCuenta(candidato, `tenant:${tenant}:usuario:${usuario}`);
     verificarBloqueoCuenta(claveCuenta);
 
-    if (!candidato || !(await compararPasswordPostgres(pin, candidato.pin_o_password))) {
+    if (!candidato || !(await compararPassword(pin, candidato.pin_o_password))) {
         registrarFalloLogin(claveRL, claveCuenta);
         return undefined;
     }
@@ -227,34 +225,35 @@ async function verificarUsuarioEnTenant(pool, tenantId, nombreUsuario, pin, ip =
 }
 
 async function crearUsuarioEnTenant(pool, tenantId, nombreVisible, nombreUsuario, pin, rol) {
-    const conexion = exigirPoolTenant(pool);
-    const tenant = exigirTenantId(tenantId);
+    return insertarUsuarioPostgres(
+        async (sql, params) => (await consultarConPoolTenant(pool, tenantId, sql, params)).rows[0],
+        exigirTenantId(tenantId), nombreVisible, nombreUsuario, pin, rol
+    );
+}
+
+async function insertarUsuarioPostgres(consultar, tenant, nombreVisible, nombreUsuario, pin, rol) {
     const visible = String(nombreVisible || '').trim();
-    const usuario = String(nombreUsuario || '').trim().toLowerCase();
+    const usuario = String(nombreUsuario || '').trim();
     if (!visible || !usuario) throw new Error('El nombre visible y el usuario son obligatorios.');
     const pinValido = validarPoliticaPin(pin, rol);
     const hashPin = await bcrypt.hash(pinValido, BCRYPT_ROUNDS);
 
-    try {
-        const resultado = await conexion.query(`
-            INSERT INTO usuarios
-                (tenant_id, nombre, nombre_usuario, pin_o_password, rol)
-            VALUES ($1, $2, $3, $4, $5)
-            RETURNING id
-        `, [tenant, visible, usuario, hashPin, rol]);
-        return resultado.rows[0].id;
-    } catch (err) {
-        if (err && err.code === '23505') {
-            throw new Error(`Ya existe el usuario "${usuario}" en este negocio.`);
-        }
-        throw err;
-    }
+    const creado = await consultar(`
+        INSERT INTO usuarios (tenant_id, nombre, nombre_usuario, pin_o_password, rol)
+        SELECT $1, $2, LOWER($3), $4, $5
+        WHERE NOT EXISTS (
+            SELECT 1 FROM usuarios WHERE tenant_id = $1 AND LOWER(nombre_usuario) = LOWER($3)
+        )
+        ON CONFLICT DO NOTHING
+        RETURNING id
+    `, [tenant, visible, usuario, hashPin, rol]);
+    if (!creado) throw new Error(`Ya existe el usuario "${usuario}" en este negocio.`);
+    return creado.id;
 }
 
 async function obtenerUsuarioPorIdEnTenant(pool, tenantId, usuarioId) {
-    const conexion = exigirPoolTenant(pool);
     const tenant = exigirTenantId(tenantId);
-    const resultado = await conexion.query(`
+    const resultado = await consultarConPoolTenant(pool, tenant, `
         SELECT id, tenant_id, nombre AS nombre_visible, nombre_usuario, rol,
                puede_registrar_respaldo_fiscal
         FROM usuarios
@@ -327,7 +326,11 @@ function limpiarIntentosLogin(clave) {
 }
 
 function obtenerClaveCuenta(candidato, identificadorIntentado) {
-    if (candidato && candidato.id) return `cuenta:${Number(candidato.id)}`;
+    if (candidato && candidato.id) {
+        return candidato.tenant_id
+            ? `cuenta:${candidato.tenant_id}:${candidato.id}`
+            : `cuenta:${candidato.id}`;
+    }
     return `intento:${String(identificadorIntentado || 'desconocido').trim().toLowerCase()}`;
 }
 
@@ -375,8 +378,6 @@ async function compararPassword(pinPlano, passwordGuardado) {
 
     if (!esHashBcrypt(passwordGuardado)) return false;
     return await bcrypt.compare(pinStr, passwordGuardado);
-
-    // Respaldo de transición por si algún registro aún estuviera en texto plano
 }
 
 const NIVEL_ROL = {
@@ -391,53 +392,28 @@ function esRolAdministrativo(rol) {
 }
 
 async function verificarUsuario(nombre, pin, ip = 'local') {
-    const nombreLimpio = String(nombre || '').trim();
-    const claveRL = obtenerClaveRateLimitLogin(`nombre:${nombreLimpio}`, ip);
-    verificarBloqueoLogin(claveRL);
-
-    const candidato = await getQuery(
-        `SELECT id, nombre, rol, pin_o_password FROM usuarios WHERE LOWER(nombre) = LOWER(?) AND activo = 1`,
-        [nombreLimpio]
-    );
-
-    const claveCuenta = obtenerClaveCuenta(candidato, `nombre:${nombreLimpio}`);
-    verificarBloqueoCuenta(claveCuenta);
-
-    if (!candidato) {
-        registrarFalloLogin(claveRL, claveCuenta);
-        return undefined;
-    }
-
-    const coincide = await compararPassword(pin, candidato.pin_o_password);
-    if (!coincide) {
-        registrarFalloLogin(claveRL, claveCuenta);
-        return undefined;
-    }
-
-    limpiarIntentosLogin(claveRL);
-    return { id: candidato.id, nombre: candidato.nombre, rol: candidato.rol };
+    return verificarUsuarioPostgres(getQuery, obtenerTenantId(), nombre, pin, ip);
 }
 
 async function autenticarUsuarioPorId(usuarioId, pin, nombreUsuario = null, ip = 'local') {
-    const usaNombre = nombreUsuario && String(nombreUsuario).trim() !== '';
-    const identificadorRL = usaNombre ? `nombre:${String(nombreUsuario).trim()}` : `id:${Number(usuarioId || 0)}`;
-    const claveRL = obtenerClaveRateLimitLogin(identificadorRL, ip);
-    verificarBloqueoLogin(claveRL);
-
-    let candidato = null;
-    if (usaNombre) {
-        candidato = await getQuery(
-            `SELECT id, nombre, rol, pin_o_password FROM usuarios WHERE LOWER(nombre) = LOWER(?) AND activo = 1`,
-            [String(nombreUsuario).trim()]
-        );
-    } else {
-        candidato = await getQuery(
-            `SELECT id, nombre, rol, pin_o_password FROM usuarios WHERE id = ? AND activo = 1`,
-            [usuarioId]
-        );
+    const tenant = obtenerTenantId();
+    if (String(nombreUsuario || '').trim()) {
+        const usuario = await verificarUsuario(nombreUsuario, pin, ip);
+        if (!usuario) throw new Error('Credenciales incorrectas o usuario inactivo.');
+        return usuario;
     }
 
-    const claveCuenta = obtenerClaveCuenta(candidato, identificadorRL);
+    const identificadorTenant = `tenant:${tenant}:id:${Number(usuarioId || 0)}`;
+    const claveRL = obtenerClaveRateLimitLogin(identificadorTenant, ip);
+    verificarBloqueoLogin(claveRL);
+
+    const candidato = await getQuery(
+        `SELECT id, nombre, rol, pin_o_password, tenant_id
+         FROM usuarios WHERE id = $1 AND activo = 1 AND tenant_id = $2`,
+        [usuarioId, tenant]
+    );
+
+    const claveCuenta = obtenerClaveCuenta(candidato, identificadorTenant);
     verificarBloqueoCuenta(claveCuenta);
 
     if (!candidato) {
@@ -456,19 +432,22 @@ async function autenticarUsuarioPorId(usuarioId, pin, nombreUsuario = null, ip =
 }
 
 async function obtenerUsuarioPorId(id) {
+    const tenant = obtenerTenantId();
     return await getQuery(
         `SELECT id, nombre, rol, COALESCE(puede_registrar_respaldo_fiscal, 1) as puede_registrar_respaldo_fiscal
-         FROM usuarios WHERE id = ? AND activo = 1`,
-        [id]
+         FROM usuarios WHERE id = $1 AND activo = 1 AND tenant_id = $2`,
+        [id, tenant]
     );
 }
 
 async function obtenerUsuarios() {
+    const tenant = obtenerTenantId();
     // El rol 'developer' es estrictamente invisible para todos los roles en listados y selectores
     return await allQuery(
         `SELECT id, nombre, rol, COALESCE(puede_registrar_respaldo_fiscal, 1) as puede_registrar_respaldo_fiscal
-         FROM usuarios WHERE activo = 1 AND rol != 'developer'
-         ORDER BY CASE rol WHEN 'propietario' THEN 1 WHEN 'admin' THEN 2 ELSE 3 END, id ASC`
+         FROM usuarios WHERE activo = 1 AND rol != 'developer' AND tenant_id = $1
+         ORDER BY CASE rol WHEN 'propietario' THEN 1 WHEN 'admin' THEN 2 ELSE 3 END, id ASC`,
+        [tenant]
     );
 }
 
@@ -481,17 +460,17 @@ async function actualizarPermisoFiscalUsuario(adminId, usuarioObjetivoId, habili
     if (!Number.isFinite(idNum) || idNum <= 0) {
         throw new Error('ID de usuario inválido.');
     }
-    await runQuery(
-        `UPDATE usuarios SET puede_registrar_respaldo_fiscal = ? WHERE id = ?`,
-        [habilitado ? 1 : 0, idNum]
-    );
+    await actualizarUsuario('puede_registrar_respaldo_fiscal', habilitado ? 1 : 0, idNum);
     return true;
 }
 
 // Lista pública mínima para el selector de login de /caja: solo cajeros activos, sin rol.
 async function obtenerCajerosParaLogin() {
-    return await allQuery(
-        `SELECT id, nombre FROM usuarios WHERE activo = 1 AND rol = 'user' ORDER BY nombre COLLATE NOCASE ASC, id ASC`
+    return allQuery(
+        `SELECT id, nombre, nombre_usuario AS "nombreUsuario"
+         FROM usuarios WHERE activo = 1 AND rol = 'user' AND tenant_id = $1
+         ORDER BY LOWER(nombre) ASC, id ASC`,
+        [obtenerTenantId()]
     );
 }
 
@@ -526,28 +505,8 @@ function validarPoliticaPin(pin, rol) {
 }
 
 async function crearUsuario(nombre, pin, rol) {
-    const nombreLimpio = String(nombre || '').trim();
-    if (!nombreLimpio) {
-        throw new Error('El nombre de usuario no puede estar vacío.');
-    }
-    if (pin === null || pin === undefined || String(pin).trim() === '') {
-        throw new Error('La contraseña / PIN no puede estar vacía.');
-    }
-    const pinStr = validarPoliticaPin(pin, rol);
-    const hashPin = await bcrypt.hash(pinStr, BCRYPT_ROUNDS);
-
-    try {
-        const res = await runQuery(
-            `INSERT INTO usuarios (nombre, pin_o_password, rol) VALUES (?, ?, ?)`,
-            [nombreLimpio, hashPin, rol]
-        );
-        return res.lastID;
-    } catch (err) {
-        if (err && err.message && err.message.includes('UNIQUE constraint failed')) {
-            throw new Error(`Ya existe un usuario con el nombre "${nombreLimpio}".`);
-        }
-        throw err;
-    }
+    const tenant = obtenerTenantId();
+    return enTransaccion(() => insertarUsuarioPostgres(getQuery, tenant, nombre, nombre, pin, rol));
 }
 
 async function crearUsuarioConPermiso(adminId, nuevoNombre, pin, nuevoRol) {
@@ -586,8 +545,16 @@ async function borrarUsuarioConPermiso(adminId, usuarioABorrarId) {
     if (NIVEL_ROL[ejecutor.rol] <= NIVEL_ROL[objetivo.rol]) {
         throw new Error(`Jerarquía insuficiente: como ${ejecutor.rol} no puedes borrar a un usuario de tu mismo rango (${objetivo.rol}) o superior.`);
     }
-    const res = await runQuery(`UPDATE usuarios SET activo = 0 WHERE id = ?`, [usuarioABorrarId]);
+    const res = await actualizarUsuario('activo', 0, usuarioABorrarId);
     return res.changes > 0;
+}
+
+async function actualizarUsuario(campo, valor, id) {
+    const tenant = obtenerTenantId();
+    return enTransaccion(() => runQuery(
+        `UPDATE usuarios SET ${campo} = $1 WHERE id = $2 AND tenant_id = $3`,
+        [valor, id, tenant]
+    ));
 }
 
 async function cambiarPasswordConPermiso(ejecutorId, usuarioObjetivoId, nuevoPin, pinActual = null) {
@@ -595,7 +562,12 @@ async function cambiarPasswordConPermiso(ejecutorId, usuarioObjetivoId, nuevoPin
         throw new Error('La nueva contraseña / PIN no puede estar vacía.');
     }
 
-    const ejecutor = await getQuery(`SELECT id, nombre, rol, pin_o_password FROM usuarios WHERE id = ? AND activo = 1`, [ejecutorId]);
+    const tenant = obtenerTenantId();
+    const ejecutor = await getQuery(
+        `SELECT id, nombre, rol, pin_o_password FROM usuarios
+         WHERE id = $1 AND activo = 1 AND tenant_id = $2`,
+        [ejecutorId, tenant]
+    );
     if (!ejecutor) {
         throw new Error('Usuario ejecutor no válido.');
     }
@@ -617,7 +589,7 @@ async function cambiarPasswordConPermiso(ejecutorId, usuarioObjetivoId, nuevoPin
         if (!coincide) {
             throw new Error('Tu contraseña / PIN actual es incorrecto.');
         }
-        await runQuery(`UPDATE usuarios SET pin_o_password = ? WHERE id = ?`, [nuevoHash, usuarioObjetivoId]);
+        await actualizarUsuario('pin_o_password', nuevoHash, usuarioObjetivoId);
         return true;
     }
 
@@ -630,7 +602,7 @@ async function cambiarPasswordConPermiso(ejecutorId, usuarioObjetivoId, nuevoPin
         throw new Error(`Jerarquía insuficiente: un ${ejecutor.rol} no puede cambiar la contraseña de otro ${objetivo.rol} ni de un superior.`);
     }
 
-    await runQuery(`UPDATE usuarios SET pin_o_password = ? WHERE id = ?`, [nuevoHash, usuarioObjetivoId]);
+    await actualizarUsuario('pin_o_password', nuevoHash, usuarioObjetivoId);
     return true;
 }
 

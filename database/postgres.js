@@ -33,4 +33,20 @@ async function cerrarPoolsPostgres() {
     pools.clear();
 }
 
-module.exports = { obtenerPool, cerrarPoolsPostgres };
+async function enTransaccionPostgres(pool, ejecutar) {
+    const client = await pool.connect();
+    let errorRollback;
+    try {
+        await client.query('BEGIN');
+        const resultado = await ejecutar(client);
+        await client.query('COMMIT');
+        return resultado;
+    } catch (error) {
+        await client.query('ROLLBACK').catch((errorCierre) => { errorRollback = errorCierre; });
+        throw error;
+    } finally {
+        client.release(errorRollback);
+    }
+}
+
+module.exports = { obtenerPool, cerrarPoolsPostgres, enTransaccionPostgres };

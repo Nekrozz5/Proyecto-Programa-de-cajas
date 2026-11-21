@@ -7,12 +7,18 @@
 
 const ExcelJS = require('exceljs');
 const {
-    runQuery,
     getQuery,
     allQuery,
     redondear2
 } = require('./db');
 const { obtenerConfiguracionNegocio } = require('./configuracion.repo');
+
+const ZONA_REPORTES = 'America/La_Paz';
+const horaBoliviaSql = (columna) => `(${columna} AT TIME ZONE '${ZONA_REPORTES}')`;
+const fechaHoraLocal = (columna) => `TO_CHAR(${horaBoliviaSql(columna || 'CURRENT_TIMESTAMP')}, 'YYYY-MM-DD HH24:MI:SS')`;
+const diaLocal = (columna) => `TO_CHAR(${horaBoliviaSql(columna)}, 'YYYY-MM-DD')`;
+const fechaFacturaLocal = (columna) => `TO_CHAR(${horaBoliviaSql(columna)}, 'DD/MM/YYYY')`;
+const redondeoSql = (expresion) => `ROUND((${expresion})::numeric, 2)::double precision`;
 
 async function obtenerEstadisticasCaja(cajaId) {
     const config = await obtenerConfiguracionNegocio();
@@ -32,19 +38,19 @@ async function obtenerEstadisticasCaja(cajaId) {
                 COALESCE(SUM(
                     CASE
                         WHEN m.regimen_tributario IS NOT NULL THEN COALESCE(m.iva_monto, 0)
-                        WHEN m.tipo_comprobante = 'factura' THEN ROUND(m.monto * (? / 100.0), 2)
+                        WHEN m.tipo_comprobante = 'factura' THEN ${redondeoSql('m.monto * ($1 / 100.0)')}
                         ELSE 0
                     END
                 ), 0) as debito_fiscal_iva,
                 COALESCE(SUM(
                     CASE
                         WHEN m.regimen_tributario IS NOT NULL THEN COALESCE(m.it_monto, 0)
-                        WHEN m.tipo_comprobante = 'factura' THEN ROUND(m.monto * (? / 100.0), 2)
+                        WHEN m.tipo_comprobante = 'factura' THEN ${redondeoSql('m.monto * ($2 / 100.0)')}
                         ELSE 0
                     END
                 ), 0) as impuesto_transacciones_it
          FROM movimientos m
-         WHERE m.caja_id = ? AND m.tipo = 'ingreso' AND m.estado = 'completado'
+         WHERE m.caja_id = $3 AND m.tipo = 'ingreso' AND m.estado = 'completado'
            AND COALESCE(m.categoria_contable, 'venta') = 'venta'
            AND EXISTS (SELECT 1 FROM detalle_movimientos d WHERE d.movimiento_id = m.id)`,
         [ivaPorc, itPorc, cajaId]
@@ -54,7 +60,7 @@ async function obtenerEstadisticasCaja(cajaId) {
         `SELECT COALESCE(SUM(d.cantidad * d.costo_unitario), 0) as costo_total_ventas
          FROM detalle_movimientos d
          INNER JOIN movimientos m ON d.movimiento_id = m.id
-         WHERE m.caja_id = ? AND m.estado = 'completado'`,
+         WHERE m.caja_id = $1 AND m.estado = 'completado'`,
         [cajaId]
     );
 
@@ -64,18 +70,18 @@ async function obtenerEstadisticasCaja(cajaId) {
                 COALESCE(SUM(
                     CASE
                         WHEN regimen_tributario IS NOT NULL THEN COALESCE(iva_monto, 0)
-                        WHEN tipo_comprobante = 'factura' THEN ROUND(monto * (? / 100.0), 2)
+                        WHEN tipo_comprobante = 'factura' THEN ${redondeoSql('monto * ($1 / 100.0)')}
                         ELSE 0
                     END
                 ), 0) as credito_fiscal_iva_egresos
-         FROM movimientos WHERE caja_id = ? AND tipo = 'egreso' AND estado = 'completado'`,
+         FROM movimientos WHERE caja_id = $2 AND tipo = 'egreso' AND estado = 'completado'`,
         [ivaPorc, cajaId]
     );
 
     const kpiReposiciones = await getQuery(
         `SELECT COALESCE(SUM(monto), 0) as total_reposiciones
          FROM movimientos m
-         WHERE m.caja_id = ? AND m.tipo = 'ingreso' AND m.estado = 'completado'
+         WHERE m.caja_id = $1 AND m.tipo = 'ingreso' AND m.estado = 'completado'
            AND (m.categoria_contable = 'aporte_cambio' OR NOT EXISTS (SELECT 1 FROM detalle_movimientos d WHERE d.movimiento_id = m.id))`,
         [cajaId]
     );
@@ -98,7 +104,7 @@ async function obtenerEstadisticasCaja(cajaId) {
                 m.monto as monto_neto_mov
          FROM detalle_movimientos d
          INNER JOIN movimientos m ON d.movimiento_id = m.id
-         WHERE m.caja_id = ?
+         WHERE m.caja_id = $1
            AND m.tipo = 'ingreso'
            AND m.estado = 'completado'
            AND COALESCE(m.categoria_contable, 'venta') = 'venta'
@@ -109,7 +115,7 @@ async function obtenerEstadisticasCaja(cajaId) {
     const mapaProd = new Map();
     for (const p of productosActivos) {
         mapaProd.set(p.id, {
-            id: p.id,
+            id: Number(p.id),
             nombre: p.nombre,
             categoria: p.categoria,
             unidades_vendidas: 0,
@@ -150,7 +156,7 @@ async function obtenerEstadisticasCaja(cajaId) {
             let reg = mapaProd.get(lin.producto_id);
             if (!reg) {
                 reg = {
-                    id: lin.producto_id,
+                    id: Number(lin.producto_id),
                     nombre: `Producto #${lin.producto_id}`,
                     categoria: '',
                     unidades_vendidas: 0,
@@ -194,7 +200,7 @@ async function obtenerEstadisticasCaja(cajaId) {
         ventasTotales,
         ventasFacturadas,
         ventasRecibo,
-        cantidadTickets: kpiVentas.cantidad_tickets,
+        cantidadTickets: Number(kpiVentas.cantidad_tickets),
         ticketPromedio: redondear2(ticketPromedio),
         costoTotalVentas,
         gananciaBruta,
@@ -222,7 +228,7 @@ async function obtenerDesgloseMetodosPago(cajaId) {
                 COALESCE(SUM(mp.monto), 0) as total
          FROM movimientos_pagos mp
          INNER JOIN movimientos m ON mp.movimiento_id = m.id
-         WHERE m.caja_id = ?
+         WHERE m.caja_id = $1
            AND m.tipo = 'ingreso'
            AND m.estado = 'completado'
            AND COALESCE(m.categoria_contable, 'venta') = 'venta'
@@ -246,32 +252,39 @@ async function obtenerDesgloseMetodosPago(cajaId) {
 }
 
 async function obtenerTendenciasVentas() {
+    const hora = `TO_CHAR(${horaBoliviaSql('m.fecha_hora')}, 'HH24:00')`;
+    const hoy = diaLocal('CURRENT_TIMESTAMP');
+    const inicioSemana = `TO_CHAR(${horaBoliviaSql('CURRENT_TIMESTAMP')}::date - 7, 'YYYY-MM-DD')`;
     const ventasPorHora = await allQuery(
-        `SELECT strftime('%H:00', fecha_hora, 'localtime') as hora,
+        `SELECT ${hora} as hora,
                 COUNT(id) as cantidad_tickets,
-                ROUND(SUM(monto), 2) as total_vendido
+                ${redondeoSql('SUM(monto)')} as total_vendido
          FROM movimientos m
          WHERE m.tipo = 'ingreso' AND m.estado = 'completado'
            AND COALESCE(m.categoria_contable, 'venta') = 'venta'
            AND EXISTS (SELECT 1 FROM detalle_movimientos d WHERE d.movimiento_id = m.id)
-           AND date(m.fecha_hora, 'localtime') = date('now', 'localtime')
+           AND ${diaLocal('m.fecha_hora')} = ${hoy}
          GROUP BY hora
          ORDER BY hora ASC`
     );
 
     const comparativaSemanal = await allQuery(
-        `SELECT date(m.fecha_hora, 'localtime') as fecha,
+        `SELECT ${diaLocal('m.fecha_hora')} as fecha,
                 COUNT(CASE WHEN m.tipo = 'ingreso' AND COALESCE(m.categoria_contable, 'venta') = 'venta' THEN m.id END) as cantidad_tickets,
-                ROUND(SUM(CASE WHEN m.tipo = 'ingreso' AND COALESCE(m.categoria_contable, 'venta') = 'venta' THEN m.monto ELSE 0 END), 2) as ingresos,
-                ROUND(SUM(CASE WHEN m.tipo = 'egreso' THEN m.monto ELSE 0 END), 2) as egresos
+                ${redondeoSql("SUM(CASE WHEN m.tipo = 'ingreso' AND COALESCE(m.categoria_contable, 'venta') = 'venta' THEN m.monto ELSE 0 END)")} as ingresos,
+                ${redondeoSql("SUM(CASE WHEN m.tipo = 'egreso' THEN m.monto ELSE 0 END)")} as egresos
          FROM movimientos m
          WHERE m.estado = 'completado'
-           AND date(m.fecha_hora, 'localtime') >= date('now', 'localtime', '-7 days')
+           AND ${diaLocal('m.fecha_hora')} >= ${inicioSemana}
          GROUP BY fecha
          ORDER BY fecha ASC`
     );
 
-    return { ventasPorHora, comparativaSemanal };
+    const normalizarTickets = (fila) => ({ ...fila, cantidad_tickets: Number(fila.cantidad_tickets) });
+    return {
+        ventasPorHora: ventasPorHora.map(normalizarTickets),
+        comparativaSemanal: comparativaSemanal.map(normalizarTickets)
+    };
 }
 
 function sanitizarTextoCSV(valor) {
@@ -286,23 +299,23 @@ function construirClausulaFiltroMovimientos(cajaId = null, filtros = {}, aliasMo
     const params = [];
 
     if (cajaId) {
-        condiciones.push(`${aliasMov}.caja_id = ?`);
+        condiciones.push(`${aliasMov}.caja_id = $${params.length + 1}`);
         params.push(Number(cajaId));
     }
     if (filtros?.desde && /^\d{4}-\d{2}-\d{2}$/.test(String(filtros.desde).trim())) {
-        condiciones.push(`date(${aliasMov}.fecha_hora, 'localtime') >= ?`);
+        condiciones.push(`${diaLocal(`${aliasMov}.fecha_hora`)} >= $${params.length + 1}`);
         params.push(String(filtros.desde).trim());
     }
     if (filtros?.hasta && /^\d{4}-\d{2}-\d{2}$/.test(String(filtros.hasta).trim())) {
-        condiciones.push(`date(${aliasMov}.fecha_hora, 'localtime') <= ?`);
+        condiciones.push(`${diaLocal(`${aliasMov}.fecha_hora`)} <= $${params.length + 1}`);
         params.push(String(filtros.hasta).trim());
     }
     if (filtros?.usuarioId && Number.isFinite(Number(filtros.usuarioId)) && Number(filtros.usuarioId) > 0) {
-        condiciones.push(`${aliasMov}.usuario_id = ?`);
+        condiciones.push(`${aliasMov}.usuario_id = $${params.length + 1}`);
         params.push(Number(filtros.usuarioId));
     }
     if (filtros?.cajaFisicaId && Number.isFinite(Number(filtros.cajaFisicaId)) && Number(filtros.cajaFisicaId) > 0 && aliasCaja) {
-        condiciones.push(`${aliasCaja}.caja_fisica_id = ?`);
+        condiciones.push(`${aliasCaja}.caja_fisica_id = $${params.length + 1}`);
         params.push(Number(filtros.cajaFisicaId));
     }
 
@@ -322,7 +335,7 @@ async function generarReporteCSV(cajaId = null, filtros = {}) {
         `SELECT m.id,
                 m.caja_id,
                 cf.nombre as caja_nombre,
-                datetime(m.fecha_hora, 'localtime') as fecha_hora,
+                ${fechaHoraLocal('m.fecha_hora')} as fecha_hora,
                 COALESCE(u.nombre, '—') as operador,
                 m.tipo,
                 COALESCE(m.categoria_contable, CASE WHEN m.tipo = 'egreso' THEN 'gasto_operativo' ELSE 'venta' END) as categoria_contable,
@@ -342,10 +355,10 @@ async function generarReporteCSV(cajaId = null, filtros = {}) {
                 m.regimen_tributario,
                 m.iva_monto,
                 m.it_monto,
-                COALESCE((SELECT ROUND(SUM(d.cantidad * d.costo_unitario), 2) FROM detalle_movimientos d WHERE d.movimiento_id = m.id), 0) as costo_cmv,
+                COALESCE((SELECT ${redondeoSql('SUM(d.cantidad * d.costo_unitario)')} FROM detalle_movimientos d WHERE d.movimiento_id = m.id), 0) as costo_cmv,
                 m.estado,
                 COALESCE(ua.nombre, '') as anulado_por_nombre,
-                COALESCE(datetime(m.fecha_anulacion, 'localtime'), '') as fecha_anulacion,
+                COALESCE(${fechaHoraLocal('m.fecha_anulacion')}, '') as fecha_anulacion,
                 COALESCE(m.motivo_anulacion, '') as motivo_anulacion,
                 m.descripcion
          FROM movimientos m
@@ -448,7 +461,7 @@ async function generarReporteExcel(cajaId = null, filtros = {}) {
         `SELECT m.id,
                 m.caja_id,
                 cf.nombre as caja_nombre,
-                datetime(m.fecha_hora, 'localtime') as fecha_hora,
+                ${fechaHoraLocal('m.fecha_hora')} as fecha_hora,
                 COALESCE(u.nombre, '—') as operador,
                 m.tipo,
                 COALESCE(m.categoria_contable, CASE WHEN m.tipo = 'egreso' THEN 'gasto_operativo' ELSE 'venta' END) as categoria_contable,
@@ -470,10 +483,10 @@ async function generarReporteExcel(cajaId = null, filtros = {}) {
                 COALESCE(m.it_porcentaje, 0) as it_porcentaje,
                 m.iva_monto,
                 m.it_monto,
-                COALESCE((SELECT ROUND(SUM(d.cantidad * d.costo_unitario), 2) FROM detalle_movimientos d WHERE d.movimiento_id = m.id), 0) as costo_cmv,
+                COALESCE((SELECT ${redondeoSql('SUM(d.cantidad * d.costo_unitario)')} FROM detalle_movimientos d WHERE d.movimiento_id = m.id), 0) as costo_cmv,
                 m.estado,
                 COALESCE(ua.nombre, '') as anulado_por_nombre,
-                COALESCE(datetime(m.fecha_anulacion, 'localtime'), '') as fecha_anulacion,
+                COALESCE(${fechaHoraLocal('m.fecha_anulacion')}, '') as fecha_anulacion,
                 COALESCE(m.motivo_anulacion, '') as motivo_anulacion,
                 m.descripcion
          FROM movimientos m
@@ -489,23 +502,23 @@ async function generarReporteExcel(cajaId = null, filtros = {}) {
     const condCajas = [];
     const paramsCajas = [];
     if (cajaId) {
-        condCajas.push(`c.id = ?`);
+        condCajas.push(`c.id = $${paramsCajas.length + 1}`);
         paramsCajas.push(Number(cajaId));
     }
     if (filtros?.desde && /^\d{4}-\d{2}-\d{2}$/.test(String(filtros.desde).trim())) {
-        condCajas.push(`date(c.fecha_apertura, 'localtime') >= ?`);
+        condCajas.push(`${diaLocal('c.fecha_apertura')} >= $${paramsCajas.length + 1}`);
         paramsCajas.push(String(filtros.desde).trim());
     }
     if (filtros?.hasta && /^\d{4}-\d{2}-\d{2}$/.test(String(filtros.hasta).trim())) {
-        condCajas.push(`date(c.fecha_apertura, 'localtime') <= ?`);
+        condCajas.push(`${diaLocal('c.fecha_apertura')} <= $${paramsCajas.length + 1}`);
         paramsCajas.push(String(filtros.hasta).trim());
     }
     if (filtros?.usuarioId && Number.isFinite(Number(filtros.usuarioId)) && Number(filtros.usuarioId) > 0) {
-        condCajas.push(`c.usuario_id = ?`);
+        condCajas.push(`c.usuario_id = $${paramsCajas.length + 1}`);
         paramsCajas.push(Number(filtros.usuarioId));
     }
     if (filtros?.cajaFisicaId && Number.isFinite(Number(filtros.cajaFisicaId)) && Number(filtros.cajaFisicaId) > 0) {
-        condCajas.push(`c.caja_fisica_id = ?`);
+        condCajas.push(`c.caja_fisica_id = $${paramsCajas.length + 1}`);
         paramsCajas.push(Number(filtros.cajaFisicaId));
     }
     const whereCajas = condCajas.length > 0 ? `WHERE ${condCajas.join(' AND ')}` : '';
@@ -514,8 +527,8 @@ async function generarReporteExcel(cajaId = null, filtros = {}) {
         `SELECT c.id,
                 cf.nombre as caja_nombre,
                 COALESCE(u.nombre, '—') as cajero,
-                datetime(c.fecha_apertura, 'localtime') as fecha_apertura,
-                datetime(c.fecha_cierre, 'localtime') as fecha_cierre,
+                ${fechaHoraLocal('c.fecha_apertura')} as fecha_apertura,
+                ${fechaHoraLocal('c.fecha_cierre')} as fecha_cierre,
                 c.estado,
                 c.monto_inicial,
                 c.efectivo_esperado,
@@ -535,11 +548,15 @@ async function generarReporteExcel(cajaId = null, filtros = {}) {
         paramsCajas
     );
 
+    const precioAdicional = `(CASE WHEN dmm.precio_adicional = TRUNC(dmm.precio_adicional)
+                 THEN dmm.precio_adicional::text || '.0' ELSE dmm.precio_adicional::text END)`;
+    const textoModificador = `dmm.nombre || (CASE WHEN dmm.precio_adicional > 0 THEN ' (+Bs ' || ${precioAdicional} || ')' ELSE '' END)`;
+    const agruparModificadores = `STRING_AGG(${textoModificador}, ', ' ORDER BY dmm.id)`;
     const detallesVentasRaw = await allQuery(
         `SELECT d.id as detalle_id,
                 m.id as movimiento_id,
                 m.caja_id,
-                datetime(m.fecha_hora, 'localtime') as fecha_hora,
+                ${fechaHoraLocal('m.fecha_hora')} as fecha_hora,
                 COALESCE(u.nombre, '—') as operador,
                 d.producto_id,
                 p.nombre as producto_nombre,
@@ -555,7 +572,7 @@ async function generarReporteExcel(cajaId = null, filtros = {}) {
                 m.metodo_pago,
                 m.estado,
                 COALESCE((
-                    SELECT GROUP_CONCAT(dmm.nombre || (CASE WHEN dmm.precio_adicional > 0 THEN ' (+Bs ' || dmm.precio_adicional || ')' ELSE '' END), ', ')
+                    SELECT ${agruparModificadores}
                     FROM detalle_movimientos_modificadores dmm
                     WHERE dmm.detalle_movimiento_id = d.id
                 ), '') as modificadores_aplicados
@@ -646,20 +663,17 @@ async function generarReporteExcel(cajaId = null, filtros = {}) {
     const rentabilidadPorProducto = Array.from(mapaRentabilidadProd.values()).sort((a, b) => b.ingreso_neto - a.ingreso_neto);
 
     const condInsumos = [`mi.tipo IN ('compra', 'merma')`];
-    const paramsIns = [];
     const condDirectos = [`mpd.tipo IN ('compra', 'merma')`];
-    const paramsDir = [];
+    const paramsCompras = [];
     if (filtros?.desde && /^\d{4}-\d{2}-\d{2}$/.test(String(filtros.desde).trim())) {
-        condInsumos.push(`date(mi.fecha_hora, 'localtime') >= ?`);
-        paramsIns.push(String(filtros.desde).trim());
-        condDirectos.push(`date(mpd.fecha_hora, 'localtime') >= ?`);
-        paramsDir.push(String(filtros.desde).trim());
+        const indice = paramsCompras.push(String(filtros.desde).trim());
+        condInsumos.push(`${diaLocal('mi.fecha_hora')} >= $${indice}`);
+        condDirectos.push(`${diaLocal('mpd.fecha_hora')} >= $${indice}`);
     }
     if (filtros?.hasta && /^\d{4}-\d{2}-\d{2}$/.test(String(filtros.hasta).trim())) {
-        condInsumos.push(`date(mi.fecha_hora, 'localtime') <= ?`);
-        paramsIns.push(String(filtros.hasta).trim());
-        condDirectos.push(`date(mpd.fecha_hora, 'localtime') <= ?`);
-        paramsDir.push(String(filtros.hasta).trim());
+        const indice = paramsCompras.push(String(filtros.hasta).trim());
+        condInsumos.push(`${diaLocal('mi.fecha_hora')} <= $${indice}`);
+        condDirectos.push(`${diaLocal('mpd.fecha_hora')} <= $${indice}`);
     }
 
     const comprasYMermasInsumos = await allQuery(
@@ -669,11 +683,11 @@ async function generarReporteExcel(cajaId = null, filtros = {}) {
                    i.nombre as item_nombre,
                    i.unidad_medida,
                    mi.tipo,
-                   datetime(mi.fecha_hora, 'localtime') as fecha_hora,
+                   ${fechaHoraLocal('mi.fecha_hora')} as fecha_hora,
                    mi.fecha_hora as fecha_orden,
                    mi.cantidad,
                    mi.costo_unitario,
-                   ROUND(COALESCE(NULLIF(mi.monto_total_compra, 0), mi.cantidad * mi.costo_unitario), 2) as monto_total,
+                   ${redondeoSql('COALESCE(NULLIF(mi.monto_total_compra, 0), mi.cantidad * mi.costo_unitario)')} as monto_total,
                    COALESCE(mi.proveedor_nombre, '') as proveedor_nombre,
                    COALESCE(mi.proveedor_nit, '') as proveedor_nit,
                    COALESCE(mi.nro_factura_compra, '') as nro_factura_compra,
@@ -688,11 +702,11 @@ async function generarReporteExcel(cajaId = null, filtros = {}) {
                    p.nombre as item_nombre,
                    COALESCE(p.unidad_medida, 'unidades') as unidad_medida,
                    mpd.tipo,
-                   datetime(mpd.fecha_hora, 'localtime') as fecha_hora,
+                   ${fechaHoraLocal('mpd.fecha_hora')} as fecha_hora,
                    mpd.fecha_hora as fecha_orden,
                    mpd.cantidad,
                    mpd.costo_unitario,
-                   ROUND(COALESCE(mpd.monto_total, mpd.cantidad * mpd.costo_unitario), 2) as monto_total,
+                   ${redondeoSql('COALESCE(mpd.monto_total, mpd.cantidad * mpd.costo_unitario)')} as monto_total,
                    COALESCE(mpd.proveedor_nombre, '') as proveedor_nombre,
                    COALESCE(mpd.proveedor_nit, '') as proveedor_nit,
                    COALESCE(mpd.nro_factura_compra, '') as nro_factura_compra,
@@ -701,18 +715,18 @@ async function generarReporteExcel(cajaId = null, filtros = {}) {
             FROM movimientos_productos_directos mpd
             INNER JOIN productos p ON mpd.producto_id = p.id
             WHERE ${condDirectos.join(' AND ')}
-        ) ORDER BY fecha_orden DESC`,
-        [...paramsIns, ...paramsDir]
+        ) AS compras_y_mermas ORDER BY fecha_orden DESC`,
+        paramsCompras
     );
 
     const condKardexPrd = [];
     const paramsKardexPrd = [];
     if (filtros?.desde && /^\d{4}-\d{2}-\d{2}$/.test(String(filtros.desde).trim())) {
-        condKardexPrd.push(`date(mpd.fecha_hora, 'localtime') >= ?`);
+        condKardexPrd.push(`${diaLocal('mpd.fecha_hora')} >= $${paramsKardexPrd.length + 1}`);
         paramsKardexPrd.push(String(filtros.desde).trim());
     }
     if (filtros?.hasta && /^\d{4}-\d{2}-\d{2}$/.test(String(filtros.hasta).trim())) {
-        condKardexPrd.push(`date(mpd.fecha_hora, 'localtime') <= ?`);
+        condKardexPrd.push(`${diaLocal('mpd.fecha_hora')} <= $${paramsKardexPrd.length + 1}`);
         paramsKardexPrd.push(String(filtros.hasta).trim());
     }
     const whereKardexPrd = condKardexPrd.length > 0 ? `WHERE ${condKardexPrd.join(' AND ')}` : '';
@@ -725,12 +739,12 @@ async function generarReporteExcel(cajaId = null, filtros = {}) {
                 mpd.movimiento_id,
                 COALESCE(u.nombre, 'Sistema') as operador,
                 mpd.tipo,
-                datetime(mpd.fecha_hora, 'localtime') as fecha_hora,
+                ${fechaHoraLocal('mpd.fecha_hora')} as fecha_hora,
                 mpd.cantidad,
                 mpd.stock_resultante,
                 mpd.costo_unitario,
                 COALESCE(NULLIF(mpd.costo_promedio_resultante, 0), mpd.costo_unitario, p.costo, 0) as costo_promedio_resultante,
-                COALESCE(mpd.monto_total, ROUND(mpd.cantidad * mpd.costo_unitario, 2)) as monto_total,
+                COALESCE(mpd.monto_total, ${redondeoSql('mpd.cantidad * mpd.costo_unitario')}) as monto_total,
                 COALESCE(mpd.proveedor_nombre, '') as proveedor_nombre,
                 COALESCE(mpd.nro_factura_compra, '') as nro_factura_compra,
                 mpd.motivo
@@ -746,11 +760,11 @@ async function generarReporteExcel(cajaId = null, filtros = {}) {
     const condKardexIns = [];
     const paramsKardexIns = [];
     if (filtros?.desde && /^\d{4}-\d{2}-\d{2}$/.test(String(filtros.desde).trim())) {
-        condKardexIns.push(`date(mi.fecha_hora, 'localtime') >= ?`);
+        condKardexIns.push(`${diaLocal('mi.fecha_hora')} >= $${paramsKardexIns.length + 1}`);
         paramsKardexIns.push(String(filtros.desde).trim());
     }
     if (filtros?.hasta && /^\d{4}-\d{2}-\d{2}$/.test(String(filtros.hasta).trim())) {
-        condKardexIns.push(`date(mi.fecha_hora, 'localtime') <= ?`);
+        condKardexIns.push(`${diaLocal('mi.fecha_hora')} <= $${paramsKardexIns.length + 1}`);
         paramsKardexIns.push(String(filtros.hasta).trim());
     }
     const whereKardexIns = condKardexIns.length > 0 ? `WHERE ${condKardexIns.join(' AND ')}` : '';
@@ -763,12 +777,12 @@ async function generarReporteExcel(cajaId = null, filtros = {}) {
                 mi.movimiento_id,
                 COALESCE(u.nombre, 'Sistema') as operador,
                 mi.tipo,
-                datetime(mi.fecha_hora, 'localtime') as fecha_hora,
+                ${fechaHoraLocal('mi.fecha_hora')} as fecha_hora,
                 mi.cantidad,
                 mi.stock_resultante,
                 mi.costo_unitario,
                 COALESCE(NULLIF(mi.costo_promedio_resultante, 0), mi.costo_unitario, i.costo_por_unidad, 0) as costo_promedio_resultante,
-                COALESCE(mi.monto_total_compra, ROUND(mi.cantidad * mi.costo_unitario, 2)) as monto_total,
+                COALESCE(mi.monto_total_compra, ${redondeoSql('mi.cantidad * mi.costo_unitario')}) as monto_total,
                 COALESCE(mi.proveedor_nombre, '') as proveedor_nombre,
                 COALESCE(mi.nro_factura_compra, '') as nro_factura_compra,
                 mi.motivo
@@ -788,10 +802,10 @@ async function generarReporteExcel(cajaId = null, filtros = {}) {
                 i.unidad_medida,
                 i.stock_actual,
                 i.costo_por_unidad as costo_unitario,
-                ROUND(i.stock_actual * i.costo_por_unidad, 2) as valor_total,
+                ${redondeoSql('i.stock_actual * i.costo_por_unidad')} as valor_total,
                 i.stock_seguridad,
                 i.tiempo_entrega_dias,
-                COALESCE((SELECT datetime(MAX(fecha_hora), 'localtime') FROM movimientos_insumos WHERE insumo_id = i.id), datetime('now', 'localtime')) as fecha_actualizacion
+                COALESCE((SELECT ${fechaHoraLocal('MAX(fecha_hora)')} FROM movimientos_insumos WHERE insumo_id = i.id), ${fechaHoraLocal()}) as fecha_actualizacion
          FROM insumos i
          WHERE i.activo = 1
          ORDER BY i.nombre ASC`
@@ -804,10 +818,10 @@ async function generarReporteExcel(cajaId = null, filtros = {}) {
                 COALESCE(p.unidad_medida, 'unidades') as unidad_medida,
                 p.stock as stock_actual,
                 p.costo as costo_unitario,
-                ROUND(COALESCE(p.stock, 0) * COALESCE(p.costo, 0), 2) as valor_total,
+                ${redondeoSql('COALESCE(p.stock, 0) * COALESCE(p.costo, 0)')} as valor_total,
                 p.stock_minimo as stock_seguridad,
                 1 as tiempo_entrega_dias,
-                COALESCE((SELECT datetime(MAX(fecha_hora), 'localtime') FROM movimientos_productos_directos WHERE producto_id = p.id), datetime('now', 'localtime')) as fecha_actualizacion
+                COALESCE((SELECT ${fechaHoraLocal('MAX(fecha_hora)')} FROM movimientos_productos_directos WHERE producto_id = p.id), ${fechaHoraLocal()}) as fecha_actualizacion
          FROM productos p
          WHERE p.activo = 1 AND p.tipo_inventario = 'directo'
          ORDER BY p.nombre ASC`
@@ -926,8 +940,8 @@ async function generarReporteExcel(cajaId = null, filtros = {}) {
         }
 
         hojaMov.addRow({
-            id: m.id,
-            caja_id: m.caja_id,
+            id: Number(m.id),
+            caja_id: Number(m.caja_id),
             caja_nombre: m.caja_nombre || 'Caja Principal',
             fecha_hora: m.fecha_hora,
             operador: m.operador,
@@ -1004,7 +1018,7 @@ async function generarReporteExcel(cajaId = null, filtros = {}) {
 
     for (const c of cajas) {
         hojaCajas.addRow({
-            id: c.id,
+            id: Number(c.id),
             caja_nombre: c.caja_nombre || 'Caja Principal',
             cajero: c.cajero,
             fecha_apertura: c.fecha_apertura,
@@ -1054,9 +1068,9 @@ async function generarReporteExcel(cajaId = null, filtros = {}) {
 
     for (const d of detallesVentas) {
         hojaDet.addRow({
-            detalle_id: d.detalle_id,
-            movimiento_id: d.movimiento_id,
-            caja_id: d.caja_id,
+            detalle_id: Number(d.detalle_id),
+            movimiento_id: Number(d.movimiento_id),
+            caja_id: Number(d.caja_id),
             fecha_hora: d.fecha_hora,
             operador: d.operador,
             producto_nombre: d.producto_nombre,
@@ -1114,7 +1128,7 @@ async function generarReporteExcel(cajaId = null, filtros = {}) {
     for (const r of rentabilidadPorProducto) {
         const margen = r.ingreso_neto > 0 ? Number(((r.ganancia_bruta / r.ingreso_neto) * 100).toFixed(2)) : 0;
         hojaRent.addRow({
-            producto_id: r.producto_id,
+            producto_id: Number(r.producto_id),
             producto_nombre: r.producto_nombre,
             categoria: r.categoria,
             tipo_inventario: r.tipo_inventario,
@@ -1246,7 +1260,7 @@ async function generarReporteExcel(cajaId = null, filtros = {}) {
         else if (st <= seg) alerta = 'CRÍTICO';
 
         hojaInv.addRow({
-            id: item.id,
+            id: Number(item.id),
             nombre: item.nombre,
             clase: item.clase,
             unidad_medida: item.unidad_medida,
@@ -1298,8 +1312,8 @@ async function generarReporteExcel(cajaId = null, filtros = {}) {
 
     for (const kp of kardexCronologicoProductos) {
         hojaKp.addRow({
-            id: kp.id,
-            producto_id: kp.producto_id,
+            id: Number(kp.id),
+            producto_id: Number(kp.producto_id),
             producto_nombre: kp.producto_nombre,
             unidad_medida: kp.unidad_medida,
             fecha_hora: kp.fecha_hora,
@@ -1347,8 +1361,8 @@ async function generarReporteExcel(cajaId = null, filtros = {}) {
 
     for (const ki of kardexCronologicoInsumos) {
         hojaKi.addRow({
-            id: ki.id,
-            insumo_id: ki.insumo_id,
+            id: Number(ki.id),
+            insumo_id: Number(ki.insumo_id),
             insumo_nombre: ki.insumo_nombre,
             unidad_medida: ki.unidad_medida,
             fecha_hora: ki.fecha_hora,
@@ -1404,8 +1418,8 @@ async function generarReporteExcel(cajaId = null, filtros = {}) {
         sumEfAnulado = redondear2(sumEfAnulado + efNum);
         sumQrAnulado = redondear2(sumQrAnulado + qrNum);
         hojaAnul.addRow({
-            id: ma.id,
-            caja_id: ma.caja_id,
+            id: Number(ma.id),
+            caja_id: Number(ma.caja_id),
             caja_nombre: ma.caja_nombre || 'Caja Principal',
             fecha_hora: ma.fecha_hora,
             operador: ma.operador,
@@ -1455,7 +1469,7 @@ async function generarReporteExcel(cajaId = null, filtros = {}) {
     hojaRes.addRow({ concepto: 'Régimen Configurado', valor: regimenTexto });
     hojaRes.addRow({ concepto: 'Periodo / Alcance del Reporte', valor: periodoTexto });
     hojaRes.addRow({ concepto: 'Generado por Usuario', valor: usuarioGenerador });
-    hojaRes.addRow({ concepto: 'Fecha de Generación (Hora Local Bolivia)', valor: new Date().toLocaleString('es-BO') });
+    hojaRes.addRow({ concepto: 'Fecha de Generación (Hora Local Bolivia)', valor: new Date().toLocaleString('es-BO', { timeZone: ZONA_REPORTES }) });
     hojaRes.addRow({ concepto: '--- ESTADO DE RESULTADOS OPERATIVO ---', valor: '' });
     hojaRes.addRow({ concepto: '(+) Ventas Brutas de Productos/Servicios', valor: sumSubtotalVentas });
     hojaRes.addRow({ concepto: '(-) Descuentos Otorgados en Ventas', valor: sumDescuentoVentas });
@@ -1501,14 +1515,12 @@ async function obtenerComprasFacturadasRCV({ desde, hasta, cajaId } = {}) {
         `COALESCE(mi.con_factura, 0) = 1`,
         `(mi.movimiento_id IS NULL OR m.estado = 'completado')`
     ];
-    const paramsIns = [];
 
     const condPrd = [
         `mpd.tipo = 'compra'`,
         `COALESCE(mpd.con_factura, 0) = 1`,
         `(mpd.movimiento_id IS NULL OR m.estado = 'completado')`
     ];
-    const paramsPrd = [];
 
     const condEgr = [
         `m.tipo = 'egreso'`,
@@ -1517,36 +1529,27 @@ async function obtenerComprasFacturadasRCV({ desde, hasta, cajaId } = {}) {
         `NOT EXISTS (SELECT 1 FROM movimientos_insumos mi WHERE mi.movimiento_id = m.id AND COALESCE(mi.con_factura, 0) = 1)`,
         `NOT EXISTS (SELECT 1 FROM movimientos_productos_directos mpd WHERE mpd.movimiento_id = m.id AND COALESCE(mpd.con_factura, 0) = 1)`
     ];
-    const paramsEgr = [];
+    const params = [];
 
     if (desde && /^\d{4}-\d{2}-\d{2}$/.test(String(desde).trim())) {
-        const d = String(desde).trim();
-        condIns.push(`date(mi.fecha_hora, 'localtime') >= ?`);
-        paramsIns.push(d);
-        condPrd.push(`date(mpd.fecha_hora, 'localtime') >= ?`);
-        paramsPrd.push(d);
-        condEgr.push(`date(m.fecha_hora, 'localtime') >= ?`);
-        paramsEgr.push(d);
+        const indice = params.push(String(desde).trim());
+        condIns.push(`${diaLocal('mi.fecha_hora')} >= $${indice}`);
+        condPrd.push(`${diaLocal('mpd.fecha_hora')} >= $${indice}`);
+        condEgr.push(`${diaLocal('m.fecha_hora')} >= $${indice}`);
     }
 
     if (hasta && /^\d{4}-\d{2}-\d{2}$/.test(String(hasta).trim())) {
-        const h = String(hasta).trim();
-        condIns.push(`date(mi.fecha_hora, 'localtime') <= ?`);
-        paramsIns.push(h);
-        condPrd.push(`date(mpd.fecha_hora, 'localtime') <= ?`);
-        paramsPrd.push(h);
-        condEgr.push(`date(m.fecha_hora, 'localtime') <= ?`);
-        paramsEgr.push(h);
+        const indice = params.push(String(hasta).trim());
+        condIns.push(`${diaLocal('mi.fecha_hora')} <= $${indice}`);
+        condPrd.push(`${diaLocal('mpd.fecha_hora')} <= $${indice}`);
+        condEgr.push(`${diaLocal('m.fecha_hora')} <= $${indice}`);
     }
 
     if (cajaId !== undefined && cajaId !== null && String(cajaId).trim() !== '') {
-        const cid = Number(cajaId);
-        condIns.push(`m.caja_id = ?`);
-        paramsIns.push(cid);
-        condPrd.push(`m.caja_id = ?`);
-        paramsPrd.push(cid);
-        condEgr.push(`m.caja_id = ?`);
-        paramsEgr.push(cid);
+        const filtroCaja = `m.caja_id = $${params.push(Number(cajaId))}`;
+        condIns.push(filtroCaja);
+        condPrd.push(filtroCaja);
+        condEgr.push(filtroCaja);
     }
 
     const sql = `
@@ -1555,14 +1558,14 @@ async function obtenerComprasFacturadasRCV({ desde, hasta, cajaId } = {}) {
                    'insumo' AS origen,
                    m.caja_id AS caja_id,
                    mi.movimiento_id AS movimiento_id,
-                   datetime(mi.fecha_hora, 'localtime') AS fecha_hora,
-                   strftime('%d/%m/%Y', datetime(mi.fecha_hora, 'localtime')) AS fecha_factura,
+                   ${fechaHoraLocal('mi.fecha_hora')} AS fecha_hora,
+                   ${fechaFacturaLocal('mi.fecha_hora')} AS fecha_factura,
                    COALESCE(NULLIF(TRIM(mi.proveedor_nit), ''), '0') AS nit_proveedor,
                    COALESCE(NULLIF(TRIM(mi.proveedor_nombre), ''), 'SIN NOMBRE') AS razon_social_proveedor,
                    COALESCE(NULLIF(TRIM(mi.nro_factura_compra), ''), '0') AS nro_factura,
                    '0' AS nro_dui_dim,
                    COALESCE(NULLIF(TRIM(mi.nro_autorizacion_cuf), ''), '0') AS nro_autorizacion_cuf,
-                   ROUND(COALESCE(NULLIF(mi.monto_total_compra, 0), mi.cantidad * mi.costo_unitario), 2) AS importe_total_compra,
+                   ${redondeoSql('COALESCE(NULLIF(mi.monto_total_compra, 0), mi.cantidad * mi.costo_unitario)')} AS importe_total_compra,
                    0.0 AS importe_ice,
                    0.0 AS importe_iehd,
                    0.0 AS importe_ipj,
@@ -1570,11 +1573,11 @@ async function obtenerComprasFacturadasRCV({ desde, hasta, cajaId } = {}) {
                    0.0 AS otro_no_sujeto_credito_fiscal,
                    0.0 AS importes_exentos,
                    0.0 AS importe_gravado_tasa_cero,
-                   ROUND(COALESCE(NULLIF(mi.monto_total_compra, 0), mi.cantidad * mi.costo_unitario), 2) AS subtotal,
+                   ${redondeoSql('COALESCE(NULLIF(mi.monto_total_compra, 0), mi.cantidad * mi.costo_unitario)')} AS subtotal,
                    0.0 AS descuentos,
                    0.0 AS importe_gift_card,
-                   ROUND(COALESCE(NULLIF(mi.monto_total_compra, 0), mi.cantidad * mi.costo_unitario), 2) AS importe_base_credito_fiscal,
-                   ROUND(ROUND(COALESCE(NULLIF(mi.monto_total_compra, 0), mi.cantidad * mi.costo_unitario), 2) * 0.13, 2) AS credito_fiscal,
+                   ${redondeoSql('COALESCE(NULLIF(mi.monto_total_compra, 0), mi.cantidad * mi.costo_unitario)')} AS importe_base_credito_fiscal,
+                   ${redondeoSql(`${redondeoSql('COALESCE(NULLIF(mi.monto_total_compra, 0), mi.cantidad * mi.costo_unitario)')} * 0.13`)} AS credito_fiscal,
                    COALESCE(mi.tipo_compra, 1) AS tipo_compra,
                    COALESCE(NULLIF(TRIM(mi.codigo_control), ''), '0') AS codigo_control
             FROM movimientos_insumos mi
@@ -1587,14 +1590,14 @@ async function obtenerComprasFacturadasRCV({ desde, hasta, cajaId } = {}) {
                    'producto_directo' AS origen,
                    m.caja_id AS caja_id,
                    mpd.movimiento_id AS movimiento_id,
-                   datetime(mpd.fecha_hora, 'localtime') AS fecha_hora,
-                   strftime('%d/%m/%Y', datetime(mpd.fecha_hora, 'localtime')) AS fecha_factura,
+                   ${fechaHoraLocal('mpd.fecha_hora')} AS fecha_hora,
+                   ${fechaFacturaLocal('mpd.fecha_hora')} AS fecha_factura,
                    COALESCE(NULLIF(TRIM(mpd.proveedor_nit), ''), '0') AS nit_proveedor,
                    COALESCE(NULLIF(TRIM(mpd.proveedor_nombre), ''), 'SIN NOMBRE') AS razon_social_proveedor,
                    COALESCE(NULLIF(TRIM(mpd.nro_factura_compra), ''), '0') AS nro_factura,
                    '0' AS nro_dui_dim,
                    COALESCE(NULLIF(TRIM(mpd.nro_autorizacion_cuf), ''), '0') AS nro_autorizacion_cuf,
-                   ROUND(COALESCE(NULLIF(mpd.monto_total, 0), mpd.cantidad * mpd.costo_unitario), 2) AS importe_total_compra,
+                   ${redondeoSql('COALESCE(NULLIF(mpd.monto_total, 0), mpd.cantidad * mpd.costo_unitario)')} AS importe_total_compra,
                    0.0 AS importe_ice,
                    0.0 AS importe_iehd,
                    0.0 AS importe_ipj,
@@ -1602,11 +1605,11 @@ async function obtenerComprasFacturadasRCV({ desde, hasta, cajaId } = {}) {
                    0.0 AS otro_no_sujeto_credito_fiscal,
                    0.0 AS importes_exentos,
                    0.0 AS importe_gravado_tasa_cero,
-                   ROUND(COALESCE(NULLIF(mpd.monto_total, 0), mpd.cantidad * mpd.costo_unitario), 2) AS subtotal,
+                   ${redondeoSql('COALESCE(NULLIF(mpd.monto_total, 0), mpd.cantidad * mpd.costo_unitario)')} AS subtotal,
                    0.0 AS descuentos,
                    0.0 AS importe_gift_card,
-                   ROUND(COALESCE(NULLIF(mpd.monto_total, 0), mpd.cantidad * mpd.costo_unitario), 2) AS importe_base_credito_fiscal,
-                   ROUND(ROUND(COALESCE(NULLIF(mpd.monto_total, 0), mpd.cantidad * mpd.costo_unitario), 2) * 0.13, 2) AS credito_fiscal,
+                   ${redondeoSql('COALESCE(NULLIF(mpd.monto_total, 0), mpd.cantidad * mpd.costo_unitario)')} AS importe_base_credito_fiscal,
+                   ${redondeoSql(`${redondeoSql('COALESCE(NULLIF(mpd.monto_total, 0), mpd.cantidad * mpd.costo_unitario)')} * 0.13`)} AS credito_fiscal,
                    COALESCE(mpd.tipo_compra, 1) AS tipo_compra,
                    COALESCE(NULLIF(TRIM(mpd.codigo_control), ''), '0') AS codigo_control
             FROM movimientos_productos_directos mpd
@@ -1619,14 +1622,14 @@ async function obtenerComprasFacturadasRCV({ desde, hasta, cajaId } = {}) {
                    'egreso' AS origen,
                    m.caja_id AS caja_id,
                    m.id AS movimiento_id,
-                   datetime(m.fecha_hora, 'localtime') AS fecha_hora,
-                   strftime('%d/%m/%Y', datetime(m.fecha_hora, 'localtime')) AS fecha_factura,
+                   ${fechaHoraLocal('m.fecha_hora')} AS fecha_hora,
+                   ${fechaFacturaLocal('m.fecha_hora')} AS fecha_factura,
                    COALESCE(NULLIF(TRIM(m.cliente_nit_ci), ''), '0') AS nit_proveedor,
                    COALESCE(NULLIF(TRIM(m.cliente_razon_social), ''), 'SIN NOMBRE') AS razon_social_proveedor,
                    COALESCE(NULLIF(TRIM(m.nro_factura), ''), '0') AS nro_factura,
                    '0' AS nro_dui_dim,
                    COALESCE(NULLIF(TRIM(m.cuf_autorizacion), ''), '0') AS nro_autorizacion_cuf,
-                   ROUND(m.monto, 2) AS importe_total_compra,
+                   ${redondeoSql('m.monto')} AS importe_total_compra,
                    0.0 AS importe_ice,
                    0.0 AS importe_iehd,
                    0.0 AS importe_ipj,
@@ -1634,20 +1637,20 @@ async function obtenerComprasFacturadasRCV({ desde, hasta, cajaId } = {}) {
                    0.0 AS otro_no_sujeto_credito_fiscal,
                    0.0 AS importes_exentos,
                    0.0 AS importe_gravado_tasa_cero,
-                   ROUND(m.monto, 2) AS subtotal,
+                   ${redondeoSql('m.monto')} AS subtotal,
                    0.0 AS descuentos,
                    0.0 AS importe_gift_card,
-                   ROUND(m.monto, 2) AS importe_base_credito_fiscal,
-                   ROUND(COALESCE(NULLIF(m.iva_monto, 0), m.monto * 0.13), 2) AS credito_fiscal,
+                   ${redondeoSql('m.monto')} AS importe_base_credito_fiscal,
+                   ${redondeoSql('COALESCE(NULLIF(m.iva_monto, 0), m.monto * 0.13)')} AS credito_fiscal,
                    COALESCE(m.tipo_compra, 1) AS tipo_compra,
                    COALESCE(NULLIF(TRIM(m.codigo_control), ''), '0') AS codigo_control
             FROM movimientos m
             WHERE ${condEgr.join(' AND ')}
-        )
+        ) AS compras_facturadas
         ORDER BY fecha_hora ASC, id ASC
     `;
 
-    const filas = await allQuery(sql, [...paramsIns, ...paramsPrd, ...paramsEgr]);
+    const filas = await allQuery(sql, params);
 
     return filas.map((fila, index) => ({
         nro: index + 1,
@@ -1675,8 +1678,8 @@ async function obtenerComprasFacturadasRCV({ desde, hasta, cajaId } = {}) {
         // Metadatos auxiliares de trazabilidad
         id: fila.id,
         origen: fila.origen,
-        caja_id: fila.caja_id,
-        movimiento_id: fila.movimiento_id,
+        caja_id: fila.caja_id === null ? null : Number(fila.caja_id),
+        movimiento_id: fila.movimiento_id === null ? null : Number(fila.movimiento_id),
         fecha_hora: fila.fecha_hora
     }));
 }

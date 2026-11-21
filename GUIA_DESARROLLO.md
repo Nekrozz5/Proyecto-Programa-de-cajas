@@ -6,7 +6,7 @@ Bienvenido al proyecto. Si eres nuevo en el repositorio o vienes a colaborar, es
 
 ## 💡 ¿Cómo está estructurado el sistema?
 
-Este proyecto utiliza **Next.js (App Router)** como un sistema **Full-Stack Cloud desplegado en AWS**. 
+Este proyecto utiliza **Next.js (App Router)** y PostgreSQL como único motor de persistencia, con un registro central de tenants y una base operativa por negocio.
 
 En lugar de tener dos servidores o carpetas separadas (como un frontend en Vite y un backend en Express en puertos distintos), el Frontend y el Backend **coexisten dentro del mismo proyecto pero están limpiamente separados por carpetas especializadas**.
 
@@ -14,7 +14,7 @@ En lugar de tener dos servidores o carpetas separadas (como un frontend en Vite 
 programa-cajas/
 │
 ├── 🧠 BACKEND (Servidor, Base de Datos, Lógica y Seguridad)
-│   ├── database/                    # Base de datos SQLite y Esquemas Drizzle ORM
+│   ├── database/                    # Pools pg, migraciones SQL y aprovisionamiento
 │   ├── server/                      # Núcleo de lógica de servidor (Server Actions, Repositorios)
 │   └── app/api/                     # Endpoints HTTP REST (Descarga de reportes Excel/CSV)
 │
@@ -35,7 +35,7 @@ El Backend gestiona las transacciones, la integridad de los datos, el cálculo d
 
 | Carpeta / Archivo | Responsabilidad | ¿Qué encontrarás aquí? |
 | :--- | :--- | :--- |
-| **`database/`** | **Capa de Persistencia** | Conexión a SQLite (`database.js`), esquema tipado de 20 tablas (`schema.js`) y sistema de migraciones automáticas versionadas (`migraciones.js`). |
+| **`database/`** | **Capa de Persistencia** | Pools de PostgreSQL (`postgres.js`), registro central (`migraciones-control.js`) y migraciones versionadas por negocio (`migraciones-tenant.js`). |
 | **`server/actions/`** | **Server Actions (`'use server'`)** | Las mutaciones protegidas que ejecuta Next.js en el servidor: registrar ventas, aperturas y cierres de turno, compras, mermas, actualización de catálogo. Todo corre dentro de `transaccion()`. |
 | **`server/domain/`** | **Reglas de Negocio Puras** | Lógica financiera desacoplada: cálculo de Costo Promedio Ponderado (`costos.js`), snapshot tributario e impuestos IVA/IT (`fiscal.js`). |
 | **`server/repositories/`**| **Consultas SQL** | Consultas SQL parametrizadas a la base de datos (`ventas.repo.js`, `catalogo.repo.js`, `cajas.repo.js`, `inventario.repo.js`, etc.). |
@@ -71,7 +71,7 @@ El Frontend es todo lo visual que se ejecuta en el navegador o en la ventana del
 
 ### 🔹 Casos de Backend (Datos, Lógica, Base de Datos):
 1. **"Quiero agregar un campo nuevo a la base de datos":**
-   👉 Edita la definición de tablas en [database/schema.js](file:///database/schema.js) y agrega una nueva versión de migración en [database/migraciones.js](file:///database/migraciones.js).
+   👉 Agrega una nueva versión en [database/migraciones-tenant.js](database/migraciones-tenant.js). Para cambios en el registro central, actualiza [database/migraciones-control.js](database/migraciones-control.js).
 2. **"Quiero cambiar las reglas de cómo se descuenta el stock o los combos al vender":**
    👉 Ve a [server/actions/ventas.actions.js](file:///server/actions/ventas.actions.js) o a las reglas de dominio en [server/domain/](file:///server/domain/).
 3. **"Quiero modificar una consulta SQL de reporte o catálogo":**
@@ -86,6 +86,6 @@ El Frontend es todo lo visual que se ejecuta en el navegador o en la ventana del
 1. **Toda escritura en Base de Datos va dentro de `transaccion()`:**
    Cualquier Server Action que inserte o actualice datos debe usar la función `transaccion(async (dbTx) => { ... })` para evitar inconsistencias de inventario o dinero.
 2. **Descuento de stock atómico:**
-   Todo descuento de stock en SQL debe usar condiciones de seguridad para evitar números negativos (`UPDATE ... WHERE stock >= ?`).
+   Todo descuento de stock en SQL debe usar una condición atómica para evitar números negativos (`UPDATE ... WHERE stock >= $1`).
 3. **Sesión exclusiva en el servidor:**
    Los roles y permisos del usuario se leen siempre desde la cookie cifrada en el servidor (`server/lib/sesion.js`), nunca desde parámetros enviados desde el cliente.

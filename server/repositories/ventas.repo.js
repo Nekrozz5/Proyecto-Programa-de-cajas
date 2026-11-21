@@ -16,7 +16,6 @@ const {
     numeroNoNegativo
 } = require('./db');
 const { obtenerUsuarioPorId, esRolAdministrativo } = require('./auth.repo');
-const { obtenerConfiguracionNegocio } = require('./configuracion.repo');
 const { prorratearDescuentoTicket } = require('../domain/costos');
 const {
     validarRegimenYPermisosVenta,
@@ -24,6 +23,23 @@ const {
     calcularSnapshotFiscalVenta,
     calcularSnapshotFiscalEgreso
 } = require('../domain/fiscal');
+
+const redondearStock = (expresion) => `ROUND(CAST(${expresion} AS numeric), 4)::double precision`;
+const fechaLocal = (columna) => `TO_CHAR(${columna} AT TIME ZONE 'America/La_Paz', 'YYYY-MM-DD HH24:MI:SS')`;
+
+// La configuración inicial se crea desde su repositorio. El POS puede usar los
+// valores por defecto sin abrir otra transacción mientras tiene bloqueado el turno.
+const obtenerConfiguracionParaMovimiento = () => getQuery('SELECT * FROM configuracion_negocio WHERE id = 1');
+
+async function restituirLote(productoId, cantidad) {
+    const lote = await getQuery(
+        `SELECT id FROM producto_lotes WHERE producto_id = $1 AND activo = 1 ORDER BY fecha_vencimiento ASC, id ASC LIMIT 1`,
+        [productoId]
+    );
+    if (lote) {
+        await runQuery(`UPDATE producto_lotes SET stock = ${redondearStock('stock + $1')} WHERE id = $2`, [cantidad, lote.id]);
+    }
+}
 
 async function registrarVentaCompleta(
     cajaId,
@@ -141,7 +157,7 @@ async function registrarVentaCompleta(
                     COALESCE(cf.habilita_respaldo_fiscal, 1) as habilita_respaldo_fiscal
              FROM cajas c
              LEFT JOIN cajas_fisicas cf ON c.caja_fisica_id = cf.id
-             WHERE c.id = ?`,
+             WHERE c.id = $1 FOR NO KEY UPDATE OF c`,
             [cajaId]
         );
         if (!caja) {
@@ -161,7 +177,7 @@ async function registrarVentaCompleta(
 
         for (const itemAgrupado of mapaItemsAgrupados.values()) {
             const { productoId: prodId, loteId, modificadoresIds, cantidadTotal } = itemAgrupado;
-            const prod = await getQuery(`SELECT * FROM productos WHERE id = ? AND activo = 1`, [prodId]);
+            const prod = await getQuery(`SELECT * FROM productos WHERE id = $1 AND activo = 1`, [prodId]);
             if (!prod) throw new Error(`Producto con ID ${prodId} no existe.`);
 
             // Validar vigencia temporal en caso de combos
@@ -190,7 +206,7 @@ async function registrarVentaCompleta(
                             p.costo as componente_costo, p.stock as componente_stock
                       FROM combo_componentes cc
                       INNER JOIN productos p ON cc.componente_producto_id = p.id
-                      WHERE cc.combo_producto_id = ? AND p.activo = 1`,
+                      WHERE cc.combo_producto_id = $1 AND p.activo = 1`,
                     [prod.id]
                 );
                 if (componentesCombo.length === 0) {
@@ -205,7 +221,7 @@ async function registrarVentaCompleta(
                     `SELECT r.insumo_id, r.cantidad_requerida, i.nombre, i.stock_actual, i.unidad_medida, i.costo_por_unidad
                      FROM recetas r
                      INNER JOIN insumos i ON r.insumo_id = i.id
-                     WHERE r.producto_id = ?`,
+                     WHERE r.producto_id = $1`,
                     [prod.id]
                 );
             }
@@ -213,7 +229,6 @@ async function registrarVentaCompleta(
             // Validar y cargar modificadores
             let opcionesModificadores = [];
             if (modificadoresIds.length > 0) {
-                const placeholders = modificadoresIds.map(() => '?').join(',');
                 opcionesModificadores = await allQuery(
                     `SELECT o.*, g.nombre as grupo_nombre, g.tipo_seleccion, g.es_obligatorio,
                             i.nombre as insumo_nombre, i.stock_actual as insumo_stock, i.costo_por_unidad as insumo_costo, i.unidad_medida as insumo_unidad,
@@ -222,8 +237,8 @@ async function registrarVentaCompleta(
                      INNER JOIN grupos_modificadores g ON o.grupo_id = g.id
                      LEFT JOIN insumos i ON o.insumo_id = i.id
                      LEFT JOIN insumos ir ON o.insumo_reemplazado_id = ir.id
-                     WHERE o.id IN (${placeholders}) AND o.activo = 1 AND g.activo = 1`,
-                    modificadoresIds
+                     WHERE o.id = ANY($1::bigint[]) AND o.activo = 1 AND g.activo = 1`,
+                    [modificadoresIds]
                 );
             }
 
@@ -351,7 +366,7 @@ async function registrarVentaCompleta(
                             `SELECT r.insumo_id, r.cantidad_requerida, i.nombre, i.unidad_medida, i.costo_por_unidad
                              FROM recetas r
                              INNER JOIN insumos i ON r.insumo_id = i.id
-                             WHERE r.producto_id = ?`,
+                             WHERE r.producto_id = $1`,
                             [comp.componente_producto_id]
                         );
                         for (const ing of recComp) {
@@ -447,7 +462,7 @@ async function registrarVentaCompleta(
         // 3. Validar stock total requerido antes de descontar nada
         for (const iId in consumoAcumuladoInsumos) {
             const req = consumoAcumuladoInsumos[iId];
-            const insActual = await getQuery(`SELECT stock_actual, nombre, unidad_medida FROM insumos WHERE id = ?`, [req.insumoId]);
+            const insActual = await getQuery(`SELECT stock_actual, nombre, unidad_medida FROM insumos WHERE id = $1`, [req.insumoId]);
             if (!insActual || Number(insActual.stock_actual) < req.cantidadTotalRequerida) {
                 const disponible = insActual ? insActual.stock_actual : 0;
                 const unidad = insActual ? insActual.unidad_medida : req.unidad;
@@ -459,7 +474,7 @@ async function registrarVentaCompleta(
 
         for (const pId in consumoAcumuladoDirecto) {
             const reqDir = consumoAcumuladoDirecto[pId];
-            const prodActual = await getQuery(`SELECT stock, nombre, unidad_medida FROM productos WHERE id = ?`, [reqDir.productoId]);
+            const prodActual = await getQuery(`SELECT stock, nombre, unidad_medida FROM productos WHERE id = $1`, [reqDir.productoId]);
             if (!prodActual || Number(prodActual.stock) < reqDir.cantidadTotalRequerida) {
                 const disponible = prodActual ? prodActual.stock : 0;
                 const unidad = prodActual ? prodActual.unidad_medida : 'unidades';
@@ -472,7 +487,7 @@ async function registrarVentaCompleta(
             for (const lId in reqDir.lotesEspecificos) {
                 const cantReqLote = reqDir.lotesEspecificos[lId];
                 const loteActual = await getQuery(
-                    `SELECT id, stock, fecha_vencimiento FROM producto_lotes WHERE id = ? AND producto_id = ? AND activo = 1`,
+                    `SELECT id, stock, fecha_vencimiento FROM producto_lotes WHERE id = $1 AND producto_id = $2 AND activo = 1`,
                     [lId, reqDir.productoId]
                 );
                 if (!loteActual || Number(loteActual.stock) < cantReqLote) {
@@ -487,7 +502,7 @@ async function registrarVentaCompleta(
         // Validar límite restante de combos si corresponde
         for (const it of itemsProcesados) {
             if (it.tipoInventario === 'combo' && it.limiteMaximoActivo) {
-                const pCombo = await getQuery(`SELECT limite_unidades_restante, nombre FROM productos WHERE id = ?`, [it.productoId]);
+                const pCombo = await getQuery(`SELECT limite_unidades_restante, nombre FROM productos WHERE id = $1`, [it.productoId]);
                 const restante = Math.max(0, Math.floor(pCombo?.limite_unidades_restante ?? 0));
                 if (restante < it.cantidad) {
                     throw new Error(`Límite de venta alcanzado para la promoción "${pCombo.nombre}". Quedan solo ${restante} combos disponibles.`);
@@ -592,7 +607,7 @@ async function registrarVentaCompleta(
         }
 
         // 6. Validaciones fiscales y snapshot congelado
-        const configNegocio = await obtenerConfiguracionNegocio();
+        const configNegocio = await obtenerConfiguracionParaMovimiento();
         const regimenConfig = configNegocio?.regimen_tributario || 'simplificado_control_interno';
 
         const tipoComprobante = opcionesExtra?.tipoComprobante === 'factura' ? 'factura' : 'recibo';
@@ -618,13 +633,7 @@ async function registrarVentaCompleta(
 
         if (conFactura && !nroFactura) {
             // Asignación correlativa automática si no se proporcionó número manual
-            const filaMax = await getQuery(
-                `SELECT COALESCE(MAX(CAST(nro_factura AS INTEGER)), 0) + 1 AS siguiente_nro
-                 FROM movimientos
-                 WHERE tipo_comprobante = 'factura'
-                   AND CAST(nro_factura AS INTEGER) > 0`
-            );
-            nroFactura = String(filaMax?.siguiente_nro || 1);
+            nroFactura = String(await consultarNumeroFactura());
         }
 
         const snapshotFiscal = calcularSnapshotFiscalVenta({
@@ -649,7 +658,7 @@ async function registrarVentaCompleta(
                 descripcion, estado,
                 canal_venta, datos_entrega, referencia_externa
              )
-             VALUES (?, ?, 'ingreso', 'venta', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'completado', ?, ?, ?)`,
+             VALUES ($1, $2, 'ingreso', 'venta', $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, 'completado', $22, $23, $24) RETURNING id`,
             [
                 cajaId,
                 operador.id,
@@ -682,35 +691,35 @@ async function registrarVentaCompleta(
         // 8. Insertar fuente de verdad del dinero: movimientos_pagos
         if (metodoPago === 'efectivo') {
             await runQuery(
-                `INSERT INTO movimientos_pagos (movimiento_id, metodo_pago, monto, referencia) VALUES (?, 'efectivo', ?, NULL)`,
+                `INSERT INTO movimientos_pagos (movimiento_id, metodo_pago, monto, referencia) VALUES ($1, 'efectivo', $2, NULL)`,
                 [movimientoId, montoEfectivo]
             );
         } else if (metodoPago === 'qr') {
             await runQuery(
-                `INSERT INTO movimientos_pagos (movimiento_id, metodo_pago, monto, referencia) VALUES (?, 'qr', ?, ?)`,
+                `INSERT INTO movimientos_pagos (movimiento_id, metodo_pago, monto, referencia) VALUES ($1, 'qr', $2, $3)`,
                 [movimientoId, montoQr, referenciaQr]
             );
         } else if (metodoPago === 'pedidos_ya' || metodoPago === 'yango') {
             await runQuery(
-                `INSERT INTO movimientos_pagos (movimiento_id, metodo_pago, monto, referencia) VALUES (?, ?, ?, ?)`,
+                `INSERT INTO movimientos_pagos (movimiento_id, metodo_pago, monto, referencia) VALUES ($1, $2, $3, $4)`,
                 [movimientoId, canalVenta, montoNeto, referenciaExterna]
             );
         } else if (metodoPago === 'mixto') {
             if (montoEfectivo > 0) {
                 await runQuery(
-                    `INSERT INTO movimientos_pagos (movimiento_id, metodo_pago, monto, referencia) VALUES (?, 'efectivo', ?, NULL)`,
+                    `INSERT INTO movimientos_pagos (movimiento_id, metodo_pago, monto, referencia) VALUES ($1, 'efectivo', $2, NULL)`,
                     [movimientoId, montoEfectivo]
                 );
             }
             if (montoQr > 0) {
                 await runQuery(
-                    `INSERT INTO movimientos_pagos (movimiento_id, metodo_pago, monto, referencia) VALUES (?, 'qr', ?, ?)`,
+                    `INSERT INTO movimientos_pagos (movimiento_id, metodo_pago, monto, referencia) VALUES ($1, 'qr', $2, $3)`,
                     [movimientoId, montoQr, referenciaQr]
                 );
             }
             if (montoEfectivo === 0 && montoQr === 0) {
                 await runQuery(
-                    `INSERT INTO movimientos_pagos (movimiento_id, metodo_pago, monto, referencia) VALUES (?, 'efectivo', 0, NULL)`,
+                    `INSERT INTO movimientos_pagos (movimiento_id, metodo_pago, monto, referencia) VALUES ($1, 'efectivo', 0, NULL)`,
                     [movimientoId]
                 );
             }
@@ -720,7 +729,7 @@ async function registrarVentaCompleta(
         for (const it of itemsProcesados) {
             const resDet = await runQuery(
                 `INSERT INTO detalle_movimientos (movimiento_id, producto_id, cantidad, precio_unitario, costo_unitario, subtotal)
-                 VALUES (?, ?, ?, ?, ?, ?)`,
+                 VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
                 [movimientoId, it.productoId, it.cantidad, it.precioUnitario, it.costoUnitario, it.subtotal]
             );
             const detalleMovimientoId = resDet.lastID;
@@ -731,7 +740,7 @@ async function registrarVentaCompleta(
                     `INSERT INTO detalle_movimientos_modificadores (
                         detalle_movimiento_id, modificador_opcion_id, nombre, precio_adicional, costo_adicional,
                         insumo_id, cantidad_insumo, insumo_reemplazado_id
-                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+                     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
                     [
                         detalleMovimientoId,
                         mod.modificadorOpcionId,
@@ -750,7 +759,7 @@ async function registrarVentaCompleta(
                 await runQuery(
                     `INSERT INTO detalle_movimientos_combos (
                         detalle_movimiento_id, componente_producto_id, cantidad_unitaria, cantidad_total, costo_unitario_congelado
-                     ) VALUES (?, ?, ?, ?, ?)`,
+                     ) VALUES ($1, $2, $3, $4, $5)`,
                     [
                         detalleMovimientoId,
                         comp.componenteProductoId,
@@ -765,8 +774,8 @@ async function registrarVentaCompleta(
             if (it.tipoInventario === 'combo' && it.limiteMaximoActivo) {
                 const rCombo = await runQuery(
                     `UPDATE productos
-                     SET limite_unidades_restante = ROUND(limite_unidades_restante - ?, 4)
-                     WHERE id = ? AND limite_unidades_restante >= ?`,
+                     SET limite_unidades_restante = ${redondearStock('limite_unidades_restante - $1')}
+                     WHERE id = $2 AND limite_unidades_restante >= $3`,
                     [it.cantidad, it.productoId, it.cantidad]
                 );
                 if (rCombo.changes === 0) {
@@ -780,14 +789,14 @@ async function registrarVentaCompleta(
         for (const iId in consumoAcumuladoInsumos) {
             const req = consumoAcumuladoInsumos[iId];
             const r = await runQuery(
-                `UPDATE insumos SET stock_actual = ROUND(stock_actual - ?, 4) WHERE id = ? AND stock_actual >= ?`,
+                `UPDATE insumos SET stock_actual = ${redondearStock('stock_actual - $1')} WHERE id = $2 AND stock_actual >= $3`,
                 [req.cantidadTotalRequerida, req.insumoId, req.cantidadTotalRequerida]
             );
             if (r.changes === 0) {
                 throw new Error(`Error de concurrencia: Stock insuficiente de ${req.nombre} durante la venta.`);
             }
 
-            const insActualizado = await getQuery(`SELECT stock_actual, costo_por_unidad FROM insumos WHERE id = ?`, [req.insumoId]);
+            const insActualizado = await getQuery(`SELECT stock_actual, costo_por_unidad FROM insumos WHERE id = $1`, [req.insumoId]);
             const stockResult = Number(insActualizado?.stock_actual || 0);
             const cppResult = Number(insActualizado?.costo_por_unidad || req.costoUnitario);
 
@@ -795,7 +804,7 @@ async function registrarVentaCompleta(
                 `INSERT INTO movimientos_insumos (
                     insumo_id, movimiento_id, usuario_id, tipo, cantidad, stock_resultante,
                     costo_unitario, costo_promedio_resultante, monto_total_compra, motivo
-                 ) VALUES (?, ?, ?, 'consumo_venta', ?, ?, ?, ?, ?, ?)`,
+                 ) VALUES ($1, $2, $3, 'consumo_venta', $4, $5, $6, $7, $8, $9)`,
                 [
                     req.insumoId,
                     movimientoId,
@@ -814,7 +823,7 @@ async function registrarVentaCompleta(
         for (const pId in consumoAcumuladoDirecto) {
             const reqDir = consumoAcumuladoDirecto[pId];
             const r = await runQuery(
-                `UPDATE productos SET stock = ROUND(stock - ?, 4) WHERE id = ? AND stock >= ?`,
+                `UPDATE productos SET stock = ${redondearStock('stock - $1')} WHERE id = $2 AND stock >= $3`,
                 [reqDir.cantidadTotalRequerida, reqDir.productoId, reqDir.cantidadTotalRequerida]
             );
             if (r.changes === 0) {
@@ -825,7 +834,7 @@ async function registrarVentaCompleta(
             for (const lId in reqDir.lotesEspecificos) {
                 const cantLote = reqDir.lotesEspecificos[lId];
                 const rLote = await runQuery(
-                    `UPDATE producto_lotes SET stock = ROUND(stock - ?, 4) WHERE id = ? AND producto_id = ? AND stock >= ?`,
+                    `UPDATE producto_lotes SET stock = ${redondearStock('stock - $1')} WHERE id = $2 AND producto_id = $3 AND stock >= $4`,
                     [cantLote, lId, reqDir.productoId, cantLote]
                 );
                 if (rLote.changes === 0) {
@@ -836,7 +845,7 @@ async function registrarVentaCompleta(
             // Descontar stock por política PEPS automática para cantidades sin lote específico
             if (reqDir.cantidadPeps > 0) {
                 const lotesPeps = await allQuery(
-                    `SELECT id, stock FROM producto_lotes WHERE producto_id = ? AND activo = 1 AND stock > 0 ORDER BY fecha_vencimiento ASC, id ASC`,
+                    `SELECT id, stock FROM producto_lotes WHERE producto_id = $1 AND activo = 1 AND stock > 0 ORDER BY fecha_vencimiento ASC, id ASC`,
                     [reqDir.productoId]
                 );
                 let remPeps = reqDir.cantidadPeps;
@@ -844,7 +853,7 @@ async function registrarVentaCompleta(
                     if (remPeps <= 0) break;
                     const desc = Math.min(Number(lot.stock), remPeps);
                     const rLote = await runQuery(
-                        `UPDATE producto_lotes SET stock = ROUND(stock - ?, 4) WHERE id = ? AND stock >= ?`,
+                        `UPDATE producto_lotes SET stock = ${redondearStock('stock - $1')} WHERE id = $2 AND stock >= $3`,
                         [desc, lot.id, desc]
                     );
                     if (rLote.changes > 0) {
@@ -852,11 +861,17 @@ async function registrarVentaCompleta(
                     }
                 }
                 if (remPeps > 0) {
-                    throw new Error('Stock insuficiente en lotes activos del producto para cubrir la política PEPS.');
+                    const usaLotes = lotesPeps.length > 0 || await getQuery(
+                        'SELECT id FROM producto_lotes WHERE producto_id = $1 AND activo = 1 LIMIT 1',
+                        [reqDir.productoId]
+                    );
+                    if (usaLotes) {
+                        throw new Error('Stock insuficiente en lotes activos del producto para cubrir la política PEPS.');
+                    }
                 }
             }
 
-            const prodActualizado = await getQuery(`SELECT stock, costo FROM productos WHERE id = ?`, [reqDir.productoId]);
+            const prodActualizado = await getQuery(`SELECT stock, costo FROM productos WHERE id = $1`, [reqDir.productoId]);
             const stockResultDir = Number(prodActualizado?.stock || 0);
             const cppResultDir = Number(prodActualizado?.costo || reqDir.costoUnitario);
 
@@ -864,7 +879,7 @@ async function registrarVentaCompleta(
                 `INSERT INTO movimientos_productos_directos (
                     producto_id, movimiento_id, usuario_id, tipo, cantidad, stock_resultante,
                     costo_unitario, costo_promedio_resultante, monto_total, motivo
-                 ) VALUES (?, ?, ?, 'venta', ?, ?, ?, ?, ?, ?)`,
+                 ) VALUES ($1, $2, $3, 'venta', $4, $5, $6, $7, $8, $9)`,
                 [
                     reqDir.productoId,
                     movimientoId,
@@ -930,7 +945,7 @@ async function registrarEgreso(cajaId, monto, descripcion, metodoPago = 'efectiv
                     COALESCE(cf.habilita_respaldo_fiscal, 1) as habilita_respaldo_fiscal
              FROM cajas c
              LEFT JOIN cajas_fisicas cf ON c.caja_fisica_id = cf.id
-             WHERE c.id = ?`,
+             WHERE c.id = $1 FOR NO KEY UPDATE OF c`,
             [cajaId]
         );
         if (!caja) {
@@ -943,7 +958,7 @@ async function registrarEgreso(cajaId, monto, descripcion, metodoPago = 'efectiv
             throw new Error('Permiso denegado: solo el cajero titular de la caja abierta o un Administrador puede registrar egresos en este turno.');
         }
 
-        const configNegocio = await obtenerConfiguracionNegocio();
+        const configNegocio = await obtenerConfiguracionParaMovimiento();
         const regimenSnapshot = configNegocio?.regimen_tributario === 'regimen_general'
             ? 'regimen_general'
             : 'simplificado_control_interno';
@@ -1008,7 +1023,7 @@ async function registrarEgreso(cajaId, monto, descripcion, metodoPago = 'efectiv
                 regimen_tributario, iva_porcentaje, it_porcentaje, iva_monto, it_monto,
                 descripcion, estado
              )
-             VALUES (?, ?, 'egreso', ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 0, ?, 'completado')`,
+             VALUES ($1, $2, 'egreso', $3, $4, 0, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, 0, $18, 0, $19, 'completado') RETURNING id`,
             [
                 cajaId,
                 ejecutor.id,
@@ -1033,7 +1048,7 @@ async function registrarEgreso(cajaId, monto, descripcion, metodoPago = 'efectiv
         );
         const movId = res.lastID;
         await runQuery(
-            `INSERT INTO movimientos_pagos (movimiento_id, metodo_pago, monto, referencia) VALUES (?, ?, ?, ?)`,
+            `INSERT INTO movimientos_pagos (movimiento_id, metodo_pago, monto, referencia) VALUES ($1, $2, $3, $4)`,
             [movId, metodoPago === 'qr' ? 'qr' : 'efectivo', montoValidado, referenciaQr]
         );
         return movId;
@@ -1059,7 +1074,7 @@ async function registrarIngresoEfectivo(cajaId, monto, motivo, usuarioId = null)
             throw new Error('El usuario que intenta registrar el ingreso no existe o está inactivo.');
         }
 
-        const caja = await getQuery(`SELECT id, usuario_id, estado FROM cajas WHERE id = ?`, [cajaId]);
+        const caja = await getQuery(`SELECT id, usuario_id, estado FROM cajas WHERE id = $1 FOR NO KEY UPDATE`, [cajaId]);
         if (!caja) {
             throw new Error('La caja indicada no existe.');
         }
@@ -1070,7 +1085,7 @@ async function registrarIngresoEfectivo(cajaId, monto, motivo, usuarioId = null)
             throw new Error('Permiso denegado: solo el cajero titular o un Administrador puede ingresar efectivo en este turno.');
         }
 
-        const configNegocio = await obtenerConfiguracionNegocio();
+        const configNegocio = await obtenerConfiguracionParaMovimiento();
         const regimenSnapshot = configNegocio?.regimen_tributario === 'regimen_general'
             ? 'regimen_general'
             : 'simplificado_control_interno';
@@ -1084,12 +1099,12 @@ async function registrarIngresoEfectivo(cajaId, monto, motivo, usuarioId = null)
                 regimen_tributario, iva_porcentaje, it_porcentaje, iva_monto, it_monto,
                 descripcion, estado
              )
-             VALUES (?, ?, 'ingreso', 'aporte_cambio', ?, 0, ?, 'efectivo', ?, 0, ?, 0, 'recibo', ?, 0, 0, 0, 0, ?, 'completado')`,
+             VALUES ($1, $2, 'ingreso', 'aporte_cambio', $3, 0, $4, 'efectivo', $5, 0, $6, 0, 'recibo', $7, 0, 0, 0, 0, $8, 'completado') RETURNING id`,
             [cajaId, ejecutor.id, montoValidado, montoValidado, montoValidado, montoValidado, regimenSnapshot, descripcionFinal]
         );
         const movId = res.lastID;
         await runQuery(
-            `INSERT INTO movimientos_pagos (movimiento_id, metodo_pago, monto, referencia) VALUES (?, 'efectivo', ?, NULL)`,
+            `INSERT INTO movimientos_pagos (movimiento_id, metodo_pago, monto, referencia) VALUES ($1, 'efectivo', $2, NULL)`,
             [movId, montoValidado]
         );
         return movId;
@@ -1110,11 +1125,11 @@ async function anularMovimientoConPermiso(adminId, movimientoId, motivoAnulacion
     const motivoLimpio = String(motivoAnulacion).trim();
 
     return await enTransaccion(async () => {
-        const mov = await getQuery(`SELECT * FROM movimientos WHERE id = ?`, [movimientoId]);
+        const mov = await getQuery(`SELECT * FROM movimientos WHERE id = $1 FOR NO KEY UPDATE`, [movimientoId]);
         if (!mov) throw new Error('Movimiento no encontrado.');
         if (mov.estado === 'anulado') throw new Error('Este movimiento ya fue anulado.');
 
-        const caja = await getQuery(`SELECT id, estado FROM cajas WHERE id = ?`, [mov.caja_id]);
+        const caja = await getQuery(`SELECT id, estado FROM cajas WHERE id = $1 FOR NO KEY UPDATE`, [mov.caja_id]);
         if (!caja) {
             throw new Error('La caja asociada al movimiento no existe.');
         }
@@ -1126,29 +1141,23 @@ async function anularMovimientoConPermiso(adminId, movimientoId, motivoAnulacion
             `SELECT d.*, p.tipo_inventario
              FROM detalle_movimientos d
              INNER JOIN productos p ON d.producto_id = p.id
-             WHERE d.movimiento_id = ?`,
+             WHERE d.movimiento_id = $1`,
             [movimientoId]
         );
 
         for (const det of detalles) {
             if (det.tipo_inventario === 'directo') {
-                await runQuery(`UPDATE productos SET stock = ROUND(stock + ?, 4) WHERE id = ?`, [det.cantidad, det.producto_id]);
+                await runQuery(`UPDATE productos SET stock = ${redondearStock('stock + $1')} WHERE id = $2`, [det.cantidad, det.producto_id]);
 
                 // Restituir en lotes si el producto usa lotes
-                const loteDestino = await getQuery(
-                    `SELECT id FROM producto_lotes WHERE producto_id = ? AND activo = 1 ORDER BY fecha_vencimiento ASC, id ASC LIMIT 1`,
-                    [det.producto_id]
-                );
-                if (loteDestino) {
-                    await runQuery(`UPDATE producto_lotes SET stock = ROUND(stock + ?, 4) WHERE id = ?`, [det.cantidad, loteDestino.id]);
-                }
+                await restituirLote(det.producto_id, det.cantidad);
 
-                const prodAct = await getQuery(`SELECT stock, costo FROM productos WHERE id = ?`, [det.producto_id]);
+                const prodAct = await getQuery(`SELECT stock, costo FROM productos WHERE id = $1`, [det.producto_id]);
                 await runQuery(
                     `INSERT INTO movimientos_productos_directos (
                         producto_id, movimiento_id, usuario_id, tipo, cantidad, stock_resultante,
                         costo_unitario, costo_promedio_resultante, monto_total, motivo
-                     ) VALUES (?, ?, ?, 'reingreso_anulacion', ?, ?, ?, ?, ?, ?)`,
+                     ) VALUES ($1, $2, $3, 'reingreso_anulacion', $4, $5, $6, $7, $8, $9)`,
                     [
                         det.producto_id,
                         movimientoId,
@@ -1165,8 +1174,8 @@ async function anularMovimientoConPermiso(adminId, movimientoId, motivoAnulacion
                 // Si tenía límite activo, restituir el contador restante
                 await runQuery(
                     `UPDATE productos
-                     SET limite_unidades_restante = ROUND(limite_unidades_restante + ?, 4)
-                     WHERE id = ? AND limite_maximo_activo = 1`,
+                     SET limite_unidades_restante = ${redondearStock('limite_unidades_restante + $1')}
+                     WHERE id = $2 AND limite_maximo_activo = 1`,
                     [det.cantidad, det.producto_id]
                 );
 
@@ -1175,21 +1184,22 @@ async function anularMovimientoConPermiso(adminId, movimientoId, motivoAnulacion
                     `SELECT dmc.*, p.tipo_inventario
                      FROM detalle_movimientos_combos dmc
                      INNER JOIN productos p ON dmc.componente_producto_id = p.id
-                     WHERE dmc.detalle_movimiento_id = ?`,
+                     WHERE dmc.detalle_movimiento_id = $1`,
                     [det.id]
                 );
                 for (const comp of componentesCombosVendidos) {
                     if (comp.tipo_inventario === 'directo') {
                         await runQuery(
-                            `UPDATE productos SET stock = ROUND(stock + ?, 4) WHERE id = ?`,
+                            `UPDATE productos SET stock = ${redondearStock('stock + $1')} WHERE id = $2`,
                             [comp.cantidad_total, comp.componente_producto_id]
                         );
-                        const prodAct = await getQuery(`SELECT stock, costo FROM productos WHERE id = ?`, [comp.componente_producto_id]);
+                        await restituirLote(comp.componente_producto_id, comp.cantidad_total);
+                        const prodAct = await getQuery(`SELECT stock, costo FROM productos WHERE id = $1`, [comp.componente_producto_id]);
                         await runQuery(
                             `INSERT INTO movimientos_productos_directos (
                                 producto_id, movimiento_id, usuario_id, tipo, cantidad, stock_resultante,
                                 costo_unitario, costo_promedio_resultante, monto_total, motivo
-                             ) VALUES (?, ?, ?, 'reingreso_anulacion', ?, ?, ?, ?, ?, ?)`,
+                             ) VALUES ($1, $2, $3, 'reingreso_anulacion', $4, $5, $6, $7, $8, $9)`,
                             [
                                 comp.componente_producto_id,
                                 movimientoId,
@@ -1211,7 +1221,7 @@ async function anularMovimientoConPermiso(adminId, movimientoId, motivoAnulacion
         let consumosInsumos = await allQuery(
             `SELECT id, insumo_id, cantidad, costo_unitario
              FROM movimientos_insumos
-             WHERE movimiento_id = ? AND tipo = 'consumo_venta'`,
+             WHERE movimiento_id = $1 AND tipo = 'consumo_venta'`,
             [movimientoId]
         );
 
@@ -1221,22 +1231,23 @@ async function anularMovimientoConPermiso(adminId, movimientoId, motivoAnulacion
             consumosInsumos = await allQuery(
                 `SELECT id, insumo_id, cantidad, costo_unitario
                  FROM movimientos_insumos
-                 WHERE tipo = 'consumo_venta' AND motivo LIKE ?`,
-                [`%${motivoRespaldo}%`]
+                 WHERE tipo = 'consumo_venta' AND movimiento_id IS NULL
+                   AND (motivo LIKE $1 OR motivo LIKE $2)`,
+                [`%${motivoRespaldo}`, `%${motivoRespaldo} %`]
             );
         }
 
         for (const cons of consumosInsumos) {
             await runQuery(
-                `UPDATE insumos SET stock_actual = ROUND(stock_actual + ?, 4) WHERE id = ?`,
+                `UPDATE insumos SET stock_actual = ${redondearStock('stock_actual + $1')} WHERE id = $2`,
                 [cons.cantidad, cons.insumo_id]
             );
-            const insAct = await getQuery(`SELECT stock_actual, costo_por_unidad FROM insumos WHERE id = ?`, [cons.insumo_id]);
+            const insAct = await getQuery(`SELECT stock_actual, costo_por_unidad FROM insumos WHERE id = $1`, [cons.insumo_id]);
             await runQuery(
                 `INSERT INTO movimientos_insumos (
                     insumo_id, movimiento_id, usuario_id, tipo, cantidad, stock_resultante,
                     costo_unitario, costo_promedio_resultante, monto_total_compra, motivo
-                 ) VALUES (?, ?, ?, 'reingreso_anulacion', ?, ?, ?, ?, ?, ?)`,
+                 ) VALUES ($1, $2, $3, 'reingreso_anulacion', $4, $5, $6, $7, $8, $9)`,
                 [
                     cons.insumo_id,
                     movimientoId,
@@ -1257,13 +1268,13 @@ async function anularMovimientoConPermiso(adminId, movimientoId, motivoAnulacion
             for (const det of detalles) {
                 if (det.tipo_inventario === 'receta') {
                     const insumosBaseReceta = await allQuery(
-                        `SELECT insumo_id, cantidad_requerida FROM recetas WHERE producto_id = ?`,
+                        `SELECT insumo_id, cantidad_requerida FROM recetas WHERE producto_id = $1`,
                         [det.producto_id]
                     );
                     const modsVendidos = await allQuery(
                         `SELECT insumo_id, cantidad_insumo, insumo_reemplazado_id
                          FROM detalle_movimientos_modificadores
-                         WHERE detalle_movimiento_id = ?`,
+                         WHERE detalle_movimiento_id = $1`,
                         [det.id]
                     );
 
@@ -1290,13 +1301,13 @@ async function anularMovimientoConPermiso(adminId, movimientoId, motivoAnulacion
 
                     for (const [insId, cantPorUnidad] of mapaInsumosAReintegrar.entries()) {
                         const totalReingreso = Number((cantPorUnidad * det.cantidad).toFixed(4));
-                        await runQuery(`UPDATE insumos SET stock_actual = ROUND(stock_actual + ?, 4) WHERE id = ?`, [totalReingreso, insId]);
-                        const insAct = await getQuery(`SELECT stock_actual, costo_por_unidad FROM insumos WHERE id = ?`, [insId]);
+                        await runQuery(`UPDATE insumos SET stock_actual = ${redondearStock('stock_actual + $1')} WHERE id = $2`, [totalReingreso, insId]);
+                        const insAct = await getQuery(`SELECT stock_actual, costo_por_unidad FROM insumos WHERE id = $1`, [insId]);
                         await runQuery(
                             `INSERT INTO movimientos_insumos (
                                 insumo_id, movimiento_id, usuario_id, tipo, cantidad, stock_resultante,
                                 costo_unitario, costo_promedio_resultante, monto_total_compra, motivo
-                             ) VALUES (?, ?, ?, 'reingreso_anulacion', ?, ?, ?, ?, ?, ?)`,
+                             ) VALUES ($1, $2, $3, 'reingreso_anulacion', $4, $5, $6, $7, $8, $9)`,
                             [
                                 insId,
                                 movimientoId,
@@ -1318,11 +1329,11 @@ async function anularMovimientoConPermiso(adminId, movimientoId, motivoAnulacion
         await runQuery(
             `UPDATE movimientos
              SET estado = 'anulado',
-                 descripcion = ?,
-                 anulado_por = ?,
+                 descripcion = $1,
+                 anulado_por = $2,
                  fecha_anulacion = CURRENT_TIMESTAMP,
-                 motivo_anulacion = ?
-             WHERE id = ?`,
+                 motivo_anulacion = $3
+             WHERE id = $4`,
             [nuevaDesc, ejecutor.id, motivoLimpio, movimientoId]
         );
         return true;
@@ -1332,14 +1343,14 @@ async function anularMovimientoConPermiso(adminId, movimientoId, motivoAnulacion
 async function obtenerMovimientosCaja(cajaId) {
     return await allQuery(
         `SELECT m.*,
-                datetime(m.fecha_hora, 'localtime') as fecha_hora,
-                datetime(m.fecha_anulacion, 'localtime') as fecha_anulacion,
+                ${fechaLocal('m.fecha_hora')} as fecha_hora,
+                ${fechaLocal('m.fecha_anulacion')} as fecha_anulacion,
                 u.nombre as usuario_nombre,
                 ua.nombre as anulado_por_nombre
          FROM movimientos m
          LEFT JOIN usuarios u ON m.usuario_id = u.id
          LEFT JOIN usuarios ua ON m.anulado_por = ua.id
-         WHERE m.caja_id = ?
+         WHERE m.caja_id = $1
          ORDER BY m.id DESC`,
         [cajaId]
     );
@@ -1349,14 +1360,20 @@ async function obtenerMovimientosCaja(cajaId) {
  * Obtiene el siguiente número correlativo para facturas de venta.
  * @returns {Promise<number>}
  */
-async function obtenerSiguienteNumeroFactura() {
+async function consultarNumeroFactura() {
+    // Conserva el prefijo numérico en comprobantes que incluyen otros caracteres.
+    const numero = `SUBSTRING(LTRIM(nro_factura) FROM '^[+-]?[0-9]+')::numeric`;
     const fila = await getQuery(
-        `SELECT COALESCE(MAX(CAST(nro_factura AS INTEGER)), 0) + 1 AS siguiente_nro
+        `SELECT COALESCE(MAX(${numero}), 0) + 1 AS siguiente_nro
          FROM movimientos
          WHERE tipo_comprobante = 'factura'
-           AND CAST(nro_factura AS INTEGER) > 0`
+           AND ${numero} > 0`
     );
-    return Number(fila?.siguiente_nro || 1);
+    return fila?.siguiente_nro || 1;
+}
+
+async function obtenerSiguienteNumeroFactura() {
+    return Number(await consultarNumeroFactura());
 }
 
 module.exports = {

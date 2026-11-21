@@ -4,9 +4,17 @@
  * Gestiona la tabla singleton `configuracion_negocio`.
  */
 
-const { runQuery, getQuery, allQuery, redondear2, numeroNoNegativo } = require('./db');
+const { runQuery, getQuery, enTransaccion, redondear2, numeroNoNegativo } = require('./db');
 const { obtenerUsuarioPorId, esRolAdministrativo } = require('./auth.repo');
 const { normalizarRegimen } = require('../domain/fiscal');
+const {
+    obtenerConfiguracionSmtp,
+    guardarConfiguracionSmtp,
+    listarDestinatariosNotificaciones,
+    crearDestinatarioPendiente,
+    validarCodigoDestinatario,
+    eliminarDestinatario
+} = require('./notificaciones.repo');
 
 /**
  * Determina si el negocio completó su configuración inicial.
@@ -17,16 +25,33 @@ function sistemaEstaInstalado(configuracion) {
     return Boolean(configuracion && Number(configuracion.configurado) === 1);
 }
 
+const CONSULTA_CONFIGURACION = 'SELECT * FROM configuracion_negocio WHERE id = 1';
+
+async function inicializarConfiguracion() {
+    await runQuery(
+        `INSERT INTO configuracion_negocio (id, nombre_negocio, modalidad_nombre, usa_stock_directo, usa_vencimiento, usa_recetas_ensamblaje, habilita_apps_comida, habilita_delivery, configurado)
+         VALUES (1, 'Mi Negocio', 'Venta Directa No Perecedera', 1, 0, 0, 0, 0, 1)
+         ON CONFLICT (id) DO NOTHING`
+    );
+}
+
 async function obtenerConfiguracionNegocio() {
-    let config = await getQuery(`SELECT * FROM configuracion_negocio WHERE id = 1`);
-    if (!config) {
-        await runQuery(
-            `INSERT INTO configuracion_negocio (id, nombre_negocio, modalidad_nombre, usa_stock_directo, usa_vencimiento, usa_recetas_ensamblaje, habilita_apps_comida, habilita_delivery, configurado)
-             VALUES (1, 'Mi Negocio', 'Venta Directa No Perecedera', 1, 0, 0, 0, 0, 1)`
-        );
-        config = await getQuery(`SELECT * FROM configuracion_negocio WHERE id = 1`);
-    }
-    return config;
+    const config = await getQuery(CONSULTA_CONFIGURACION);
+    if (config) return config;
+
+    const inicializar = async () => {
+        await inicializarConfiguracion();
+        return getQuery(CONSULTA_CONFIGURACION);
+    };
+    return enTransaccion(inicializar);
+}
+
+async function actualizarConfiguracionSingleton(sql, parametros) {
+    return enTransaccion(async () => {
+        await inicializarConfiguracion();
+        await runQuery(sql, parametros);
+        return getQuery(CONSULTA_CONFIGURACION);
+    });
 }
 
 async function guardarConfiguracionNegocio(adminId, config) {
@@ -46,22 +71,22 @@ async function guardarConfiguracionNegocio(adminId, config) {
         ? (config.habilitaDelivery ? 1 : 0)
         : (config.habilita_delivery !== undefined ? (config.habilita_delivery ? 1 : 0) : null);
 
-    await runQuery(
+    return actualizarConfiguracionSingleton(
         `UPDATE configuracion_negocio
-         SET nombre_negocio = ?,
-             modalidad_nombre = ?,
-             usa_stock_directo = ?,
-             usa_vencimiento = ?,
-             usa_recetas_ensamblaje = ?,
-             habilita_apps_comida = COALESCE(?, habilita_apps_comida, 0),
-             habilita_delivery = COALESCE(?, habilita_delivery, 0),
-             nit_negocio = COALESCE(?, nit_negocio, ''),
-             regimen_tributario = COALESCE(?, regimen_tributario, 'simplificado_control_interno'),
-             emite_factura = COALESCE(?, emite_factura, 0),
-             iva_porcentaje = ?,
-             it_porcentaje = ?,
-             it_base = COALESCE(?, it_base, 'todas_las_ventas'),
-             usa_respaldo_compras_egresos = COALESCE(?, usa_respaldo_compras_egresos, 1),
+         SET nombre_negocio = $1,
+             modalidad_nombre = $2,
+             usa_stock_directo = $3,
+             usa_vencimiento = $4,
+             usa_recetas_ensamblaje = $5,
+             habilita_apps_comida = COALESCE($6, habilita_apps_comida, 0),
+             habilita_delivery = COALESCE($7, habilita_delivery, 0),
+             nit_negocio = COALESCE($8, nit_negocio, ''),
+             regimen_tributario = COALESCE($9, regimen_tributario, 'simplificado_control_interno'),
+             emite_factura = COALESCE($10, emite_factura, 0),
+             iva_porcentaje = $11,
+             it_porcentaje = $12,
+             it_base = COALESCE($13, it_base, 'todas_las_ventas'),
+             usa_respaldo_compras_egresos = COALESCE($14, usa_respaldo_compras_egresos, 1),
              configurado = 1
          WHERE id = 1`,
         [
@@ -81,7 +106,6 @@ async function guardarConfiguracionNegocio(adminId, config) {
             config.usaRespaldoComprasEgresos !== undefined ? (config.usaRespaldoComprasEgresos ? 1 : 0) : null
         ]
     );
-    return await obtenerConfiguracionNegocio();
 }
 
 async function actualizarConfiguracionNegocio(config, adminId = null) {
@@ -124,16 +148,16 @@ async function actualizarConfiguracionNegocio(config, adminId = null) {
         ? String(config.nit_negocio).trim()
         : (config.nitNegocio !== undefined ? String(config.nitNegocio).trim() : null);
 
-    await runQuery(
+    return actualizarConfiguracionSingleton(
         `UPDATE configuracion_negocio
-         SET nombre_negocio = COALESCE(?, nombre_negocio),
-             modalidad_nombre = COALESCE(?, modalidad_nombre),
-             usa_stock_directo = COALESCE(?, usa_stock_directo),
-             usa_vencimiento = COALESCE(?, usa_vencimiento),
-             usa_recetas_ensamblaje = COALESCE(?, usa_recetas_ensamblaje),
-             habilita_apps_comida = COALESCE(?, habilita_apps_comida),
-             habilita_delivery = COALESCE(?, habilita_delivery),
-             nit_negocio = COALESCE(?, nit_negocio)
+         SET nombre_negocio = COALESCE($1, nombre_negocio),
+             modalidad_nombre = COALESCE($2, modalidad_nombre),
+             usa_stock_directo = COALESCE($3, usa_stock_directo),
+             usa_vencimiento = COALESCE($4, usa_vencimiento),
+             usa_recetas_ensamblaje = COALESCE($5, usa_recetas_ensamblaje),
+             habilita_apps_comida = COALESCE($6, habilita_apps_comida),
+             habilita_delivery = COALESCE($7, habilita_delivery),
+             nit_negocio = COALESCE($8, nit_negocio)
          WHERE id = 1`,
         [
             nombreNegocio,
@@ -147,7 +171,6 @@ async function actualizarConfiguracionNegocio(config, adminId = null) {
         ]
     );
 
-    return await obtenerConfiguracionNegocio();
 }
 
 async function guardarConfiguracionContable(adminId, config) {
@@ -165,16 +188,16 @@ async function guardarConfiguracionContable(adminId, config) {
     const itBase = config.itBase === 'solo_facturadas' ? 'solo_facturadas' : 'todas_las_ventas';
     const usaRespaldo = config.usaRespaldoComprasEgresos !== undefined ? (config.usaRespaldoComprasEgresos ? 1 : 0) : 1;
 
-    await runQuery(
+    return actualizarConfiguracionSingleton(
         `UPDATE configuracion_negocio
-         SET nombre_negocio = COALESCE(?, nombre_negocio),
-             nit_negocio = ?,
-             regimen_tributario = ?,
-             emite_factura = ?,
-             iva_porcentaje = ?,
-             it_porcentaje = ?,
-             it_base = ?,
-             usa_respaldo_compras_egresos = ?,
+         SET nombre_negocio = COALESCE($1, nombre_negocio),
+             nit_negocio = $2,
+             regimen_tributario = $3,
+             emite_factura = $4,
+             iva_porcentaje = $5,
+             it_porcentaje = $6,
+             it_base = $7,
+             usa_respaldo_compras_egresos = $8,
              configurado = 1
          WHERE id = 1`,
         [
@@ -188,170 +211,6 @@ async function guardarConfiguracionContable(adminId, config) {
             usaRespaldo
         ]
     );
-    return await obtenerConfiguracionNegocio();
-}
-
-// ==========================================
-// CONFIGURACIÓN SMTP Y DESTINATARIOS
-// ==========================================
-
-async function obtenerConfiguracionSmtp() {
-    return await getQuery(`SELECT * FROM configuracion_smtp WHERE id = 1`);
-}
-
-async function guardarConfiguracionSmtp(adminIdODatos, posibleDatos) {
-    let adminId = null;
-    let datos = {};
-    if (typeof adminIdODatos === 'object' && adminIdODatos !== null) {
-        datos = adminIdODatos;
-        adminId = posibleDatos;
-    } else {
-        adminId = adminIdODatos;
-        datos = posibleDatos || {};
-    }
-
-    if (adminId) {
-        const ejecutor = await obtenerUsuarioPorId(adminId);
-        if (!ejecutor || !esRolAdministrativo(ejecutor.rol)) {
-            throw new Error('Permiso denegado: solo un Administrador o Propietario(a) puede modificar la configuración SMTP.');
-        }
-    }
-
-    const actual = await getQuery(`SELECT * FROM configuracion_smtp WHERE id = 1`);
-    const host = datos.host !== undefined ? String(datos.host).trim() : (actual?.host || '');
-    const puerto = datos.puerto !== undefined ? Number(datos.puerto) : (actual?.puerto || 587);
-    const secure = datos.secure !== undefined ? (datos.secure ? 1 : 0) : (actual?.secure ?? 0);
-    const usuario = datos.usuario !== undefined ? String(datos.usuario).trim() : (actual?.usuario || '');
-    const password = (datos.password !== undefined && String(datos.password).trim() !== '')
-        ? String(datos.password).trim()
-        : (actual?.password || '');
-    const remitenteNombre = datos.remitenteNombre !== undefined
-        ? String(datos.remitenteNombre).trim()
-        : (datos.remitente_nombre !== undefined ? String(datos.remitente_nombre).trim() : (actual?.remitente_nombre || 'Sistema POS'));
-    const activo = datos.activo !== undefined ? (datos.activo ? 1 : 0) : (actual?.activo ?? 0);
-    const ahora = new Date().toISOString();
-
-    if (actual) {
-        await runQuery(
-            `UPDATE configuracion_smtp
-             SET host = ?, puerto = ?, secure = ?, usuario = ?, password = ?, remitente_nombre = ?, activo = ?, actualizado_en = ?
-             WHERE id = 1`,
-            [host, puerto, secure, usuario, password, remitenteNombre, activo, ahora]
-        );
-    } else {
-        await runQuery(
-            `INSERT INTO configuracion_smtp (id, host, puerto, secure, usuario, password, remitente_nombre, activo, actualizado_en)
-             VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [host, puerto, secure, usuario, password, remitenteNombre, activo, ahora]
-        );
-    }
-    return await obtenerConfiguracionSmtp();
-}
-
-async function listarDestinatariosNotificaciones(soloVerificados = false) {
-    if (soloVerificados) {
-        return await allQuery(
-            `SELECT * FROM notificacion_destinatarios WHERE activo = 1 AND verificado = 1 ORDER BY id ASC`
-        );
-    }
-    return await allQuery(
-        `SELECT * FROM notificacion_destinatarios WHERE activo = 1 ORDER BY id ASC`
-    );
-}
-
-async function crearDestinatarioPendiente({ email, nombre, codigo, expira, usuarioId }) {
-    const emailLimpio = String(email || '').trim().toLowerCase();
-    const nombreLimpio = String(nombre || '').trim();
-    if (!emailLimpio || !emailLimpio.includes('@')) {
-        throw new Error('Debe proporcionar un correo electrónico válido.');
-    }
-    const ahora = new Date().toISOString();
-
-    const existente = await getQuery(
-        `SELECT id, verificado, activo FROM notificacion_destinatarios WHERE LOWER(email) = LOWER(?)`,
-        [emailLimpio]
-    );
-
-    if (existente) {
-        if (Number(existente.verificado) === 1 && Number(existente.activo) === 1) {
-            throw new Error('Este correo ya está registrado y verificado como destinatario.');
-        }
-        await runQuery(
-            `UPDATE notificacion_destinatarios
-             SET nombre = ?,
-                 verificado = 0,
-                 codigo_verificacion = ?,
-                 codigo_expira = ?,
-                 intentos_fallidos = 0,
-                 activo = 1,
-                 creado_por = ?,
-                 creado_en = ?
-             WHERE id = ?`,
-            [nombreLimpio || emailLimpio, String(codigo || '').trim().toUpperCase(), expira || null, usuarioId || null, ahora, existente.id]
-        );
-        return await getQuery(`SELECT * FROM notificacion_destinatarios WHERE id = ?`, [existente.id]);
-    }
-
-    const res = await runQuery(
-        `INSERT INTO notificacion_destinatarios 
-         (email, nombre, verificado, codigo_verificacion, codigo_expira, intentos_fallidos, activo, creado_por, creado_en)
-         VALUES (?, ?, 0, ?, ?, 0, 1, ?, ?)`,
-        [emailLimpio, nombreLimpio || emailLimpio, String(codigo || '').trim().toUpperCase(), expira || null, usuarioId || null, ahora]
-    );
-    return await getQuery(`SELECT * FROM notificacion_destinatarios WHERE id = ?`, [res.lastID]);
-}
-
-async function validarCodigoDestinatario(id, codigo) {
-    const destinatario = await getQuery(`SELECT * FROM notificacion_destinatarios WHERE id = ?`, [id]);
-    if (!destinatario) {
-        throw new Error('Destinatario no encontrado.');
-    }
-
-    if (Number(destinatario.verificado) === 1) {
-        return { ...destinatario, verificado: 1, exito: true };
-    }
-
-    if (Number(destinatario.intentos_fallidos || 0) >= 5) {
-        throw new Error('Demasiados intentos fallidos. Genera un nuevo código para continuar.');
-    }
-
-    if (destinatario.codigo_expira) {
-        const fechaExpira = new Date(destinatario.codigo_expira);
-        if (!isNaN(fechaExpira.getTime()) && Date.now() > fechaExpira.getTime()) {
-            throw new Error('El código de verificación ha expirado.');
-        }
-    }
-
-    const codIngresado = String(codigo || '').trim().toUpperCase();
-    const codEsperado = String(destinatario.codigo_verificacion || '').trim().toUpperCase();
-
-    if (!codIngresado || codIngresado !== codEsperado) {
-        await runQuery(
-            `UPDATE notificacion_destinatarios SET intentos_fallidos = intentos_fallidos + 1 WHERE id = ?`,
-            [id]
-        );
-        throw new Error('Código de verificación incorrecto.');
-    }
-
-    const ahora = new Date().toISOString();
-    await runQuery(
-        `UPDATE notificacion_destinatarios
-         SET verificado = 1,
-             codigo_verificacion = NULL,
-             codigo_expira = NULL,
-             intentos_fallidos = 0,
-             verificado_en = ?
-         WHERE id = ?`,
-        [ahora, id]
-    );
-
-    const actualizado = await getQuery(`SELECT * FROM notificacion_destinatarios WHERE id = ?`, [id]);
-    return { ...actualizado, exito: true };
-}
-
-async function eliminarDestinatario(id) {
-    const res = await runQuery(`DELETE FROM notificacion_destinatarios WHERE id = ?`, [id]);
-    return res.changes > 0;
 }
 
 module.exports = {

@@ -5,7 +5,7 @@
 // - Régimen General con liquidación fiscal (IVA 13%, IT 3%, base configurable y facturas SIAT)
 // - Respaldo fiscal SIAT RCV (CUF de autorización, código de control, tipo de compra)
 // - Estaciones multicaja física (Barra Principal y Terraza & Take Away) con turnos simultáneos
-// - Usuarios con perfiles diferenciados: Propietario(a), Admin, Cajeros y Developer
+// - Usuarios con perfiles diferenciados: Propietario(a), Admin y Cajeros
 // - Configuración SMTP dinámica y destinatarios de alertas por correo con verificación
 // - Soporte completo de Delivery y Apps de Comida (PedidosYa, Yango, Mototaxi Propio, Local)
 // - Materia prima métrica con hasta 6 decimales (NIC 2 CPP) y Kardex de Insumos
@@ -25,65 +25,36 @@
 // - Verificación automática de integridad algebraica de Kardex directo, insumos y Lotes PEPS
 // ==========================================
 
-const bcrypt = require('bcryptjs');
-const db = require('../database/database');
+const { randomBytes, randomInt } = require('node:crypto');
+const { cerrarPoolsPostgres, obtenerPool } = require('../database/postgres');
+const { ejecutarMigracionesEnPool } = require('../database/migraciones-tenant');
+const { obtenerTenantPorSlug, obtenerPoolTenant } = require('../server/tenancy/tenant-registry');
+const { runQuery: run, getQuery: get, allQuery: all,
+    ejecutarConContextoTenant } = require('../server/repositories/db');
 const queries = require('../server/queries');
 
-const BCRYPT_ROUNDS = 10;
+class ErrorSeed extends Error {}
 
-function run(sql, params = []) {
-    return new Promise((resolve, reject) => {
-        db.run(sql, params, function (err) {
-            if (err) reject(err);
-            else resolve({ lastID: this.lastID, changes: this.changes });
-        });
-    });
-}
-
-function get(sql, params = []) {
-    return new Promise((resolve, reject) => {
-        db.get(sql, params, (err, row) => {
-            if (err) reject(err);
-            else resolve(row);
-        });
-    });
-}
-
-function all(sql, params = []) {
-    return new Promise((resolve, reject) => {
-        db.all(sql, params, (err, rows) => {
-            if (err) reject(err);
-            else resolve(rows);
-        });
-    });
-}
-
-async function sembrarCafeteriaCompleta() {
-    console.log('==================================================================');
-    console.log('--- INICIANDO SEED INTEGRAL DE CAFETERÍA & BAKERY (v16) ---');
-    console.log('==================================================================');
-
-    // 1. Limpieza de tablas operativas
-    console.log('[1/14] Limpiando tablas operativas previas en orden relacional...');
-    await run(`DELETE FROM detalle_movimientos_combos`);
-    await run(`DELETE FROM detalle_movimientos_modificadores`);
-    await run(`DELETE FROM combo_componentes`);
-    await run(`DELETE FROM producto_grupos_modificadores`);
-    await run(`DELETE FROM modificadores_opciones`);
-    await run(`DELETE FROM grupos_modificadores`);
-    await run(`DELETE FROM movimientos_productos_directos`);
-    await run(`DELETE FROM movimientos_insumos`);
-    await run(`DELETE FROM movimientos_pagos`);
-    await run(`DELETE FROM detalle_movimientos`);
-    await run(`DELETE FROM movimientos`);
-    await run(`DELETE FROM recetas`);
-    await run(`DELETE FROM producto_lotes`);
-    await run(`DELETE FROM productos`);
-    await run(`DELETE FROM insumos`);
-    await run(`DELETE FROM cajas`);
-    await run(`DELETE FROM categorias`);
-    await run(`DELETE FROM notificacion_destinatarios`);
-    await run(`DELETE FROM configuracion_smtp`);
+async function cargarDatos({ tenantId, password, pin }) {
+    // Las tablas del fixture se cargan desde un estado inicial, sin borrar datos.
+    console.log('[1/14] Verificando que el tenant piloto esté vacío...');
+    await run(`
+        LOCK TABLE configuracion_negocio, usuarios, cajas_fisicas, categorias, productos, insumos,
+            movimientos, cajas, configuracion_smtp, notificacion_destinatarios IN SHARE ROW EXCLUSIVE MODE
+    `);
+    const { ocupada } = await get(`
+        SELECT EXISTS (SELECT 1 FROM configuracion_negocio WHERE configurado <> 0)
+            OR EXISTS (SELECT 1 FROM usuarios WHERE rol <> 'developer' OR tenant_id <> $1)
+            OR EXISTS (SELECT 1 FROM cajas_fisicas WHERE id <> 1)
+            OR EXISTS (SELECT 1 FROM categorias)
+            OR EXISTS (SELECT 1 FROM productos)
+            OR EXISTS (SELECT 1 FROM insumos)
+            OR EXISTS (SELECT 1 FROM cajas)
+            OR EXISTS (SELECT 1 FROM configuracion_smtp)
+            OR EXISTS (SELECT 1 FROM notificacion_destinatarios) AS ocupada
+    `, [tenantId]);
+    if (ocupada) throw new ErrorSeed('La semilla requiere un tenant piloto vacío y sin configurar.');
+    await run('INSERT INTO configuracion_negocio (id) VALUES (1) ON CONFLICT (id) DO NOTHING');
 
     // 2. Configuración del negocio y módulo fiscal (Régimen General + Apps de Comida v14)
     console.log('[2/14] Configurando parámetros contables, fiscales y delivery del negocio...');
@@ -95,6 +66,7 @@ async function sembrarCafeteriaCompleta() {
              usa_vencimiento = 1,
              usa_recetas_ensamblaje = 1,
              habilita_apps_comida = 1,
+             habilita_delivery = 1,
              configurado = 1,
              nit_negocio = '1029384756',
              regimen_tributario = 'regimen_general',
@@ -106,143 +78,51 @@ async function sembrarCafeteriaCompleta() {
          WHERE id = 1`
     );
 
-    // 3. Estaciones de caja física multicaja
-    console.log('[3/14] Configurando estaciones multicaja física (Barra y Terraza)...');
-    await run(
-        `UPDATE cajas_fisicas
-         SET nombre = 'Caja 1 - Barra Principal',
-             activa = 1,
-             habilita_respaldo_fiscal = 1
-         WHERE id = 1`
-    );
-    await run(
-        `INSERT OR IGNORE INTO cajas_fisicas (id, nombre, activa, habilita_respaldo_fiscal)
-         VALUES (2, 'Caja 2 - Terraza & Take Away', 1, 1)`
-    );
+    console.log('[3/14] Creando usuarios del fixture...');
+    const carlosId = await queries.crearUsuario('carlos', password, 'propietario');
+    const sofiaId = await queries.crearUsuario('sofia', password, 'admin');
+    const luciaId = await queries.crearUsuario('lucia', pin, 'user');
+    const marcosId = await queries.crearUsuario('marcos', pin, 'user');
 
-    // 4. Usuarios del sistema con perfiles diferenciados (Clave universal: 12345678)
-    console.log('[4/14] Configurando usuarios y credenciales (Clave universal: 12345678)...');
-    const PASSWORD_UNIVERSAL = '12345678';
-    const hashUniversal = await bcrypt.hash(PASSWORD_UNIVERSAL, BCRYPT_ROUNDS);
-
-    // Propietario(a): carlos (v16)
-    let carlosId;
-    const carlos = await get(`SELECT id FROM usuarios WHERE LOWER(nombre) = 'carlos'`);
-    if (!carlos) {
-        const res = await run(
-            `INSERT INTO usuarios (nombre, pin_o_password, rol, activo, puede_registrar_respaldo_fiscal)
-             VALUES ('carlos', ?, 'propietario', 1, 1)`,
-            [hashUniversal]
-        );
-        carlosId = res.lastID;
+    // Estaciones de caja física multicaja.
+    console.log('[4/14] Configurando estaciones multicaja física (Barra y Terraza)...');
+    const barraExistente = await get('SELECT id FROM cajas_fisicas WHERE id = 1');
+    const barra = 'Caja 1 - Barra Principal';
+    let cajaBarraId = barraExistente?.id;
+    if (cajaBarraId) {
+        await run('UPDATE cajas_fisicas SET nombre = $1, activa = 1, habilita_respaldo_fiscal = 1 WHERE id = $2',
+            [barra, cajaBarraId]);
+        const { last_value, is_called } = await get('SELECT last_value, is_called FROM cajas_fisicas_id_seq');
+        if (Number(last_value) === 1 && !is_called) {
+            await run('ALTER SEQUENCE cajas_fisicas_id_seq RESTART WITH 2');
+        }
     } else {
-        await run(
-            `UPDATE usuarios
-             SET pin_o_password = ?, rol = 'propietario', activo = 1, puede_registrar_respaldo_fiscal = 1
-             WHERE id = ?`,
-            [hashUniversal, carlos.id]
-        );
-        carlosId = carlos.id;
+        cajaBarraId = await queries.crearCajaFisica(barra, sofiaId);
     }
-
-    // Admin: sofia
-    let sofiaId;
-    const sofia = await get(`SELECT id FROM usuarios WHERE LOWER(nombre) = 'sofia'`);
-    if (!sofia) {
-        const res = await run(
-            `INSERT INTO usuarios (nombre, pin_o_password, rol, activo, puede_registrar_respaldo_fiscal)
-             VALUES ('sofia', ?, 'admin', 1, 1)`,
-            [hashUniversal]
-        );
-        sofiaId = res.lastID;
-    } else {
-        await run(
-            `UPDATE usuarios
-             SET pin_o_password = ?, rol = 'admin', activo = 1, puede_registrar_respaldo_fiscal = 1
-             WHERE id = ?`,
-            [hashUniversal, sofia.id]
-        );
-        sofiaId = sofia.id;
-    }
-
-    // Cajera 1: lucia
-    let luciaId;
-    const lucia = await get(`SELECT id FROM usuarios WHERE LOWER(nombre) = 'lucia'`);
-    if (!lucia) {
-        const res = await run(
-            `INSERT INTO usuarios (nombre, pin_o_password, rol, activo, puede_registrar_respaldo_fiscal)
-             VALUES ('lucia', ?, 'user', 1, 1)`,
-            [hashUniversal]
-        );
-        luciaId = res.lastID;
-    } else {
-        await run(
-            `UPDATE usuarios
-             SET pin_o_password = ?, rol = 'user', activo = 1, puede_registrar_respaldo_fiscal = 1
-             WHERE id = ?`,
-            [hashUniversal, lucia.id]
-        );
-        luciaId = lucia.id;
-    }
-
-    // Cajero 2: marcos
-    let marcosId;
-    const marcos = await get(`SELECT id FROM usuarios WHERE LOWER(nombre) = 'marcos'`);
-    if (!marcos) {
-        const res = await run(
-            `INSERT INTO usuarios (nombre, pin_o_password, rol, activo, puede_registrar_respaldo_fiscal)
-             VALUES ('marcos', ?, 'user', 1, 1)`,
-            [hashUniversal]
-        );
-        marcosId = res.lastID;
-    } else {
-        await run(
-            `UPDATE usuarios
-             SET pin_o_password = ?, rol = 'user', activo = 1, puede_registrar_respaldo_fiscal = 1
-             WHERE id = ?`,
-            [hashUniversal, marcos.id]
-        );
-        marcosId = marcos.id;
-    }
-
-    // Developer técnico
-    const dev = await get(`SELECT id FROM usuarios WHERE LOWER(nombre) = 'developer'`);
-    if (!dev) {
-        await run(
-            `INSERT INTO usuarios (nombre, pin_o_password, rol, activo, puede_registrar_respaldo_fiscal)
-             VALUES ('developer', ?, 'developer', 1, 1)`,
-            [hashUniversal]
-        );
-    } else {
-        await run(
-            `UPDATE usuarios
-             SET pin_o_password = ?, rol = 'developer', activo = 1, puede_registrar_respaldo_fiscal = 1
-             WHERE id = ?`,
-            [hashUniversal, dev.id]
-        );
-    }
+    const cajaTerrazaId = await queries.crearCajaFisica('Caja 2 - Terraza & Take Away', sofiaId);
 
     // 5. Configuración SMTP dinámica y Destinatarios de Alertas de Cierre (v15)
     console.log('[5/14] Configurando servicio SMTP dinámico y destinatarios verificados...');
     await run(
-        `INSERT OR REPLACE INTO configuracion_smtp (id, host, puerto, secure, usuario, password, remitente_nombre, activo, actualizado_en)
-         VALUES (1, 'smtp.gmail.com', 465, 1, 'notificaciones@cafearoma.bo', 'demo-app-password-segura', 'Café Gourmet Aroma - Control POS', 1, CURRENT_TIMESTAMP)`
+        `INSERT INTO configuracion_smtp (id, host, puerto, secure, usuario, password, remitente_nombre, activo, actualizado_en)
+         VALUES (1, 'smtp.example.test', 465, 1, 'notificaciones@example.test', $1, 'Café Gourmet Aroma - Control POS', 0, CURRENT_TIMESTAMP)`,
+        [randomBytes(24).toString('hex')]
     );
 
     await run(
         `INSERT INTO notificacion_destinatarios (email, nombre, verificado, activo, creado_por, creado_en, verificado_en)
-         VALUES ('carlos.propietario@cafearoma.bo', 'Carlos Mendoza (Propietario)', 1, 1, ?, datetime('now', '-2 days'), datetime('now', '-2 days'))`,
+         VALUES ('carlos.propietario@example.test', 'Carlos Mendoza (Propietario)', 1, 1, $1, CURRENT_TIMESTAMP - INTERVAL '2 days', CURRENT_TIMESTAMP - INTERVAL '2 days')`,
         [carlosId]
     );
     await run(
         `INSERT INTO notificacion_destinatarios (email, nombre, verificado, activo, creado_por, creado_en, verificado_en)
-         VALUES ('sofia.admin@cafearoma.bo', 'Sofía Valenzuela (Administradora)', 1, 1, ?, datetime('now', '-2 days'), datetime('now', '-2 days'))`,
+         VALUES ('sofia.admin@example.test', 'Sofía Valenzuela (Administradora)', 1, 1, $1, CURRENT_TIMESTAMP - INTERVAL '2 days', CURRENT_TIMESTAMP - INTERVAL '2 days')`,
         [carlosId]
     );
     await run(
         `INSERT INTO notificacion_destinatarios (email, nombre, verificado, codigo_verificacion, codigo_expira, activo, creado_por, creado_en)
-         VALUES ('auditoria@cafearoma.bo', 'Auditoría Fiscal Externa', 0, '582914', datetime('now', '+1 day'), 1, ?, datetime('now'))`,
-        [carlosId]
+         VALUES ('auditoria@example.test', 'Auditoría Fiscal Externa', 0, $2, CURRENT_TIMESTAMP + INTERVAL '1 day', 1, $1, CURRENT_TIMESTAMP)`,
+        [carlosId, String(randomInt(100000, 1000000))]
     );
 
     // 6. Categorías del catálogo
@@ -843,7 +723,7 @@ async function sembrarCafeteriaCompleta() {
     console.log('[12/14] Simulando Turnos Históricos de Ayer:');
     console.log('   --- [A] Turno #1 (Caja 1 - Barra Principal - lucia): arqueo ciego, pagos mixtos, facturas SIAT...');
 
-    const turno1Id = await queries.abrirCaja(luciaId, 150.00, 1);
+    const turno1Id = await queries.abrirCaja(luciaId, 150.00, cajaBarraId);
 
     // Venta A: Efectivo con cambio entregado (Cappuccino con leche de almendras y shot extra + Croissant)
     console.log('       -> T1 Venta 1: Efectivo con modificadores y cálculo de cambio...');
@@ -904,7 +784,7 @@ async function sembrarCafeteriaCompleta() {
     );
     if (ventaFac && ventaFac.movimientoId) {
         await run(
-            `UPDATE movimientos SET cuf_autorizacion = 'CUF-CAF-88492019-2026', codigo_control = '5F-2A-88' WHERE id = ?`,
+            `UPDATE movimientos SET cuf_autorizacion = 'CUF-CAF-88492019-2026', codigo_control = '5F-2A-88' WHERE id = $1`,
             [ventaFac.movimientoId]
         );
     }
@@ -1036,7 +916,7 @@ async function sembrarCafeteriaCompleta() {
 
     // 13. Simulación Histórica: Turno #2 (Ayer, Caja 2 - Terraza & Take Away - marcos)
     console.log('   --- [B] Turno #2 (Caja 2 - Terraza & Take Away - marcos): Apps de Comida v14 y Reapertura Auditada...');
-    const turno2Id = await queries.abrirCaja(marcosId, 100.00, 2);
+    const turno2Id = await queries.abrirCaja(marcosId, 100.00, cajaTerrazaId);
 
     // Venta 2.1: Delivery PedidosYa (Canal externo desacoplado del arqueo de efectivo)
     console.log('       -> T2 Venta 1: Pedido delivery PedidosYa (v14)...');
@@ -1202,46 +1082,46 @@ async function sembrarCafeteriaCompleta() {
     console.log('    -> Sincronizando timestamps de turnos históricos para analíticas y Recharts...');
     await run(
         `UPDATE cajas
-         SET fecha_apertura = datetime('now', '-1 day', '07:30:00'),
-             fecha_cierre = datetime('now', '-1 day', '16:00:00')
-         WHERE id = ?`,
+         SET fecha_apertura = (((CURRENT_TIMESTAMP AT TIME ZONE 'America/La_Paz')::date - 1 + TIME '07:30:00') AT TIME ZONE 'America/La_Paz'),
+             fecha_cierre = (((CURRENT_TIMESTAMP AT TIME ZONE 'America/La_Paz')::date - 1 + TIME '16:00:00') AT TIME ZONE 'America/La_Paz')
+         WHERE id = $1`,
         [turno1Id]
     );
     await run(
         `UPDATE cajas
-         SET fecha_apertura = datetime('now', '-1 day', '11:00:00'),
-             fecha_cierre = datetime('now', '-1 day', '20:30:00')
-         WHERE id = ?`,
+         SET fecha_apertura = (((CURRENT_TIMESTAMP AT TIME ZONE 'America/La_Paz')::date - 1 + TIME '11:00:00') AT TIME ZONE 'America/La_Paz'),
+             fecha_cierre = (((CURRENT_TIMESTAMP AT TIME ZONE 'America/La_Paz')::date - 1 + TIME '20:30:00') AT TIME ZONE 'America/La_Paz')
+         WHERE id = $1`,
         [turno2Id]
     );
 
-    const movsT1 = await all(`SELECT id FROM movimientos WHERE caja_id = ? ORDER BY id ASC`, [turno1Id]);
+    const movsT1 = await all(`SELECT id FROM movimientos WHERE caja_id = $1 ORDER BY id ASC`, [turno1Id]);
     const horasT1 = ['08:15:00', '09:40:00', '11:20:00', '12:35:00', '13:50:00', '14:10:00', '14:45:00', '15:15:00'];
     for (let i = 0; i < movsT1.length; i++) {
         const hora = horasT1[i] || '15:30:00';
-        await run(`UPDATE movimientos SET fecha_hora = datetime('now', '-1 day', ?) WHERE id = ?`, [hora, movsT1[i].id]);
-        await run(`UPDATE movimientos_productos_directos SET fecha_hora = datetime('now', '-1 day', ?) WHERE movimiento_id = ?`, [hora, movsT1[i].id]);
-        await run(`UPDATE movimientos_insumos SET fecha_hora = datetime('now', '-1 day', ?) WHERE movimiento_id = ?`, [hora, movsT1[i].id]);
+        await run(`UPDATE movimientos SET fecha_hora = (((CURRENT_TIMESTAMP AT TIME ZONE 'America/La_Paz')::date - 1 + $1::time) AT TIME ZONE 'America/La_Paz') WHERE id = $2`, [hora, movsT1[i].id]);
+        await run(`UPDATE movimientos_productos_directos SET fecha_hora = (((CURRENT_TIMESTAMP AT TIME ZONE 'America/La_Paz')::date - 1 + $1::time) AT TIME ZONE 'America/La_Paz') WHERE movimiento_id = $2`, [hora, movsT1[i].id]);
+        await run(`UPDATE movimientos_insumos SET fecha_hora = (((CURRENT_TIMESTAMP AT TIME ZONE 'America/La_Paz')::date - 1 + $1::time) AT TIME ZONE 'America/La_Paz') WHERE movimiento_id = $2`, [hora, movsT1[i].id]);
     }
 
-    const movsT2 = await all(`SELECT id FROM movimientos WHERE caja_id = ? ORDER BY id ASC`, [turno2Id]);
+    const movsT2 = await all(`SELECT id FROM movimientos WHERE caja_id = $1 ORDER BY id ASC`, [turno2Id]);
     const horasT2 = ['11:45:00', '13:10:00', '14:30:00', '16:00:00', '17:20:00', '19:15:00', '20:00:00'];
     for (let i = 0; i < movsT2.length; i++) {
         const hora = horasT2[i] || '20:15:00';
-        await run(`UPDATE movimientos SET fecha_hora = datetime('now', '-1 day', ?) WHERE id = ?`, [hora, movsT2[i].id]);
-        await run(`UPDATE movimientos_productos_directos SET fecha_hora = datetime('now', '-1 day', ?) WHERE movimiento_id = ?`, [hora, movsT2[i].id]);
-        await run(`UPDATE movimientos_insumos SET fecha_hora = datetime('now', '-1 day', ?) WHERE movimiento_id = ?`, [hora, movsT2[i].id]);
+        await run(`UPDATE movimientos SET fecha_hora = (((CURRENT_TIMESTAMP AT TIME ZONE 'America/La_Paz')::date - 1 + $1::time) AT TIME ZONE 'America/La_Paz') WHERE id = $2`, [hora, movsT2[i].id]);
+        await run(`UPDATE movimientos_productos_directos SET fecha_hora = (((CURRENT_TIMESTAMP AT TIME ZONE 'America/La_Paz')::date - 1 + $1::time) AT TIME ZONE 'America/La_Paz') WHERE movimiento_id = $2`, [hora, movsT2[i].id]);
+        await run(`UPDATE movimientos_insumos SET fecha_hora = (((CURRENT_TIMESTAMP AT TIME ZONE 'America/La_Paz')::date - 1 + $1::time) AT TIME ZONE 'America/La_Paz') WHERE movimiento_id = $2`, [hora, movsT2[i].id]);
     }
 
     // Fechas de compras e inventario inicial en anteayer
-    await run(`UPDATE movimientos_insumos SET fecha_hora = datetime('now', '-2 days', '08:00:00') WHERE movimiento_id IS NULL`);
-    await run(`UPDATE movimientos_productos_directos SET fecha_hora = datetime('now', '-2 days', '08:00:00') WHERE movimiento_id IS NULL`);
+    await run(`UPDATE movimientos_insumos SET fecha_hora = (((CURRENT_TIMESTAMP AT TIME ZONE 'America/La_Paz')::date - 2 + TIME '08:00:00') AT TIME ZONE 'America/La_Paz') WHERE movimiento_id IS NULL`);
+    await run(`UPDATE movimientos_productos_directos SET fecha_hora = (((CURRENT_TIMESTAMP AT TIME ZONE 'America/La_Paz')::date - 2 + TIME '08:00:00') AT TIME ZONE 'America/La_Paz') WHERE movimiento_id IS NULL`);
 
     // 14. Turnos simultáneos ABIERTOS HOY (Caja 1 y Caja 2 en vivo)
     console.log('[13/14] Abriendo turnos simultáneos HOY para operación multicaja en vivo...');
 
     // Turno #3: Caja 1 - Barra Principal (carlos)
-    const turno3Id = await queries.abrirCaja(carlosId, 150.00, 1);
+    const turno3Id = await queries.abrirCaja(carlosId, 150.00, cajaBarraId);
     console.log(`    -> Turno #3 ABIERTO en Caja 1 (Barra Principal) a nombre de Carlos (Propietario)...`);
 
     // Venta hoy 3.1: Combo Ejecutivo Almuerzo por QR
@@ -1288,7 +1168,7 @@ async function sembrarCafeteriaCompleta() {
 
     // Venta hoy 3.3: Trazabilidad FIFO y selección manual de lote (v12)
     const loteGalletaReciente = await get(
-        `SELECT id, fecha_vencimiento, stock FROM producto_lotes WHERE producto_id = ? ORDER BY fecha_vencimiento DESC LIMIT 1`,
+        `SELECT id, fecha_vencimiento, stock FROM producto_lotes WHERE producto_id = $1 ORDER BY fecha_vencimiento DESC LIMIT 1`,
         [mapaProductos['Galletas de Avena Artesanales']]
     );
 
@@ -1313,7 +1193,7 @@ async function sembrarCafeteriaCompleta() {
     );
 
     // Turno #4: Caja 2 - Terraza & Take Away (marcos)
-    const turno4Id = await queries.abrirCaja(marcosId, 100.00, 2);
+    const turno4Id = await queries.abrirCaja(marcosId, 100.00, cajaTerrazaId);
     console.log(`    -> Turno #4 ABIERTO en Caja 2 (Terraza & Take Away) a nombre de Marcos (Cajero)...`);
 
     // Venta hoy 4.1: Pedido Delivery PedidosYa entrante
@@ -1371,7 +1251,7 @@ async function sembrarCafeteriaCompleta() {
                 COUNT(pl.id) as cantidad_lotes
          FROM productos p
          LEFT JOIN producto_lotes pl ON p.id = pl.producto_id AND pl.activo = 1
-         WHERE p.tipo_inventario = 'directo' AND p.fecha_vencimiento IS NOT NULL
+         WHERE p.tipo_inventario = 'directo' AND EXISTS (SELECT 1 FROM producto_lotes l WHERE l.producto_id = p.id)
          GROUP BY p.id`
     );
 
@@ -1389,39 +1269,50 @@ async function sembrarCafeteriaCompleta() {
     console.log(`[Lotes PEPS] Válido: ${lotesOk} | Productos con lotes: ${checkLotes.length} | Descuadres: ${descuadresLotes}`);
 
     if (!checkKardexDirecto.integridadOk || !checkKardexInsumos.integridadOk || !lotesOk) {
-        console.error('ADVERTENCIA: Se detectaron descuadres en la verificación de Kardex / Lotes.');
+        throw new ErrorSeed('La auditoría de Kardex o lotes detectó descuadres. Se revirtió la semilla.');
     } else {
         console.log('✓ Kardex dual y trazabilidad de lotes PEPS auditados y matemáticamente consistentes al 100% (0 descuadres).');
     }
 
-    console.log('==================================================================');
-    console.log(' SEED INTEGRAL v16 COMPLETADO EXITOSAMENTE');
-    console.log('==================================================================');
-    console.log(`- Establecimiento: Café Gourmet & Bakery Aroma`);
-    console.log(`- Régimen Fiscal: Régimen General (IVA 13%, IT 3%, Base: todas_las_ventas)`);
-    console.log(`- Respaldo RCV SIAT: CUF, Código de control y Facturas de compras/egresos`);
-    console.log(`- Servicio SMTP: Gmail SSL/TLS activo con destinatarios verificados`);
-    console.log(`- Canales de Venta: Local, Delivery Propio (Mototaxi), PedidosYa y Yango Food`);
-    console.log(`- Estaciones Multicaja: 2 Cajas Físicas activas con turnos simultáneos`);
-    console.log(`- Tipos de Catálogo: Libre (servicios), Directo (reventa), Receta (elaborados) y Combo (promociones)`);
-    console.log(`- Trazabilidad de Lotes: Multi-lotes con control PEPS / FIFO y selección manual`);
-    console.log(`- Turno #1 (Ayer, CERRADO): Barra Principal operado por Lucía (cuadrado sin novedades)`);
-    console.log(`- Turno #2 (Ayer, CERRADO & REABIERTO): Terraza operado por Marcos con apps de delivery y auditoría`);
-    console.log(`- Turno #3 (Hoy, ABIERTO): Barra Principal a nombre de Carlos (Propietario) con ventas en curso`);
-    console.log(`- Turno #4 (Hoy, ABIERTO): Terraza a nombre de Marcos (Cajero) con pedidos online en curso`);
-    console.log('------------------------------------------------------------------');
-    console.log('Credenciales de acceso para pruebas:');
-    console.log('  - Propietario(a): carlos   | Clave: 12345678');
-    console.log('  - Admin:          sofia    | Clave: 12345678');
-    console.log('  - Cajera 1:       lucia    | Clave: 12345678');
-    console.log('  - Cajero 2:       marcos   | Clave: 12345678');
-    console.log('  - Developer:      developer| Clave: 12345678');
-    console.log('==================================================================\n');
 }
 
-sembrarCafeteriaCompleta()
-    .then(() => process.exit(0))
-    .catch((err) => {
-        console.error('\n[Error Fatal en Seed]', err);
-        process.exit(1);
+async function sembrarCafeteria() {
+    const password = process.env.CAFETERIA_SEED_PASSWORD;
+    const pin = process.env.CAFETERIA_SEED_PIN;
+    if (!password || !pin) {
+        throw new ErrorSeed('Configura CAFETERIA_SEED_PASSWORD y CAFETERIA_SEED_PIN para cargar el fixture.');
+    }
+    const tenant = await obtenerTenantPorSlug('cafeteria');
+    if (!tenant) throw new ErrorSeed('El tenant piloto cafeteria debe estar registrado y activo.');
+    const pool = await obtenerPoolTenant(tenant);
+    if (pool === obtenerPool(process.env.CONTROL_DATABASE_URL)) {
+        throw new ErrorSeed('El fixture requiere una base operativa separada del registro de control.');
+    }
+    const { rows: [base] } = await pool.query(
+        "SELECT current_database() AS nombre, to_regclass('control_tenants') IS NOT NULL AS control"
+    );
+    if (base.control || base.nombre !== tenant.database_name) {
+        throw new ErrorSeed('La conexión operativa no coincide con la base registrada para cafeteria.');
+    }
+    await ejecutarMigracionesEnPool(pool, async (client) => {
+        const { rows: [{ version }] } = await client.query('SELECT MAX(version) AS version FROM schema_migrations');
+        if (tenant.schema_version !== version) {
+            throw new ErrorSeed('Aprovisiona el tenant piloto con npm run provision:tenant -- cafeteria antes de sembrar.');
+        }
+        const contexto = { tenantId: tenant.tenant_id, tenant, pool, client };
+        await ejecutarConContextoTenant(contexto, () => cargarDatos({ tenantId: tenant.tenant_id, password, pin }));
     });
+}
+
+if (require.main === module) {
+    sembrarCafeteria()
+        .finally(cerrarPoolsPostgres)
+        .then(() => console.log('Semilla integral de cafeteria confirmada en PostgreSQL.'))
+        .catch((error) => {
+            const codigo = /^[A-Z0-9]{5}$/.test(error.code) ? ` (${error.code})` : '';
+            console.error(error instanceof ErrorSeed ? error.message : `Falló la semilla PostgreSQL${codigo}.`);
+            process.exitCode = 1;
+        });
+}
+
+module.exports = { sembrarCafeteria };

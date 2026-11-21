@@ -2,6 +2,11 @@
 // MÓDULO DE NOTIFICACIONES POR CORREO (SMTP / Nodemailer)
 // ==========================================
 const nodemailer = require('nodemailer');
+const {
+    obtenerConfiguracionSmtp,
+    listarCorreosNotificacionVerificados,
+    obtenerNombreNegocioNotificaciones
+} = require('../repositories/notificaciones.repo');
 
 let transporterOverride = null;
 
@@ -9,20 +14,11 @@ function configurarTransporterPrueba(transporter = null) {
     transporterOverride = transporter;
 }
 
-function obtenerConfiguracionEmail() {
-    let dbSmtp = null;
-    let dbDestinatarios = [];
-    try {
-        const { obtenerInstanciaDrizzle } = require('../../database/drizzle');
-        const { sqlite } = obtenerInstanciaDrizzle();
-        dbSmtp = sqlite.prepare('SELECT * FROM configuracion_smtp WHERE id = 1').get();
-        const filas = sqlite.prepare('SELECT email FROM notificacion_destinatarios WHERE verificado = 1 AND activo = 1').all();
-        if (filas && filas.length > 0) {
-            dbDestinatarios = filas.map(f => String(f.email || '').trim()).filter(Boolean);
-        }
-    } catch {
-        // En caso de inicialización temprana o migraciones
-    }
+async function obtenerConfiguracionEmail() {
+    const [dbSmtp, dbDestinatarios] = await Promise.all([
+        obtenerConfiguracionSmtp(),
+        listarCorreosNotificacionVerificados()
+    ]);
 
     const host = (dbSmtp && dbSmtp.host && String(dbSmtp.host).trim())
         ? String(dbSmtp.host).trim()
@@ -43,9 +39,7 @@ function obtenerConfiguracionEmail() {
         ? String(dbSmtp.remitente_nombre).trim()
         : '';
 
-    const destinatarios = dbDestinatarios.length > 0
-        ? dbDestinatarios.join(', ')
-        : String(process.env.EMAIL_DESTINATARIO_CIERRE || '').trim();
+    const destinatarios = dbDestinatarios.join(', ');
 
     const remitente = remitenteNombre
         ? `"${remitenteNombre}" <${user || 'pos@local.test'}>`
@@ -56,10 +50,12 @@ function obtenerConfiguracionEmail() {
     return { host, port, secure, user, pass, destinatarios, remitente, remitenteNombre, activo };
 }
 
-function estaEmailConfigurado() {
-    if (transporterOverride) return true;
-    const cfg = obtenerConfiguracionEmail();
-    return Boolean(cfg.user && cfg.pass && cfg.destinatarios);
+function tieneConfiguracionEmail(cfg) {
+    return Boolean((cfg.user && cfg.pass && cfg.destinatarios) || transporterOverride);
+}
+
+async function estaEmailConfigurado() {
+    return tieneConfiguracionEmail(await obtenerConfiguracionEmail());
 }
 
 function enmascararEmail(emailStr) {
@@ -77,11 +73,10 @@ function enmascararEmail(emailStr) {
         .join(', ');
 }
 
-function verificarEstadoEmail() {
-    const cfg = obtenerConfiguracionEmail();
-    const configurado = Boolean((cfg.user && cfg.pass && cfg.destinatarios) || transporterOverride);
+async function verificarEstadoEmail() {
+    const cfg = await obtenerConfiguracionEmail();
     return {
-        configurado,
+        configurado: tieneConfiguracionEmail(cfg),
         host: cfg.host,
         port: cfg.port,
         user: cfg.user ? enmascararEmail(cfg.user) : '',
@@ -89,11 +84,10 @@ function verificarEstadoEmail() {
     };
 }
 
-function crearTransporter() {
+function crearTransporter(cfg) {
     if (transporterOverride) {
         return transporterOverride;
     }
-    const cfg = obtenerConfiguracionEmail();
     if (!cfg.user || !cfg.pass) {
         throw new Error('Credenciales SMTP no configuradas. Verifica SMTP_USER y SMTP_PASS en .env.local');
     }
@@ -362,7 +356,8 @@ function construirHtmlCierre({ caja, negocio, metricas }) {
 
 async function enviarNotificacionCierreCaja(cajaId) {
     try {
-        if (!estaEmailConfigurado()) {
+        const cfg = await obtenerConfiguracionEmail();
+        if (!tieneConfiguracionEmail(cfg)) {
             console.log(`[Mailer] Notificación de cierre omitida: Credenciales SMTP o destinatarios no configurados.`);
             return { enviado: false, motivo: 'no_configurado' };
         }
@@ -375,36 +370,17 @@ async function enviarNotificacionCierreCaja(cajaId) {
         }
 
         const bufferExcel = await generarReporteExcel(cajaId, { usuarioGenerador: datos.caja.cajero_nombre || 'Sistema Cierre' });
-        const cfg = obtenerConfiguracionEmail();
-        const transporter = crearTransporter();
+        const transporter = crearTransporter(cfg);
 
         const nombreNegocio = datos.negocio?.nombre_negocio || 'POS';
         const asunto = `📊 Cierre de Caja - Turno #${datos.caja.id} (${datos.caja.caja_nombre}) - ${nombreNegocio}`;
         const remitente = cfg.remitente || `"${nombreNegocio}" <${cfg.user || 'pos@local.test'}>`;
 
-        // Despachar a todos los destinatarios activos y verificados en BD (o fallback a cfg.destinatarios)
-        let listaDestinatarios = [];
-        try {
-            const { obtenerInstanciaDrizzle } = require('../../database/drizzle');
-            const { sqlite } = obtenerInstanciaDrizzle();
-            const filas = sqlite.prepare('SELECT email FROM notificacion_destinatarios WHERE verificado = 1 AND activo = 1').all();
-            if (filas && filas.length > 0) {
-                listaDestinatarios = filas.map(f => String(f.email || '').trim()).filter(Boolean);
-            }
-        } catch (errDb) {
-            console.warn('[Mailer] Error al consultar destinatarios verificados en BD:', errDb.message);
-        }
-
-        if (listaDestinatarios.length === 0 && cfg.destinatarios) {
-            listaDestinatarios = cfg.destinatarios.split(',').map(e => e.trim()).filter(Boolean);
-        }
-
-        if (listaDestinatarios.length === 0) {
+        const destino = cfg.destinatarios;
+        if (!destino) {
             console.log(`[Mailer] Notificación de cierre omitida: No hay destinatarios verificados.`);
             return { enviado: false, motivo: 'sin_destinatarios' };
         }
-
-        const destino = listaDestinatarios.join(', ');
 
         const fechaSufijo = datos.caja.fecha_cierre
             ? datos.caja.fecha_cierre.split(' ')[0].replace(/[^0-9-]/g, '')
@@ -510,23 +486,10 @@ async function enviarCodigoVerificacionEmail({ email, codigo, nombreNegocio }) {
             throw new Error('Debe proporcionar el código de verificación.');
         }
 
-        let negocioFinal = nombreNegocio;
-        if (!negocioFinal) {
-            try {
-                const { obtenerInstanciaDrizzle } = require('../../database/drizzle');
-                const { sqlite } = obtenerInstanciaDrizzle();
-                const configNeg = sqlite.prepare('SELECT nombre_negocio FROM configuracion_negocio WHERE id = 1').get();
-                if (configNeg && configNeg.nombre_negocio) {
-                    negocioFinal = configNeg.nombre_negocio;
-                }
-            } catch {
-                negocioFinal = 'Sistema POS';
-            }
-        }
-        negocioFinal = negocioFinal || 'Sistema POS';
+        const negocioFinal = nombreNegocio || await obtenerNombreNegocioNotificaciones() || 'Sistema POS';
 
-        const cfg = obtenerConfiguracionEmail();
-        const transporter = crearTransporter();
+        const cfg = await obtenerConfiguracionEmail();
+        const transporter = crearTransporter(cfg);
 
         const remitente = cfg.remitente || `"${negocioFinal}" <${cfg.user || 'pos@local.test'}>`;
         const asunto = `🔐 Código de Verificación: ${codigoLimpio} - ${negocioFinal}`;
@@ -553,17 +516,17 @@ async function enviarCodigoVerificacionEmail({ email, codigo, nombreNegocio }) {
 
 async function enviarEmailPrueba(destinatarioAlternativo = null) {
     try {
-        const cfg = obtenerConfiguracionEmail();
+        const cfg = await obtenerConfiguracionEmail();
         const destino = String(destinatarioAlternativo || cfg.destinatarios || '').trim();
 
         if (!transporterOverride && (!cfg.user || !cfg.pass)) {
             throw new Error('Debes definir las credenciales SMTP en la configuración o en el archivo .env.local');
         }
         if (!destino) {
-            throw new Error('No hay ningún destinatario configurado. Registra un destinatario en la configuración o define EMAIL_DESTINATARIO_CIERRE.');
+            throw new Error('No hay ningún destinatario configurado. Registra un destinatario en la configuración.');
         }
 
-        const transporter = crearTransporter();
+        const transporter = crearTransporter(cfg);
 
         const info = await transporter.sendMail({
             from: cfg.remitente || `"Sistema POS" <${cfg.user || 'pos@local.test'}>`,

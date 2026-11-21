@@ -1,20 +1,13 @@
 /**
  * Resolución de tenant exclusivamente en servidor.
  *
- * LOCAL_SINGLE_TENANT fija el tenant por configuración de la instalación.
  * AWS_MULTI_TENANT deriva el slug del host validado por el servidor y consulta
  * el registro central; nunca usa tenant_id enviado en JSON por el cliente.
  */
-const { obtenerTenantPorSlug, obtenerTenantPorId } = require('./tenant-registry');
+const { obtenerTenantPorSlug } = require('./tenant-registry');
 const { AsyncLocalStorage } = require('async_hooks');
 
 const almacenamientoTenant = new AsyncLocalStorage();
-
-const TENANT_ID_LOCAL_POR_DEFECTO = '00000000-0000-4000-8000-000000000001';
-
-function obtenerModoTenancy() {
-    return String(process.env.TENANCY_MODE || 'LOCAL_SINGLE_TENANT').trim().toUpperCase();
-}
 
 function obtenerHost(request) {
     const host = request && request.headers && typeof request.headers.get === 'function'
@@ -40,25 +33,14 @@ function obtenerSlugDesdeHost(host) {
 }
 
 async function obtenerContextoTenantDesdeRequest(request) {
-    const modo = obtenerModoTenancy();
-
-    if (modo === 'LOCAL_SINGLE_TENANT') {
-        const tenantId = String(process.env.LOCAL_TENANT_ID || TENANT_ID_LOCAL_POR_DEFECTO).trim();
-        const tenant = process.env.CONTROL_DATABASE_URL
-            ? await obtenerTenantPorId(tenantId)
-            : { tenant_id: tenantId, slug: process.env.LOCAL_TENANT_SLUG || 'local' };
-        if (!tenant) throw new Error('El tenant local no existe o está inactivo.');
-        return { modo, tenantId: tenant.tenant_id, tenant };
-    }
-
-    if (modo !== 'AWS_MULTI_TENANT') {
-        throw new Error(`TENANCY_MODE no soportado: ${modo}.`);
+    if (String(process.env.TENANCY_MODE || '').trim().toUpperCase() !== 'AWS_MULTI_TENANT') {
+        throw new Error('TENANCY_MODE debe ser AWS_MULTI_TENANT.');
     }
 
     const slug = obtenerSlugDesdeHost(obtenerHost(request));
     const tenant = await obtenerTenantPorSlug(slug);
     if (!tenant) throw new Error('Negocio no encontrado o inactivo.');
-    return { modo, tenantId: tenant.tenant_id, tenant };
+    return { tenantId: tenant.tenant_id, tenant };
 }
 
 function tenantDelPayload(payload) {
@@ -67,10 +49,15 @@ function tenantDelPayload(payload) {
     return tenantId;
 }
 
-function ejecutarConContextoTenant(contexto, fn) {
-    if (!contexto || !contexto.tenantId) {
-        throw new Error('No se puede ejecutar una operación sin contexto de tenant.');
+function validarContextoTenant(contexto) {
+    if (!contexto?.tenantId || contexto.tenantId !== contexto.tenant?.tenant_id) {
+        throw new Error('Contexto de tenant obligatorio para acceder a PostgreSQL.');
     }
+    return contexto;
+}
+
+function ejecutarConContextoTenant(contexto, fn) {
+    validarContextoTenant(contexto);
     return almacenamientoTenant.run(contexto, fn);
 }
 
@@ -78,12 +65,15 @@ function obtenerContextoTenantActual() {
     return almacenamientoTenant.getStore() || null;
 }
 
+function exigirContextoTenant() {
+    return validarContextoTenant(obtenerContextoTenantActual());
+}
+
 module.exports = {
-    TENANT_ID_LOCAL_POR_DEFECTO,
-    obtenerModoTenancy,
     obtenerSlugDesdeHost,
     obtenerContextoTenantDesdeRequest,
     tenantDelPayload,
     ejecutarConContextoTenant,
-    obtenerContextoTenantActual
+    obtenerContextoTenantActual,
+    exigirContextoTenant
 };

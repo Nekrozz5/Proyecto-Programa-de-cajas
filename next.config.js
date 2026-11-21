@@ -10,7 +10,7 @@ if (process.env.ALLOWED_ORIGINS) {
 }
 
 const nextConfig = {
-  serverExternalPackages: ['sqlite3', 'better-sqlite3', 'bcryptjs', 'exceljs', 'nodemailer'],
+  serverExternalPackages: ['bcryptjs', 'exceljs', 'nodemailer'],
   experimental: {
     serverActions: {
       allowedOrigins,

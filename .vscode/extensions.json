@@ -1,6 +1,5 @@
 {
   "recommendations": [
-    "qwtel.sqlite-viewer",
     "dbaeumer.vscode-eslint",
     "esbenp.prettier-vscode"
   ]

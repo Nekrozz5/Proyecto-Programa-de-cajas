@@ -1,11 +1,15 @@
 const { getQuery, allQuery, enTransaccion } = require('./db');
+const { obtenerContextoTenantActual } = require('../tenancy/tenant-context');
 
 const UUID_TENANT = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-function exigirTenantId(tenantId) {
-    const valor = String(tenantId || '').trim();
-    if (!UUID_TENANT.test(valor)) throw new Error('Contexto de tenant inválido o ausente.');
-    return valor;
+function resolverTenant(tenantId) {
+    const contexto = obtenerContextoTenantActual();
+    const tenant = contexto?.tenantId;
+    if (!UUID_TENANT.test(tenant) || (tenantId != null && tenantId !== tenant)) {
+        throw new Error('Contexto de tenant inválido o ausente.');
+    }
+    return tenant;
 }
 
 function validarClavePublica(clavePublica) {
@@ -26,43 +30,37 @@ function validarNombre(nombre) {
 }
 
 async function emparejarDispositivo({ tenantId, administradorId, nombre, clavePublica }) {
-    const tenant = exigirTenantId(tenantId);
+    const tenant = resolverTenant(tenantId);
     const adminId = Number(administradorId);
     const nombreValido = validarNombre(nombre);
     const claveValida = validarClavePublica(clavePublica);
 
-    if (!Number.isInteger(adminId) || adminId <= 0) throw new Error('Administrador inválido.');
+    if (!Number.isSafeInteger(adminId) || adminId <= 0) throw new Error('Administrador inválido.');
 
     return enTransaccion(async () => {
         const administrador = await getQuery(`
             SELECT id, tenant_id, rol, activo
             FROM usuarios
-            WHERE tenant_id = ? AND id = ? AND activo = 1
+            WHERE tenant_id = $1 AND id = $2 AND activo = 1
             LIMIT 1
         `, [tenant, adminId]);
         if (!administrador || !['admin', 'propietario', 'developer'].includes(administrador.rol)) {
             throw new Error('El administrador no existe, está inactivo o no tiene permisos.');
         }
 
-        const existente = await getQuery(`
-            SELECT id, estado
-            FROM dispositivos_pos
-            WHERE tenant_id = ? AND clave_publica = ?
-            LIMIT 1
-        `, [tenant, claveValida]);
-        if (existente) throw new Error('La clave pública ya está registrada en este tenant.');
-
         const pendiente = await getQuery(`
             INSERT INTO dispositivos_pos
                 (tenant_id, nombre, clave_publica, estado, creado_por)
-            VALUES (?, ?, ?, 'pendiente', ?)
-            RETURNING id, tenant_id, nombre, clave_publica, estado, creado_en
+            VALUES ($1, $2, $3, 'pendiente', $4)
+            ON CONFLICT (tenant_id, clave_publica) DO NOTHING
+            RETURNING id
         `, [tenant, nombreValido, claveValida, adminId]);
+        if (!pendiente) throw new Error('La clave pública ya está registrada en este tenant.');
 
         const activo = await getQuery(`
             UPDATE dispositivos_pos
             SET estado = 'activo'
-            WHERE id = ? AND tenant_id = ? AND estado = 'pendiente'
+            WHERE id = $1 AND tenant_id = $2 AND estado = 'pendiente'
             RETURNING id, tenant_id, nombre, clave_publica, estado, creado_en
         `, [pendiente.id, tenant]);
         if (!activo || activo.estado !== 'activo') {
@@ -81,12 +79,12 @@ async function emparejarDispositivo({ tenantId, administradorId, nombre, clavePu
 }
 
 async function obtenerEstadoDispositivo({ tenantId, clavePublica }) {
-    const tenant = exigirTenantId(tenantId);
+    const tenant = resolverTenant(tenantId);
     const clave = validarClavePublica(clavePublica);
     const dispositivo = await getQuery(`
         SELECT id, tenant_id, nombre, clave_publica, estado, creado_en, ultimo_acceso
         FROM dispositivos_pos
-        WHERE tenant_id = ? AND clave_publica = ?
+        WHERE tenant_id = $1 AND clave_publica = $2
         LIMIT 1
     `, [tenant, clave]);
     if (!dispositivo) return null;
@@ -101,13 +99,13 @@ async function obtenerEstadoDispositivo({ tenantId, clavePublica }) {
     };
 }
 
-async function listarDispositivos({ tenantId }) {
-    const tenant = exigirTenantId(tenantId);
+async function listarDispositivos({ tenantId } = {}) {
+    const tenant = resolverTenant(tenantId);
     const dispositivos = await allQuery(`
         SELECT id, tenant_id, nombre, estado, creado_en, ultimo_acceso, revocado_en
         FROM dispositivos_pos
-        WHERE tenant_id = ?
-        ORDER BY CASE estado WHEN 'activo' THEN 1 WHEN 'pendiente' THEN 2 ELSE 3 END, nombre COLLATE NOCASE ASC
+        WHERE tenant_id = $1
+        ORDER BY CASE estado WHEN 'activo' THEN 1 WHEN 'pendiente' THEN 2 ELSE 3 END, LOWER(nombre) ASC, id ASC
     `, [tenant]);
     return dispositivos.map((dispositivo) => ({
         id: dispositivo.id,
@@ -121,16 +119,16 @@ async function listarDispositivos({ tenantId }) {
 }
 
 async function revocarDispositivo({ tenantId, dispositivoId, administradorId }) {
-    const tenant = exigirTenantId(tenantId);
+    const tenant = resolverTenant(tenantId);
     const id = Number(dispositivoId);
     const adminId = Number(administradorId);
-    if (!Number.isInteger(id) || id <= 0) throw new Error('Dispositivo inválido.');
-    if (!Number.isInteger(adminId) || adminId <= 0) throw new Error('Administrador inválido.');
+    if (!Number.isSafeInteger(id) || id <= 0) throw new Error('Dispositivo inválido.');
+    if (!Number.isSafeInteger(adminId) || adminId <= 0) throw new Error('Administrador inválido.');
 
     return enTransaccion(async () => {
         const administrador = await getQuery(`
             SELECT id, rol, activo FROM usuarios
-            WHERE tenant_id = ? AND id = ? AND activo = 1 LIMIT 1
+            WHERE tenant_id = $1 AND id = $2 AND activo = 1 LIMIT 1
         `, [tenant, adminId]);
         if (!administrador || !['admin', 'propietario', 'developer'].includes(administrador.rol)) {
             throw new Error('El administrador no existe, está inactivo o no tiene permisos.');
@@ -139,7 +137,7 @@ async function revocarDispositivo({ tenantId, dispositivoId, administradorId }) 
         const revocado = await getQuery(`
             UPDATE dispositivos_pos
             SET estado = 'revocado', revocado_en = CURRENT_TIMESTAMP
-            WHERE tenant_id = ? AND id = ? AND estado <> 'revocado'
+            WHERE tenant_id = $1 AND id = $2 AND estado <> 'revocado'
             RETURNING id, nombre, estado, revocado_en
         `, [tenant, id]);
         if (!revocado) throw new Error('La terminal no existe o ya fue revocada.');

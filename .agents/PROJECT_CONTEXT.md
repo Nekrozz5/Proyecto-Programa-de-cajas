@@ -14,9 +14,9 @@ Ante **CUALQUIER** solicitud de investigación, análisis, planificación, nueva
    - **Si existe desajuste de modelo:** **DETENERSE INMEDIATAMENTE**. No elaborar la solución en ese turno. Explicar por qué el modelo actual no es óptimo, sugerir una alternativa disponible en Codex y **solicitar confirmación expresa** antes de comenzar.
 
 ## 1. Arquitectura y Punteros de Contexto
-- **Stack Principal:** Next.js (App Router), Node.js, Tailwind CSS, Shadcn UI (`components/ui/`), SQLite3 local (`caja.db`) y Drizzle ORM (`database/schema.js`).
-- **Persistencia y Concurrencia:** SQLite en modo WAL (`PRAGMA journal_mode = WAL`), claves foráneas activas (`PRAGMA foreign_keys = ON`), timeout concurrente de 5000ms (`PRAGMA busy_timeout = 5000`) y ruta configurable vía `DATABASE_PATH` en `database/database.js`.
-- **Esquema Tipado y Migraciones:** 20 tablas definidas en `database/schema.js`. Toda mutación al esquema se versiona transaccionalmente en `database/migraciones.js` mediante `PRAGMA user_version` con respaldo automático previo (`VACUUM INTO`).
+- **Stack Principal:** Next.js (App Router), Node.js, Tailwind CSS y Shadcn UI (`components/ui/`). PostgreSQL es el único motor de persistencia y `pg` es su cliente.
+- **Persistencia y Concurrencia:** `database/postgres.js` administra pools por URL. El registro central vive en la base de control. Cada negocio tiene su propia base operativa y las transacciones se vinculan al contexto del tenant.
+- **Esquema y Migraciones:** `database/migraciones-control.js` configura el registro central. `database/migraciones-tenant.js` aplica cambios operativos de forma transaccional y registra cada versión en `schema_migrations`.
 - **Seguridad y Sesiones (`server/lib/sesion.js`):** JWT HttpOnly (`jose`), hash bcrypt (salt 10). `INSTANCE_BOOT_ID` para invalidación inmediata de tokens administrativos al reiniciar servidor. TTL: `developer` (15 min), `propietario`/`admin` (30 min), `user` (8 h). Rate limiting dual (IP con `cf-connecting-ip`/`TRUST_PROXY` y cuenta).
 - **Operación Cloud (AWS):** Despliegue en AWS con soporte para acceso desde PC y dispositivos móviles con cookies adaptativas y blindaje cliente (`notranslate` en `app/layout.js`, `Cache-Control: no-store` en endpoints de caja).
 - **Punteros Documentales:**
@@ -65,7 +65,7 @@ Ante **CUALQUIER** solicitud de investigación, análisis, planificación, nueva
   - Régimen `regimen_general`: cálculo de IVA Débito/Crédito e IT configurable sobre todas las ventas o solo facturadas.
 - **Kardex Dual y Trazabilidad PEPS:**
   - Registro cronológico en `movimientos_productos_directos` y `movimientos_insumos` con `stock_resultante` y `costo_promedio_resultante`.
-  - Lotes perecederos en `producto_lotes`: política de salida automática PEPS/FIFO (`ORDER BY fecha_vencimiento ASC, id ASC`) con validación atómica `WHERE stock >= ?`.
+  - Lotes perecederos en `producto_lotes`: política de salida automática PEPS/FIFO (`ORDER BY fecha_vencimiento ASC, id ASC`) con validación atómica `WHERE stock >= $1`.
 - **Delivery y Canales Externos:**
   - Registro de canal (`local`, `delivery_propio`, `pedidos_ya`, `yango`) y métodos de pago de apps desacoplados del arqueo de efectivo.
 - **Alertas por Correo SMTP:**
@@ -73,12 +73,12 @@ Ante **CUALQUIER** solicitud de investigación, análisis, planificación, nueva
 
 ## 3. Restricciones Técnicas Operativas
 - **Atomicidad en Escrituras:** Toda mutación de datos debe residir dentro de `transaccion(async (dbTx) => { ... })` (`server/repositories/db.js`).
-- **Prevención de Stock Negativo:** Descontar existencias con cláusulas atómicas verificables (ej. `WHERE stock >= ?`).
+- **Prevención de Stock Negativo:** Descontar existencias con cláusulas atómicas verificables (ej. `WHERE stock >= $1`).
 - **Resolución de Sesión en Servidor:** Autorización resuelta exclusivamente desde el token validado en servidor (`server/lib/sesion.js`), nunca por parámetros enviados desde el cliente.
 - **Políticas de Contraseñas:** Hash bcrypt (mínimo 10 rounds). Mínimo 8 caracteres para administradores/developers y 4 para cajeros. Prohibidas credenciales fijas en código.
 - **Validación de Caja Abierta y Valores Monetarios:** Movimientos solo permitidos en cajas en estado `'abierta'`. Montos y cantidades monetarias estrictamente mayores a cero (`> 0`).
-- **Manejo de Fechas:** Almacenamiento en UTC (`CURRENT_TIMESTAMP`). Consultas y filtros orientados al usuario siempre con `'localtime'` en SQLite (ej. `datetime(fecha_hora, 'localtime')`).
-- **Mutación del Esquema:** Modificaciones exclusivas vía `database/migraciones.js` incrementando `PRAGMA user_version`. Si un rediseño local en desarrollo es incompatible, está autorizado el reinicio limpio de `caja.db`.
+- **Manejo de Fechas:** Los instantes se almacenan como `TIMESTAMPTZ`. Los períodos de reporte y la presentación al usuario usan `America/La_Paz`.
+- **Mutación del Esquema:** Agregar una migración para cada cambio operativo en `database/migraciones-tenant.js`. Los cambios del registro central se aplican en `database/migraciones-control.js`.
 
 ## 4. Flujo de Trabajo y Modos de Ejecución [ON-DEMAND-ONLY]
 Para maximizar la densidad de información y el ahorro de tokens, las siguientes tareas se rigen por activación estricta bajo demanda:
@@ -96,17 +96,22 @@ Para maximizar la densidad de información y el ahorro de tokens, las siguientes
     3. **Detección Activa de Desajuste y Confirmación:** Si el modelo configurado es excesivo o insuficiente, advertir el desajuste, sugerir una alternativa realmente disponible y solicitar confirmación antes de proceder.
 
 ## 5. Comandos del Entorno
-- **Desarrollo:** `npm run dev` (abre en `http://localhost:3000`).
+- **Desarrollo:** `npm run dev` y abrir el subdominio del tenant, por ejemplo `http://cafeteria.localhost:3000`.
 - **Compilación y Producción:** `npm run build` | `npm run start` | `pm2 start ecosystem.config.js`.
-- **Respaldo Atómico SQLite:** `npm run backup` (ejecuta `VACUUM INTO backups/`).
+- **Respaldo PostgreSQL:** `npm run backup -- <slug>` usa `pg_dump` para generar un archivo en `backups/`.
 - **Carga de Datos de Prueba:** `npm run seed` (lotes PEPS, combos, Kardex dual, régimen fiscal).
 - **Simulación Integral E2E:** `npm run simular`.
+- **Pruebas completas:** `npm run test:all` con `POSTGRES_TEST_URL` y un rol con permiso `CREATEDB`.
 
 ## 6. Variables Críticas de Entorno (`.env.local`)
 ```env
 NODE_ENV=development
 PORT=3000
-DATABASE_PATH=./caja.db
+TENANCY_MODE=AWS_MULTI_TENANT
+TENANT_HOST_SUFFIX=localhost
+CONTROL_DATABASE_URL=postgresql://usuario:contraseña@localhost:5432/control_plane
+TENANT_DATABASE_URLS_JSON={"cafeteria":"postgresql://usuario:contraseña@localhost:5432/negocio_001"}
+PG_SSL=false
 SESSION_SECRET=<hash_hex_min_32_chars>
 DEVELOPER_PASSWORD=<clave_acceso_tecnico>
 

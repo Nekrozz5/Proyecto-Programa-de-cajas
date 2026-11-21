@@ -19,6 +19,11 @@ const {
     recalcularCostoCombosQueContienenProducto
 } = require('./catalogo.repo');
 
+const redondearSql = (expresion, decimales) => `ROUND(CAST(${expresion} AS numeric), ${decimales})::double precision`;
+const horaLocal = (columna) => `(${columna} AT TIME ZONE 'America/La_Paz')`;
+const fechaLocal = (columna) => `${horaLocal(columna)}::date`;
+const fechaHoraLocal = (columna) => `TO_CHAR(${horaLocal(columna)}, 'YYYY-MM-DD HH24:MI:SS')`;
+
 async function crearInsumo(nombre, unidadMedida, stockInicial = 0, costoPorUnidad = 0, stockSeguridad = 0, tiempoEntregaDias = 1, fechaVencimiento = null, proveedor = null, usuarioId = null) {
     if (!nombre || String(nombre).trim() === '') {
         throw new Error('El nombre del insumo es obligatorio.');
@@ -31,7 +36,7 @@ async function crearInsumo(nombre, unidadMedida, stockInicial = 0, costoPorUnida
     return await enTransaccion(async () => {
         const res = await runQuery(
             `INSERT INTO insumos (nombre, unidad_medida, stock_actual, costo_por_unidad, stock_seguridad, tiempo_entrega_dias, fecha_vencimiento)
-             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+             VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
             [nombre.trim(), unidadMedida ? String(unidadMedida).trim().toLowerCase() : 'unidades', stockInicialValidado, costoPorUnidadValidado, stockSeguridadValidado, tiempoEntregaValidado, fechaVencimiento || null]
         );
         const insumoId = res.lastID;
@@ -46,7 +51,7 @@ async function crearInsumo(nombre, unidadMedida, stockInicial = 0, costoPorUnida
                     insumo_id, usuario_id, tipo, cantidad, stock_resultante,
                     costo_unitario, costo_promedio_resultante, monto_total_compra, proveedor_nombre, motivo
                  )
-                 VALUES (?, ?, 'inventario_inicial', ?, ?, ?, ?, ?, ?, ?)`,
+                 VALUES ($1, $2, 'inventario_inicial', $3, $4, $5, $6, $7, $8, $9)`,
                 [
                     insumoId,
                     usuarioId ? Number(usuarioId) : null,
@@ -74,7 +79,7 @@ async function registrarCompraInsumo(insumoId, cantidadComprada, costoTotalCompr
     const costoValidado = redondear2(numeroNoNegativo(costoTotalCompra, 'El costo total de compra'));
 
     return await enTransaccion(async () => {
-        const insumo = await getQuery(`SELECT * FROM insumos WHERE id = ? AND activo = 1`, [insumoId]);
+        const insumo = await getQuery(`SELECT * FROM insumos WHERE id = $1 AND activo = 1 FOR NO KEY UPDATE`, [insumoId]);
         if (!insumo) throw new Error('Insumo no encontrado.');
 
         const stockAnterior = Math.max(0, Number(insumo.stock_actual || 0));
@@ -89,7 +94,7 @@ async function registrarCompraInsumo(insumoId, cantidadComprada, costoTotalCompr
         const costoUnitCompra = Number((costoValidado / cantValidada).toFixed(6));
 
         await runQuery(
-            `UPDATE insumos SET stock_actual = ?, costo_por_unidad = ? WHERE id = ?`,
+            `UPDATE insumos SET stock_actual = $1, costo_por_unidad = $2 WHERE id = $3`,
             [nuevoStock, cppResultante, insumoId]
         );
 
@@ -119,7 +124,7 @@ async function registrarCompraInsumo(insumoId, cantidadComprada, costoTotalCompr
                 insumo_id, tipo, cantidad, stock_resultante, costo_unitario, costo_promedio_resultante, motivo,
                 proveedor_nombre, proveedor_nit, nro_factura_compra, con_factura, nro_autorizacion_cuf, codigo_control, monto_total_compra, usuario_id
              )
-             VALUES (?, 'compra', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             VALUES ($1, 'compra', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
             [
                 insumoId,
                 cantValidada,
@@ -139,7 +144,7 @@ async function registrarCompraInsumo(insumoId, cantidadComprada, costoTotalCompr
         );
 
         // Actualizar en cascada el costo de todos los productos que usan este insumo
-        const productosAfectados = await allQuery(`SELECT DISTINCT producto_id FROM recetas WHERE insumo_id = ?`, [insumoId]);
+        const productosAfectados = await allQuery(`SELECT DISTINCT producto_id FROM recetas WHERE insumo_id = $1`, [insumoId]);
         for (const prod of productosAfectados) {
             await recalcularCostoProductoPorReceta(prod.producto_id);
         }
@@ -160,18 +165,18 @@ async function registrarMermaInsumo(insumoId, cantidadPerdida, motivo, usuarioId
     }
 
     return await enTransaccion(async () => {
-        const insumo = await getQuery(`SELECT * FROM insumos WHERE id = ? AND activo = 1`, [insumoId]);
+        const insumo = await getQuery(`SELECT * FROM insumos WHERE id = $1 AND activo = 1 FOR NO KEY UPDATE`, [insumoId]);
         if (!insumo) throw new Error('Insumo no encontrado.');
 
         const r = await runQuery(
-            `UPDATE insumos SET stock_actual = ROUND(stock_actual - ?, 4) WHERE id = ? AND stock_actual >= ?`,
+            `UPDATE insumos SET stock_actual = ${redondearSql('stock_actual - $1', 4)} WHERE id = $2 AND stock_actual >= $3`,
             [cantValidada, insumoId, cantValidada]
         );
         if (r.changes === 0) {
             throw new Error(`Stock insuficiente para descontar ${cantValidada} ${insumo.unidad_medida} de ${insumo.nombre}. Stock actual: ${insumo.stock_actual}`);
         }
 
-        const insumoActualizado = await getQuery(`SELECT stock_actual, costo_por_unidad FROM insumos WHERE id = ?`, [insumoId]);
+        const insumoActualizado = await getQuery(`SELECT stock_actual, costo_por_unidad FROM insumos WHERE id = $1`, [insumoId]);
         const nuevoStock = insumoActualizado ? Number(insumoActualizado.stock_actual) : Number((insumo.stock_actual - cantValidada).toFixed(4));
         const costoCpp = Number(insumoActualizado?.costo_por_unidad ?? insumo.costo_por_unidad ?? 0);
         const costoPerdida = redondear2(cantValidada * costoCpp);
@@ -181,7 +186,7 @@ async function registrarMermaInsumo(insumoId, cantidadPerdida, motivo, usuarioId
                 insumo_id, usuario_id, tipo, cantidad, stock_resultante,
                 costo_unitario, costo_promedio_resultante, monto_total_compra, motivo
              )
-             VALUES (?, ?, 'merma', ?, ?, ?, ?, ?, ?)`,
+             VALUES ($1, $2, 'merma', $3, $4, $5, $6, $7, $8)`,
             [
                 insumoId,
                 usuarioId ? Number(usuarioId) : null,
@@ -242,7 +247,7 @@ async function registrarCompraProductoDirecto(productoId, cantidadComprada, cost
     const fechaVencimientoValidada = validarFormatoFechaYYYYMMDD(fechaVencimiento);
 
     return await enTransaccion(async () => {
-        const prod = await getQuery(`SELECT * FROM productos WHERE id = ? AND activo = 1`, [productoId]);
+        const prod = await getQuery(`SELECT * FROM productos WHERE id = $1 AND activo = 1 FOR NO KEY UPDATE`, [productoId]);
         if (!prod) throw new Error('Producto no encontrado.');
 
         if (prod.tipo_inventario === 'receta') {
@@ -264,7 +269,7 @@ async function registrarCompraProductoDirecto(productoId, cantidadComprada, cost
         // Gestión individual de lotes por fecha de vencimiento
         if (fechaVencimientoValidada) {
             const loteExistente = await getQuery(
-                `SELECT id, stock, costo_unitario FROM producto_lotes WHERE producto_id = ? AND fecha_vencimiento = ? AND activo = 1`,
+                `SELECT id, stock, costo_unitario FROM producto_lotes WHERE producto_id = $1 AND fecha_vencimiento = $2 AND activo = 1`,
                 [productoId, fechaVencimientoValidada]
             );
 
@@ -277,13 +282,13 @@ async function registrarCompraProductoDirecto(productoId, cantidadComprada, cost
                     : costoUnitCompra;
 
                 await runQuery(
-                    `UPDATE producto_lotes SET stock = ?, costo_unitario = ? WHERE id = ?`,
+                    `UPDATE producto_lotes SET stock = $1, costo_unitario = $2 WHERE id = $3`,
                     [nuevoStockLote, nuevoCostoLote, loteExistente.id]
                 );
             } else {
                 await runQuery(
                     `INSERT INTO producto_lotes (producto_id, fecha_vencimiento, stock, costo_unitario, activo)
-                     VALUES (?, ?, ?, ?, 1)`,
+                     VALUES ($1, $2, $3, $4, 1)`,
                     [productoId, fechaVencimientoValidada, Number(cantValidada.toFixed(4)), costoUnitCompra]
                 );
             }
@@ -295,7 +300,7 @@ async function registrarCompraProductoDirecto(productoId, cantidadComprada, cost
                     MIN(CASE WHEN stock > 0 THEN fecha_vencimiento ELSE NULL END) as proximo_vencimiento,
                     COUNT(*) as total_lotes
              FROM producto_lotes
-             WHERE producto_id = ? AND activo = 1`,
+             WHERE producto_id = $1 AND activo = 1`,
             [productoId]
         );
 
@@ -311,10 +316,10 @@ async function registrarCompraProductoDirecto(productoId, cantidadComprada, cost
         await runQuery(
             `UPDATE productos
              SET tipo_inventario = 'directo',
-                 stock = ?,
-                 costo = ?,
-                 fecha_vencimiento = ?
-             WHERE id = ?`,
+                 stock = $1,
+                 costo = $2,
+                 fecha_vencimiento = $3
+             WHERE id = $4`,
             [stockSincronizado, cppResultante, vencimientoActualizado, productoId]
         );
 
@@ -338,7 +343,7 @@ async function registrarCompraProductoDirecto(productoId, cantidadComprada, cost
             `INSERT INTO movimientos_productos_directos (
                 producto_id, usuario_id, tipo, cantidad, stock_resultante, costo_unitario, costo_promedio_resultante, monto_total,
                 proveedor_nombre, proveedor_nit, nro_factura_compra, con_factura, nro_autorizacion_cuf, codigo_control, motivo
-             ) VALUES (?, ?, 'compra', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             ) VALUES ($1, $2, 'compra', $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
             [
                 productoId,
                 usuarioId,
@@ -376,14 +381,14 @@ async function registrarMermaProductoDirecto(productoId, cantidadPerdida, motivo
     }
 
     return await enTransaccion(async () => {
-        const prod = await getQuery(`SELECT * FROM productos WHERE id = ? AND activo = 1`, [productoId]);
+        const prod = await getQuery(`SELECT * FROM productos WHERE id = $1 AND activo = 1 FOR NO KEY UPDATE`, [productoId]);
         if (!prod) throw new Error('Producto no encontrado.');
         if (prod.tipo_inventario !== 'directo') {
             throw new Error(`Solo se puede registrar merma directa sobre artículos de stock directo (modalidad actual: "${prod.tipo_inventario}").`);
         }
 
         const r = await runQuery(
-            `UPDATE productos SET stock = ROUND(stock - ?, 4) WHERE id = ? AND stock >= ?`,
+            `UPDATE productos SET stock = ${redondearSql('stock - $1', 4)} WHERE id = $2 AND stock >= $3`,
             [cantValidada, productoId, cantValidada]
         );
         if (r.changes === 0) {
@@ -394,7 +399,7 @@ async function registrarMermaProductoDirecto(productoId, cantidadPerdida, motivo
 
         // Descontar de lotes por política PEPS si existen lotes activos
         const lotes = await allQuery(
-            `SELECT id, stock FROM producto_lotes WHERE producto_id = ? AND activo = 1 AND stock > 0 ORDER BY fecha_vencimiento ASC, id ASC`,
+            `SELECT id, stock FROM producto_lotes WHERE producto_id = $1 AND activo = 1 AND stock > 0 ORDER BY fecha_vencimiento ASC, id ASC`,
             [productoId]
         );
         if (lotes.length > 0) {
@@ -403,14 +408,14 @@ async function registrarMermaProductoDirecto(productoId, cantidadPerdida, motivo
                 if (remMerma <= 0) break;
                 const desc = Math.min(Number(lot.stock), remMerma);
                 await runQuery(
-                    `UPDATE producto_lotes SET stock = ROUND(stock - ?, 4) WHERE id = ? AND stock >= ?`,
+                    `UPDATE producto_lotes SET stock = ${redondearSql('stock - $1', 4)} WHERE id = $2 AND stock >= $3`,
                     [desc, lot.id, desc]
                 );
                 remMerma = Number((remMerma - desc).toFixed(4));
             }
         }
 
-        const prodActualizado = await getQuery(`SELECT stock, costo FROM productos WHERE id = ?`, [productoId]);
+        const prodActualizado = await getQuery(`SELECT stock, costo FROM productos WHERE id = $1`, [productoId]);
         const nuevoStock = Number(prodActualizado?.stock ?? 0);
         const costoCpp = Number(prodActualizado?.costo ?? prod.costo ?? 0);
         const costoPerdida = redondear2(cantValidada * costoCpp);
@@ -419,7 +424,7 @@ async function registrarMermaProductoDirecto(productoId, cantidadPerdida, motivo
             `INSERT INTO movimientos_productos_directos (
                 producto_id, movimiento_id, usuario_id, tipo, cantidad, stock_resultante,
                 costo_unitario, costo_promedio_resultante, monto_total, motivo
-             ) VALUES (?, NULL, ?, 'merma', ?, ?, ?, ?, ?, ?)`,
+             ) VALUES ($1, NULL, $2, 'merma', $3, $4, $5, $6, $7, $8)`,
             [
                 productoId,
                 usuarioId ? Number(usuarioId) : null,
@@ -446,8 +451,8 @@ async function verificarIntegridadKardexDirecto() {
     const filas = await allQuery(
         `SELECT p.id as producto_id,
                 p.nombre,
-                ROUND(COALESCE(p.stock, 0), 4) as stock_producto,
-                ROUND(COALESCE((
+                ${redondearSql('COALESCE(p.stock, 0)', 4)} as stock_producto,
+                ${redondearSql(`COALESCE((
                     SELECT SUM(CASE
                         WHEN mpd.tipo IN ('inventario_inicial', 'compra', 'reingreso_anulacion') THEN mpd.cantidad
                         WHEN mpd.tipo IN ('venta', 'merma') THEN -mpd.cantidad
@@ -456,7 +461,7 @@ async function verificarIntegridadKardexDirecto() {
                     END)
                     FROM movimientos_productos_directos mpd
                     WHERE mpd.producto_id = p.id
-                ), 0), 4) as saldo_calculado_kardex,
+                ), 0)`, 4)} as saldo_calculado_kardex,
                 (
                     SELECT mpd2.stock_resultante
                     FROM movimientos_productos_directos mpd2
@@ -511,8 +516,8 @@ async function verificarIntegridadKardexInsumos() {
         `SELECT i.id as insumo_id,
                 i.nombre,
                 i.unidad_medida,
-                ROUND(COALESCE(i.stock_actual, 0), 4) as stock_insumo,
-                ROUND(COALESCE((
+                ${redondearSql('COALESCE(i.stock_actual, 0)', 4)} as stock_insumo,
+                ${redondearSql(`COALESCE((
                     SELECT SUM(CASE
                         WHEN mi.tipo IN ('inventario_inicial', 'compra', 'reingreso_anulacion') THEN mi.cantidad
                         WHEN mi.tipo IN ('consumo_venta', 'merma') THEN -mi.cantidad
@@ -521,7 +526,7 @@ async function verificarIntegridadKardexInsumos() {
                     END)
                     FROM movimientos_insumos mi
                     WHERE mi.insumo_id = i.id
-                ), 0), 4) as saldo_calculado_kardex,
+                ), 0)`, 4)} as saldo_calculado_kardex,
                 (
                     SELECT mi2.stock_resultante
                     FROM movimientos_insumos mi2
@@ -576,15 +581,15 @@ async function obtenerKardexDetallado({ productoId = null, insumoId = null, desd
     const condProd = [];
     const paramsProd = [];
     if (productoId) {
-        condProd.push(`mpd.producto_id = ?`);
+        condProd.push(`mpd.producto_id = $${paramsProd.length + 1}`);
         paramsProd.push(Number(productoId));
     }
     if (desde && /^\d{4}-\d{2}-\d{2}$/.test(String(desde).trim())) {
-        condProd.push(`date(mpd.fecha_hora, 'localtime') >= ?`);
+        condProd.push(`${fechaLocal('mpd.fecha_hora')} >= $${paramsProd.length + 1}`);
         paramsProd.push(String(desde).trim());
     }
     if (hasta && /^\d{4}-\d{2}-\d{2}$/.test(String(hasta).trim())) {
-        condProd.push(`date(mpd.fecha_hora, 'localtime') <= ?`);
+        condProd.push(`${fechaLocal('mpd.fecha_hora')} <= $${paramsProd.length + 1}`);
         paramsProd.push(String(hasta).trim());
     }
     const whereProd = condProd.length > 0 ? `WHERE ${condProd.join(' AND ')}` : '';
@@ -592,20 +597,20 @@ async function obtenerKardexDetallado({ productoId = null, insumoId = null, desd
     const condIns = [];
     const paramsIns = [];
     if (insumoId) {
-        condIns.push(`mi.insumo_id = ?`);
+        condIns.push(`mi.insumo_id = $${paramsIns.length + 1}`);
         paramsIns.push(Number(insumoId));
     }
     if (desde && /^\d{4}-\d{2}-\d{2}$/.test(String(desde).trim())) {
-        condIns.push(`date(mi.fecha_hora, 'localtime') >= ?`);
+        condIns.push(`${fechaLocal('mi.fecha_hora')} >= $${paramsIns.length + 1}`);
         paramsIns.push(String(desde).trim());
     }
     if (hasta && /^\d{4}-\d{2}-\d{2}$/.test(String(hasta).trim())) {
-        condIns.push(`date(mi.fecha_hora, 'localtime') <= ?`);
+        condIns.push(`${fechaLocal('mi.fecha_hora')} <= $${paramsIns.length + 1}`);
         paramsIns.push(String(hasta).trim());
     }
     const whereIns = condIns.length > 0 ? `WHERE ${condIns.join(' AND ')}` : '';
 
-    const lim = Math.min(2000, Math.max(10, Number(limite) || 200));
+    const lim = Math.round(Math.min(2000, Math.max(10, Number(limite) || 200)));
 
     const [kardexProductosDirectos, kardexInsumos] = await Promise.all([
         allQuery(
@@ -616,12 +621,12 @@ async function obtenerKardexDetallado({ productoId = null, insumoId = null, desd
                     mpd.movimiento_id,
                     COALESCE(u.nombre, 'Sistema') as operador,
                     mpd.tipo,
-                    datetime(mpd.fecha_hora, 'localtime') as fecha_hora,
+                    ${fechaHoraLocal('mpd.fecha_hora')} as fecha_hora,
                     mpd.cantidad,
                     mpd.stock_resultante,
                     mpd.costo_unitario,
                     COALESCE(NULLIF(mpd.costo_promedio_resultante, 0), mpd.costo_unitario, p.costo, 0) as costo_promedio_resultante,
-                    COALESCE(mpd.monto_total, ROUND(mpd.cantidad * mpd.costo_unitario, 2)) as monto_total,
+                    COALESCE(mpd.monto_total, ${redondearSql('mpd.cantidad * mpd.costo_unitario', 2)}) as monto_total,
                     COALESCE(mpd.proveedor_nombre, '') as proveedor_nombre,
                     COALESCE(mpd.nro_factura_compra, '') as nro_factura_compra,
                     COALESCE(mpd.nro_autorizacion_cuf, '') as nro_autorizacion_cuf,
@@ -633,8 +638,8 @@ async function obtenerKardexDetallado({ productoId = null, insumoId = null, desd
              LEFT JOIN usuarios u ON mpd.usuario_id = u.id
              ${whereProd}
              ORDER BY mpd.id DESC
-             LIMIT ${lim}`,
-            paramsProd
+             LIMIT $${paramsProd.length + 1}`,
+            [...paramsProd, lim]
         ),
         allQuery(
             `SELECT mi.id,
@@ -644,12 +649,12 @@ async function obtenerKardexDetallado({ productoId = null, insumoId = null, desd
                     mi.movimiento_id,
                     COALESCE(u.nombre, 'Sistema') as operador,
                     mi.tipo,
-                    datetime(mi.fecha_hora, 'localtime') as fecha_hora,
+                    ${fechaHoraLocal('mi.fecha_hora')} as fecha_hora,
                     mi.cantidad,
                     mi.stock_resultante,
                     mi.costo_unitario,
                     COALESCE(NULLIF(mi.costo_promedio_resultante, 0), mi.costo_unitario, i.costo_por_unidad, 0) as costo_promedio_resultante,
-                    COALESCE(mi.monto_total_compra, ROUND(mi.cantidad * mi.costo_unitario, 2)) as monto_total,
+                    COALESCE(mi.monto_total_compra, ${redondearSql('mi.cantidad * mi.costo_unitario', 2)}) as monto_total,
                     COALESCE(mi.proveedor_nombre, '') as proveedor_nombre,
                     COALESCE(mi.nro_factura_compra, '') as nro_factura_compra,
                     COALESCE(mi.nro_autorizacion_cuf, '') as nro_autorizacion_cuf,
@@ -661,8 +666,8 @@ async function obtenerKardexDetallado({ productoId = null, insumoId = null, desd
              LEFT JOIN usuarios u ON mi.usuario_id = u.id
              ${whereIns}
              ORDER BY mi.id DESC
-             LIMIT ${lim}`,
-            paramsIns
+             LIMIT $${paramsIns.length + 1}`,
+            [...paramsIns, lim]
         )
     ]);
 
@@ -686,9 +691,9 @@ async function obtenerPrediccionComprasInsumos(diasAnalisis = 30, diasCobertura 
                 END
              ), 0) as total_consumido
              FROM movimientos_insumos
-             WHERE insumo_id = ?
+             WHERE insumo_id = $1
                AND tipo IN ('consumo_venta', 'merma', 'reingreso_anulacion')
-               AND date(fecha_hora, 'localtime') >= date('now', 'localtime', ?)`,
+               AND ${fechaLocal('fecha_hora')} >= (${fechaLocal('CURRENT_TIMESTAMP')} + $2::interval)::date`,
             [ins.id, `-${diasAnalisis} days`]
         );
 
@@ -735,7 +740,7 @@ async function actualizarInsumo(insumoId, datos = {}, usuarioId = null) {
     }
 
     return await enTransaccion(async () => {
-        const insumoActual = await getQuery(`SELECT * FROM insumos WHERE id = ? AND activo = 1`, [id]);
+        const insumoActual = await getQuery(`SELECT * FROM insumos WHERE id = $1 AND activo = 1 FOR NO KEY UPDATE`, [id]);
         if (!insumoActual) {
             throw new Error('Insumo no encontrado o inactivo.');
         }
@@ -795,8 +800,8 @@ async function actualizarInsumo(insumoId, datos = {}, usuarioId = null) {
 
             await runQuery(
                 `UPDATE insumos
-                 SET nombre = ?, unidad_medida = ?, stock_actual = ?, costo_por_unidad = ?, stock_seguridad = ?, tiempo_entrega_dias = ?, fecha_vencimiento = ?
-                 WHERE id = ?`,
+                 SET nombre = $1, unidad_medida = $2, stock_actual = $3, costo_por_unidad = $4, stock_seguridad = $5, tiempo_entrega_dias = $6, fecha_vencimiento = $7
+                 WHERE id = $8`,
                 [nombreFinal, unidadFinal, nuevoStock, nuevoCosto, stockSeguridadFinal, tiempoEntregaFinal, fechaVencimientoFinal ? String(fechaVencimientoFinal).trim() : null, id]
             );
 
@@ -805,7 +810,7 @@ async function actualizarInsumo(insumoId, datos = {}, usuarioId = null) {
                     insumo_id, usuario_id, tipo, cantidad, stock_resultante,
                     costo_unitario, costo_promedio_resultante, monto_total_compra, motivo
                  )
-                 VALUES (?, ?, 'ajuste', ?, ?, ?, ?, ?, ?)`,
+                 VALUES ($1, $2, 'ajuste', $3, $4, $5, $6, $7, $8)`,
                 [
                     id,
                     usuarioId ? Number(usuarioId) : null,
@@ -819,20 +824,20 @@ async function actualizarInsumo(insumoId, datos = {}, usuarioId = null) {
             );
 
             // Recalcular en cascada el costo de todos los productos y combos que usan este insumo
-            const productosAfectados = await allQuery(`SELECT DISTINCT producto_id FROM recetas WHERE insumo_id = ?`, [id]);
+            const productosAfectados = await allQuery(`SELECT DISTINCT producto_id FROM recetas WHERE insumo_id = $1`, [id]);
             for (const prod of productosAfectados) {
                 await recalcularCostoProductoPorReceta(prod.producto_id);
             }
         } else {
             await runQuery(
                 `UPDATE insumos
-                 SET nombre = ?, unidad_medida = ?, stock_seguridad = ?, tiempo_entrega_dias = ?, fecha_vencimiento = ?
-                 WHERE id = ?`,
+                 SET nombre = $1, unidad_medida = $2, stock_seguridad = $3, tiempo_entrega_dias = $4, fecha_vencimiento = $5
+                 WHERE id = $6`,
                 [nombreFinal, unidadFinal, stockSeguridadFinal, tiempoEntregaFinal, fechaVencimientoFinal ? String(fechaVencimientoFinal).trim() : null, id]
             );
         }
 
-        return await getQuery(`SELECT * FROM insumos WHERE id = ?`, [id]);
+        return await getQuery(`SELECT * FROM insumos WHERE id = $1`, [id]);
     });
 }
 
@@ -851,7 +856,7 @@ async function eliminarInsumo(insumoId, motivo, adminId) {
     }
 
     return await enTransaccion(async () => {
-        const insumo = await getQuery(`SELECT * FROM insumos WHERE id = ? AND activo = 1`, [id]);
+        const insumo = await getQuery(`SELECT * FROM insumos WHERE id = $1 AND activo = 1 FOR NO KEY UPDATE`, [id]);
         if (!insumo) throw new Error('El material o insumo no existe o ya fue eliminado.');
 
         // 1. Validar que no esté amarrado a recetas de productos activos
@@ -859,7 +864,7 @@ async function eliminarInsumo(insumoId, motivo, adminId) {
             `SELECT p.nombre 
              FROM recetas r
              JOIN productos p ON r.producto_id = p.id
-             WHERE r.insumo_id = ? AND p.activo = 1`,
+             WHERE r.insumo_id = $1 AND p.activo = 1`,
             [id]
         );
         if (recetasQueLoUsan.length > 0) {
@@ -872,7 +877,7 @@ async function eliminarInsumo(insumoId, motivo, adminId) {
             `SELECT DISTINCT g.nombre as grupo_nombre, o.nombre as opcion_nombre
              FROM modificadores_opciones o
              JOIN grupos_modificadores g ON o.grupo_id = g.id
-             WHERE (o.insumo_id = ? OR o.insumo_reemplazado_id = ?) AND o.activo = 1 AND g.activo = 1`,
+             WHERE (o.insumo_id = $1 OR o.insumo_reemplazado_id = $2) AND o.activo = 1 AND g.activo = 1`,
             [id, id]
         );
         if (modificadoresQueLoUsan.length > 0) {
@@ -887,7 +892,7 @@ async function eliminarInsumo(insumoId, motivo, adminId) {
                 `INSERT INTO movimientos_insumos (
                     insumo_id, usuario_id, tipo, cantidad, stock_resultante,
                     costo_unitario, costo_promedio_resultante, monto_total_compra, motivo
-                 ) VALUES (?, ?, 'ajuste', ?, 0, ?, 0, 0, ?)`,
+                 ) VALUES ($1, $2, 'ajuste', $3, 0, $4, 0, 0, $5)`,
                 [
                     id,
                     adminId ? Number(adminId) : null,
@@ -900,7 +905,7 @@ async function eliminarInsumo(insumoId, motivo, adminId) {
 
         // 4. Baja lógica
         await runQuery(
-            `UPDATE insumos SET activo = 0, stock_actual = 0 WHERE id = ?`,
+            `UPDATE insumos SET activo = 0, stock_actual = 0 WHERE id = $1`,
             [id]
         );
 

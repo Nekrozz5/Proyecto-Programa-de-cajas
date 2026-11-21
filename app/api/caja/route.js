@@ -132,7 +132,7 @@ export async function GET(request) {
                 categorias,
                 prediccionInsumos,
                 kardexDetallado,
-                estadoEmail: esAdmin ? verificarEstadoEmail() : null
+                estadoEmail: esAdmin ? await verificarEstadoEmail() : null
             }, { headers: HEADERS_SIN_CACHE });
         }
 
@@ -143,7 +143,7 @@ export async function GET(request) {
             obtenerSiguienteNumeroFactura()
         ]);
 
-        const estadoEmail = esAdmin ? verificarEstadoEmail() : null;
+        const estadoEmail = esAdmin ? await verificarEstadoEmail() : null;
 
         const respuesta = NextResponse.json({
             usuarioSesion: usuarioSesionEnriquecido,

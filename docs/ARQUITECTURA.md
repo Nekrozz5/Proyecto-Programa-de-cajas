@@ -1,6 +1,6 @@
 # Arquitectura Técnica del Sistema (Cloud / AWS)
 
-Este documento describe la arquitectura global del sistema POS y Control de Cajas desplegado en AWS, su modelo de seguridad, la base de datos relacional con SQLite3, el esquema de migraciones versionadas (v1 a v17), el motor tributario modular con RCV SIAT, los pagos mixtos, los canales de delivery (PedidosYa / Yango), el Kardex cronológico dual (NIC 2), los combos, los modificadores de recetas, la trazabilidad de lotes con política PEPS (FIFO), el servicio SMTP dinámico con verificación de destinatarios y el sistema de reportes contables.
+Este documento describe la arquitectura del sistema POS y Control de Cajas en AWS. Incluye la persistencia exclusiva en PostgreSQL, el esquema de migraciones, el modelo de seguridad y los flujos de caja, inventario, fiscalidad y reportes.
 
 ---
 
@@ -8,14 +8,14 @@ Este documento describe la arquitectura global del sistema POS y Control de Caja
 
 - **Frontend / Fullstack:** Next.js 16 (App Router) con React 19.
 - **Estilos y Componentes UI:** Tailwind CSS con Shadcn UI (`components/ui/*`, `@base-ui/react`, `class-variance-authority`, `lucide-react`) y diseño responsivo táctil y web.
-- **Base de Datos:** SQLite3 (`sqlite3@^6.0.1` y `better-sqlite3@^13.2.0`) con SQL nativo parametrizado (`?`) y Drizzle ORM singleton (`database/drizzle.js`, `database/schema.js`).
+- **Base de Datos:** PostgreSQL con el cliente `pg` y SQL parametrizado (`$1`, `$2`, etc.). El registro central y las bases operativas de los negocios tienen pools separados.
 - **Autenticación y Criptografía:** JWT firmado con `jose` (`^6.2.17`) en cookies `HttpOnly` (`pos_session`) y hash de contraseñas con `bcryptjs` (`^3.0.3`) (10 rondas de salt).
 - **Reportes y Visualización:**
   - `exceljs` (`^4.4.0`): Generación en servidor de libros Excel `.xlsx` con 10 hojas contables y de auditoría.
   - `jspdf` (`^4.2.1`) y `jspdf-autotable` (`^5.0.9`): Generación en cliente de reportes PDF de balance fiscal, arqueo ciego y auditoría de turno.
   - `recharts` (`^3.10.1`): Gráficos interactivos de métricas financieras en `/admin` (flujo horario, balance de 7 días, top productos, métodos de pago).
 - **Servicio de Notificaciones:** `nodemailer` (`^10.5.0`): Envíos SMTP en segundo plano con plantilla HTML ejecutiva, configuración dinámica en BD (`configuracion_smtp`), verificación de destinatarios (`notificacion_destinatarios`) y libro Excel `.xlsx` adjunto en caliente.
-- **Despliegue Cloud en AWS y Respaldos:** Ejecución continua con PM2 (`ecosystem.config.js`) y respaldo atómico en caliente con `VACUUM INTO` (`scripts/backup.js`).
+- **Despliegue Cloud en AWS y Respaldos:** Ejecución continua con PM2 (`ecosystem.config.js`) y respaldo lógico PostgreSQL por negocio (`scripts/backup-postgres.js`).
 - **Blindaje Multi-Dispositivo en la Nube:** Protección contra traducción automática del DOM (`notranslate` en `app/layout.js`), encabezados `Cache-Control: no-store` en `GET /api/caja` para lecturas en tiempo real sin caché, y configuración de `experimental.serverActions.allowedOrigins` en `next.config.js` (`ALLOWED_ORIGINS`) para ejecución segura de Server Actions en AWS.
 
 ---
@@ -91,7 +91,7 @@ El sistema implementa una arquitectura en capas limpias que separa la interfaz v
 │   │   ├── costos.js                 # Costo Promedio Ponderado (CPP NIC 2), cascada de recetas y combos
 │   │   └── fiscal.js                 # Snapshot tributario, bases imponibles IVA e IT
 │   ├── repositories/                 # Capa de persistencia SQL parametrizada
-│   │   ├── db.js                     # Primitivas SQLite (get, all, run, transaccion)
+│   │   ├── db.js                     # Consultas y transacciones en el contexto PostgreSQL del tenant
 │   │   ├── analiticas.repo.js        # Inteligencia de negocio y proyecciones
 │   │   ├── auth.repo.js              # Usuarios, credenciales bcrypt y permisos
 │   │   ├── cajas.repo.js             # Terminales físicas, turnos, arqueos y reaperturas
@@ -107,21 +107,21 @@ El sistema implementa una arquitectura en capas limpias que separa la interfaz v
 │   │   └── sesion.js                 # JWT, cookies HttpOnly, rate limiting dual e INSTANCE_BOOT_ID
 │   └── queries.js                    # Fachada y barrel retrocompatible
 ├── database/
-│   ├── database.js                   # Conexión SQLite (WAL, busy_timeout, foreign_keys)
-│   ├── schema.js                     # Esquema tipado Drizzle ORM (20 tablas)
-│   ├── drizzle.js                    # Cliente Drizzle singleton sobre better-sqlite3
-│   └── migraciones.js                # Sistema de migraciones versionado con PRAGMA user_version (v1 a v17)
+│   ├── postgres.js                   # Pools de conexión PostgreSQL por URL
+│   ├── migraciones-control.js        # Registro central de tenants
+│   ├── migraciones-tenant.js         # Migraciones versionadas del POS
+│   └── provisionar-tenant.js         # Migración e inicialización por negocio
 ├── components/ui/                    # Componentes reutilizables Shadcn UI
 ├── public/
 │   ├── manifest.json                 # Especificación de Aplicación Web Progresiva (PWA)
 │   └── icons/                        # Iconos para PWA y dispositivos móviles
 ├── scripts/
-│   ├── backup.js                     # Respaldo atómico en caliente con VACUUM INTO
+│   ├── backup-postgres.js            # Respaldo lógico por tenant con pg_dump
 │   └── seed_cafeteria.js             # Sembrado integral con catálogo, lotes, fiscal y Kardex
 └── tests/
+    ├── postgres-*.test.js           # Integración, migraciones y aislamiento PostgreSQL
     ├── simulador_integral.js         # Simulador integral de flujo comercial automatizado
-    ├── test_migracion_v8_v9.js       # Batería de pruebas contables de migración v8 a v9
-    └── test_ventas_v9.js             # Suite de pruebas de ventas, Kardex y concurrencia
+    └── e2e/                         # Pruebas de navegador con Playwright
 ```
 
 ---
@@ -144,31 +144,11 @@ El sistema implementa una arquitectura en capas limpias que separa la interfaz v
 
 ## 4. Base de Datos y Sistema de Migraciones Versionadas (`database/`)
 
-- **`database/database.js`:**
-  - Ruta de base de datos configurable mediante `DATABASE_PATH` (por defecto `./caja.db`).
-  - Activa `PRAGMA foreign_keys = ON`.
-  - Modo WAL (`PRAGMA journal_mode = WAL`) para lecturas concurrentes sin bloqueo.
-  - `PRAGMA busy_timeout = 5000` para tolerar esperas de escritura sin bloqueos prematuros.
-  - Respaldo automático preventivo previo a la aplicación de cualquier migración (`VACUUM INTO backups/caja-pre-migracion-vX-a-vY-*.db`).
-
-- **`database/migraciones.js` (Evolución Integral v1 a v17):**
-  - **v1:** Esquema base de cajas, usuarios, movimientos y detalle de movimientos.
-  - **v2:** Módulo de insumos, compras con CPP, recetas de ensamble y configuración de negocio.
-  - **v3:** Auditoría de reaperturas (`veces_reabierta`, `historial_reaperturas`) y hashing bcrypt.
-  - **v4:** Tabla `categorias` para catálogo interactivo estructurado.
-  - **v5:** Normalización multicategoría de productos y saneamiento de registros legados.
-  - **v6:** Tabla `cajas_fisicas` (estaciones de cobro física/terminales) con vinculación a `cajas` (turnos).
-  - **v7:** Tablas `grupos_modificadores`, `modificadores_opciones`, `producto_grupos_modificadores` y `detalle_movimientos_modificadores` para complementos y reemplazos de recetas.
-  - **v8:** Soporte de tipo de producto `combo`, tablas `combo_componentes` y `detalle_movimientos_combos`, límites de unidades máximas (`limite_unidades_restante`) y control de vigencia temporal.
-  - **v9:** Régimen tributario modular (`configuracion_negocio`), normalización de pagos en `movimientos_pagos`, compras con respaldo fiscal en `movimientos_insumos`, y creación del Kardex de productos directos (`movimientos_productos_directos`).
-  - **v10:** Snapshot fiscal por movimiento (`regimen_tributario`, alícuotas e importes IVA/IT congelados), parámetro configurable `it_base` ('todas_las_ventas' | 'solo_facturadas'), `costo_promedio_resultante` en productos directos y saldos de apertura.
-  - **v11:** Kardex cronológico dual enriquecido en `movimientos_insumos` (`stock_resultante`, `costo_promedio_resultante`, `monto_total_compra`), reparación de costos métricos truncados y recálculo en cascada de recetas/combos, e índice multicaja por estación física (`una_caja_abierta_por_estacion`).
-  - **v12:** Creación de tabla `producto_lotes` para trazabilidad de vencimientos por lote, índices por producto y fecha de caducidad, migración de stock inicial con vencimiento, y soporte de salida PEPS (Primero en Expirar, Primero en Salir / FIFO) o selección manual de lote.
-  - **v13:** Columnas fiscales de respaldo RCV SIAT (`nro_autorizacion_cuf`, `codigo_control`, `tipo_compra`) añadidas a `movimientos_insumos`, `movimientos_productos_directos` y `movimientos`.
-  - **v14:** Soporte para apps de comida y delivery: bandera `habilita_apps_comida` en `configuracion_negocio`, columnas `canal_venta`, `datos_entrega` y `referencia_externa` en `movimientos`, y ampliación del CHECK constraint en `movimientos_pagos` para permitir métodos `pedidos_ya` y `yango`.
-  - **v15:** Configuración SMTP dinámica en base de datos (`configuracion_smtp`) y tabla de destinatarios de notificaciones (`notificacion_destinatarios`) con estado de verificación por código numérico de un solo uso.
-  - **v16:** Actualización del rol administrativo de `superadmin` a `propietario` en la tabla `usuarios` y normalización del CHECK constraint (`user`, `admin`, `propietario`, `developer`).
-  - **v17:** Incorporación de la columna `habilita_delivery` en `configuracion_negocio` para el control del servicio de delivery propio por parte del rol `propietario`.
+- `database/postgres.js` mantiene un pool por URL. `CONTROL_DATABASE_URL` apunta al registro de tenants y `TENANT_DATABASE_URLS_JSON` resuelve la conexión operativa por UUID o slug.
+- `database/migraciones-control.js` prepara `control_tenants`. `database/migraciones-tenant.js` aplica las versiones pendientes en cada base operativa. El DDL y las entradas en `schema_migrations` se confirman en una misma transacción.
+- El esquema operativo reúne configuración, usuarios y dispositivos POS, cajas y turnos, catálogo y recetas, ventas y pagos, Kardex y lotes, fiscalidad, SMTP y notificaciones. PostgreSQL aplica las claves foráneas, restricciones e índices de las migraciones.
+- `npm run provision:tenant -- <slug>` ejecuta las migraciones e inicializa el negocio registrado. Después de confirmar la base operativa, actualiza la versión en el registro central.
+- Los reportes agrupan los instantes de PostgreSQL por día en `America/La_Paz`. El aislamiento y la resolución de conexiones se detallan en [Arquitectura multi-negocio](ARQUITECTURA_MULTI_TENANT.md).
 
 ---
 
@@ -253,9 +233,9 @@ El sistema implementa una arquitectura en capas limpias que separa la interfaz v
 
 ## 8. Operación Cloud en AWS y Producción con PM2
 
-- **Despliegue en Instancia AWS (`ecosystem.config.js`):** La aplicación se ejecuta en producción gestionada por **PM2** en modo `fork` (1 instancia para preservar el candado único de escritura WAL sobre `caja.db` y la memoria compartida de rate limiting e `INSTANCE_BOOT_ID`), con reinicio automático (`autorestart: true`) y límite de memoria (`max_memory_restart: '1G'`).
+- **Despliegue en Instancia AWS (`ecosystem.config.js`):** PM2 se configura en modo `fork` con una instancia, reinicio automático y límite de memoria de 1 GB. El rate limiting y `INSTANCE_BOOT_ID` residen en el proceso.
 - **Validación Estricta de Secretos en Arranque (`instrumentation.js` y `server/lib/secretos.js`):** Con `NODE_ENV=production`, el servidor valida que `SESSION_SECRET` (mínimo 32 caracteres aleatorios) y `DEVELOPER_PASSWORD` no sean valores por defecto ni marcadores de ejemplo antes de aceptar tráfico.
 - **Operación detrás de Proxy Inverso / Balanceador AWS (Nginx / ALB / CloudFront):**
   - `TRUST_PROXY=true` habilita la lectura confiable de la IP real del cliente (`x-forwarded-for` / `x-real-ip`) para el rate limiting por IP.
   - Detección automática de protocolo HTTPS mediante `x-forwarded-proto` para cookies de sesión seguras.
-- **Respaldo Atómico en Caliente (`scripts/backup.js`):** Permite ejecutar `npm run backup` mediante cron o demanda en el servidor AWS utilizando `VACUUM INTO` sin detener las ventas ni bloquear las lecturas concurrentes de las terminales conectadas.
+- **Respaldo PostgreSQL (`scripts/backup-postgres.js`):** `npm run backup -- <slug>` ejecuta `pg_dump` en formato personalizado y aplica retención por tenant. El archivo se publica en el directorio de respaldos una vez completada la copia.

@@ -29,8 +29,12 @@ function obtenerTenantDatabaseUrl(tenant) {
         } catch {
             throw new Error('TENANT_DATABASE_URLS_JSON no contiene JSON válido.');
         }
-        const url = mapa[tenant.tenant_id] || mapa[tenant.slug];
-        if (url) return url;
+        if (!mapa || typeof mapa !== 'object' || Array.isArray(mapa)) {
+            throw new Error('TENANT_DATABASE_URLS_JSON debe contener un mapa de conexiones.');
+        }
+        const clave = Object.hasOwn(mapa, tenant.tenant_id) ? tenant.tenant_id : tenant.slug;
+        const url = Object.hasOwn(mapa, clave) ? mapa[clave] : null;
+        if (typeof url === 'string' && url.trim()) return url;
     }
 
     throw new Error(`No hay resolver de conexión configurado para el tenant ${tenant.slug}.`);

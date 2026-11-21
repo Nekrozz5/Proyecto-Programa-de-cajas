@@ -16,6 +16,7 @@ const inventarioRepo = require('./inventario.repo');
 const ventasRepo = require('./ventas.repo');
 const reportesRepo = require('./reportes.repo');
 const analiticasRepo = require('./analiticas.repo');
+const notificacionesRepo = require('./notificaciones.repo');
 const tenantContext = require('../tenancy/tenant-context');
 
 module.exports = {
@@ -30,5 +31,6 @@ module.exports = {
     ...ventasRepo,
     ...reportesRepo,
     ...analiticasRepo,
+    ...notificacionesRepo,
     ...tenantContext
 };

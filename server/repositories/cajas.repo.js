@@ -2,12 +2,19 @@
  * server/repositories/cajas.repo.js
  * Repositorio para estaciones de caja físicas, turnos de operación, arqueo ciego,
  * reaperturas auditadas y métricas de cierre de caja.
- * Respeta reglas de 'localtime', transacciones y consultas parametrizadas.
+ * Usa transacciones y consultas parametrizadas.
  */
 
 const { runQuery, getQuery, allQuery, enTransaccion, redondear2, numeroNoNegativo } = require('./db');
 const { obtenerUsuarioPorId, esRolAdministrativo } = require('./auth.repo');
 const { obtenerConfiguracionNegocio } = require('./configuracion.repo');
+
+const fechaLocal = (columna) => `TO_CHAR(${columna} AT TIME ZONE 'America/La_Paz', 'YYYY-MM-DD HH24:MI:SS')`;
+
+async function bloquearEstaciones() {
+    // Las altas, bajas y aperturas comparten las reglas de estación y titular.
+    await runQuery('LOCK TABLE cajas_fisicas IN SHARE ROW EXCLUSIVE MODE');
+}
 
 // ==========================================
 // ESTACIONES DE CAJA FÍSICA
@@ -33,12 +40,15 @@ async function crearCajaFisica(nombre, adminId) {
     if (!nombreLimpio || nombreLimpio.length < 2) {
         throw new Error('Debes ingresar un nombre válido para la caja física (mínimo 2 caracteres).');
     }
-    const existente = await getQuery(`SELECT id FROM cajas_fisicas WHERE LOWER(nombre) = LOWER(?)`, [nombreLimpio]);
-    if (existente) {
-        throw new Error(`Ya existe una caja física registrada con el nombre "${nombreLimpio}".`);
-    }
-    const res = await runQuery(`INSERT INTO cajas_fisicas (nombre, activa) VALUES (?, 1)`, [nombreLimpio]);
-    return res.lastID;
+    return await enTransaccion(async () => {
+        await bloquearEstaciones();
+        const existente = await getQuery(`SELECT id FROM cajas_fisicas WHERE LOWER(nombre) = LOWER($1)`, [nombreLimpio]);
+        if (existente) {
+            throw new Error(`Ya existe una caja física registrada con el nombre "${nombreLimpio}".`);
+        }
+        const res = await runQuery(`INSERT INTO cajas_fisicas (nombre, activa) VALUES ($1, 1) RETURNING id`, [nombreLimpio]);
+        return res.lastID;
+    });
 }
 
 async function desactivarCajaFisica(cajaFisicaId, adminId) {
@@ -50,31 +60,34 @@ async function desactivarCajaFisica(cajaFisicaId, adminId) {
     if (!Number.isFinite(idNum) || idNum <= 0) {
         throw new Error('ID de caja física inválido.');
     }
-    const caja = await getQuery(`SELECT * FROM cajas_fisicas WHERE id = ?`, [idNum]);
-    if (!caja) {
-        throw new Error('La caja física indicada no existe.');
-    }
-    if (Number(caja.activa) === 0) {
-        throw new Error('Esta caja física ya se encuentra inactiva.');
-    }
+    return await enTransaccion(async () => {
+        await bloquearEstaciones();
+        const caja = await getQuery(`SELECT * FROM cajas_fisicas WHERE id = $1`, [idNum]);
+        if (!caja) {
+            throw new Error('La caja física indicada no existe.');
+        }
+        if (Number(caja.activa) === 0) {
+            throw new Error('Esta caja física ya se encuentra inactiva.');
+        }
 
-    // Regla obligatoria: Mínimo 1 caja física activa en el sistema
-    const conteoActivas = await getQuery(`SELECT COUNT(*) as total FROM cajas_fisicas WHERE activa = 1`);
-    if (!conteoActivas || Number(conteoActivas.total) <= 1) {
-        throw new Error('Operación denegada: El sistema debe mantener al menos una caja física activa disponible.');
-    }
+        // Regla obligatoria: Mínimo 1 caja física activa en el sistema
+        const conteoActivas = await getQuery(`SELECT COUNT(*) as total FROM cajas_fisicas WHERE activa = 1`);
+        if (!conteoActivas || Number(conteoActivas.total) <= 1) {
+            throw new Error('Operación denegada: El sistema debe mantener al menos una caja física activa disponible.');
+        }
 
-    // Validar que no tenga turno abierto en curso
-    const turnoAbierto = await getQuery(
-        `SELECT id FROM cajas WHERE caja_fisica_id = ? AND estado = 'abierta'`,
-        [idNum]
-    );
-    if (turnoAbierto) {
-        throw new Error(`No puedes desactivar "${caja.nombre}" porque tiene el Turno #${turnoAbierto.id} actualmente abierto. Debes cerrarlo primero.`);
-    }
+        // Validar que no tenga turno abierto en curso
+        const turnoAbierto = await getQuery(
+            `SELECT id FROM cajas WHERE caja_fisica_id = $1 AND estado = 'abierta'`,
+            [idNum]
+        );
+        if (turnoAbierto) {
+            throw new Error(`No puedes desactivar "${caja.nombre}" porque tiene el Turno #${turnoAbierto.id} actualmente abierto. Debes cerrarlo primero.`);
+        }
 
-    await runQuery(`UPDATE cajas_fisicas SET activa = 0 WHERE id = ?`, [idNum]);
-    return true;
+        await runQuery(`UPDATE cajas_fisicas SET activa = 0 WHERE id = $1`, [idNum]);
+        return true;
+    });
 }
 
 async function reactivarCajaFisica(cajaFisicaId, adminId) {
@@ -86,12 +99,14 @@ async function reactivarCajaFisica(cajaFisicaId, adminId) {
     if (!Number.isFinite(idNum) || idNum <= 0) {
         throw new Error('ID de caja física inválido.');
     }
-    const caja = await getQuery(`SELECT id, activa FROM cajas_fisicas WHERE id = ?`, [idNum]);
-    if (!caja) {
-        throw new Error('La caja física indicada no existe.');
-    }
-    await runQuery(`UPDATE cajas_fisicas SET activa = 1 WHERE id = ?`, [idNum]);
-    return true;
+    return await enTransaccion(async () => {
+        const caja = await getQuery(`SELECT id, activa FROM cajas_fisicas WHERE id = $1`, [idNum]);
+        if (!caja) {
+            throw new Error('La caja física indicada no existe.');
+        }
+        await runQuery(`UPDATE cajas_fisicas SET activa = 1 WHERE id = $1`, [idNum]);
+        return true;
+    });
 }
 
 async function actualizarPermisoFiscalCajaFisica(cajaFisicaId, habilitado, adminId) {
@@ -103,7 +118,7 @@ async function actualizarPermisoFiscalCajaFisica(cajaFisicaId, habilitado, admin
     if (!Number.isFinite(idNum) || idNum <= 0) {
         throw new Error('ID de caja física inválido.');
     }
-    await runQuery(`UPDATE cajas_fisicas SET habilita_respaldo_fiscal = ? WHERE id = ?`, [habilitado ? 1 : 0, idNum]);
+    await runQuery(`UPDATE cajas_fisicas SET habilita_respaldo_fiscal = $1 WHERE id = $2`, [habilitado ? 1 : 0, idNum]);
     return true;
 }
 
@@ -114,8 +129,8 @@ async function actualizarPermisoFiscalCajaFisica(cajaFisicaId, habilitado, admin
 async function obtenerCajasAbiertas() {
     return await allQuery(
         `SELECT c.*,
-                datetime(c.fecha_apertura, 'localtime') as fecha_apertura,
-                datetime(c.fecha_cierre, 'localtime') as fecha_cierre,
+                ${fechaLocal('c.fecha_apertura')} as fecha_apertura,
+                ${fechaLocal('c.fecha_cierre')} as fecha_cierre,
                 cf.nombre as caja_fisica_nombre,
                 COALESCE(cf.habilita_respaldo_fiscal, 1) as habilita_respaldo_fiscal,
                 u.nombre as usuario_nombre,
@@ -131,8 +146,8 @@ async function obtenerCajasAbiertas() {
 async function obtenerCajaAbierta(usuarioId = null, cajaFisicaId = null) {
     let sql = `
         SELECT c.*,
-               datetime(c.fecha_apertura, 'localtime') as fecha_apertura,
-               datetime(c.fecha_cierre, 'localtime') as fecha_cierre,
+               ${fechaLocal('c.fecha_apertura')} as fecha_apertura,
+               ${fechaLocal('c.fecha_cierre')} as fecha_cierre,
                cf.nombre as caja_fisica_nombre,
                COALESCE(cf.habilita_respaldo_fiscal, 1) as habilita_respaldo_fiscal,
                u.nombre as usuario_nombre,
@@ -144,10 +159,10 @@ async function obtenerCajaAbierta(usuarioId = null, cajaFisicaId = null) {
     `;
     const params = [];
     if (cajaFisicaId) {
-        sql += ` AND c.caja_fisica_id = ?`;
+        sql += ` AND c.caja_fisica_id = $1`;
         params.push(cajaFisicaId);
     } else if (usuarioId) {
-        sql += ` AND c.usuario_id = ?`;
+        sql += ` AND c.usuario_id = $1`;
         params.push(usuarioId);
     }
     sql += ` ORDER BY c.id DESC LIMIT 1`;
@@ -157,8 +172,8 @@ async function obtenerCajaAbierta(usuarioId = null, cajaFisicaId = null) {
 async function obtenerHistorialCajas(cajaFisicaId = null) {
     let sql = `
         SELECT c.*,
-               datetime(c.fecha_apertura, 'localtime') as fecha_apertura,
-               datetime(c.fecha_cierre, 'localtime') as fecha_cierre,
+               ${fechaLocal('c.fecha_apertura')} as fecha_apertura,
+               ${fechaLocal('c.fecha_cierre')} as fecha_cierre,
                cf.nombre as caja_fisica_nombre,
                COALESCE(cf.habilita_respaldo_fiscal, 1) as habilita_respaldo_fiscal,
                u.nombre as usuario_nombre,
@@ -169,7 +184,7 @@ async function obtenerHistorialCajas(cajaFisicaId = null) {
     `;
     const params = [];
     if (cajaFisicaId) {
-        sql += ` WHERE c.caja_fisica_id = ?`;
+        sql += ` WHERE c.caja_fisica_id = $1`;
         params.push(cajaFisicaId);
     }
     sql += ` ORDER BY c.id DESC`;
@@ -189,10 +204,12 @@ async function abrirCaja(usuarioId, montoInicial, cajaFisicaId = null) {
             throw new Error('Usuario no válido o inactivo.');
         }
 
+        await bloquearEstaciones();
+
         // Resolver caja física asignada
         let cajaFisica = null;
         if (cajaFisicaId) {
-            cajaFisica = await getQuery(`SELECT * FROM cajas_fisicas WHERE id = ? AND activa = 1`, [cajaFisicaId]);
+            cajaFisica = await getQuery(`SELECT * FROM cajas_fisicas WHERE id = $1 AND activa = 1`, [cajaFisicaId]);
             if (!cajaFisica) {
                 throw new Error('La caja física seleccionada no existe o está inactiva.');
             }
@@ -208,7 +225,7 @@ async function abrirCaja(usuarioId, montoInicial, cajaFisicaId = null) {
             `SELECT c.id, u.nombre as operador
              FROM cajas c
              LEFT JOIN usuarios u ON c.usuario_id = u.id
-             WHERE c.caja_fisica_id = ? AND c.estado = 'abierta'`,
+             WHERE c.caja_fisica_id = $1 AND c.estado = 'abierta'`,
             [cajaFisica.id]
         );
         if (turnoAbiertoEstacion) {
@@ -222,7 +239,7 @@ async function abrirCaja(usuarioId, montoInicial, cajaFisicaId = null) {
             `SELECT c.id, cf.nombre as caja_nombre
              FROM cajas c
              LEFT JOIN cajas_fisicas cf ON c.caja_fisica_id = cf.id
-             WHERE c.usuario_id = ? AND c.estado = 'abierta'`,
+             WHERE c.usuario_id = $1 AND c.estado = 'abierta'`,
             [usuario.id]
         );
         if (turnoAbiertoUsuario) {
@@ -232,7 +249,7 @@ async function abrirCaja(usuarioId, montoInicial, cajaFisicaId = null) {
         }
 
         const res = await runQuery(
-            `INSERT INTO cajas (caja_fisica_id, usuario_id, monto_inicial, estado) VALUES (?, ?, ?, 'abierta')`,
+            `INSERT INTO cajas (caja_fisica_id, usuario_id, monto_inicial, estado) VALUES ($1, $2, $3, 'abierta') RETURNING id`,
             [cajaFisica.id, usuario.id, montoInicialValidado]
         );
         return res.lastID;
@@ -249,8 +266,9 @@ async function reabrirCajaConPermiso(adminId, cajaId, motivo = 'Revisión admini
         if (!ejecutor || !esRolAdministrativo(ejecutor.rol)) {
             throw new Error('Permiso denegado: solo el Administrador puede reabrir un turno cerrado.');
         }
+        await bloquearEstaciones();
 
-        const caja = await getQuery(`SELECT * FROM cajas WHERE id = ?`, [cajaId]);
+        const caja = await getQuery(`SELECT * FROM cajas WHERE id = $1 FOR NO KEY UPDATE`, [cajaId]);
         if (!caja) throw new Error('Turno de caja no encontrado.');
         if (caja.estado === 'abierta') {
             throw new Error(`El Turno #${cajaId} ya se encuentra abierto.`);
@@ -261,7 +279,7 @@ async function reabrirCajaConPermiso(adminId, cajaId, motivo = 'Revisión admini
             `SELECT c.id, cf.nombre as caja_nombre
              FROM cajas c
              LEFT JOIN cajas_fisicas cf ON c.caja_fisica_id = cf.id
-             WHERE c.caja_fisica_id = ? AND c.estado = 'abierta'`,
+             WHERE c.caja_fisica_id = $1 AND c.estado = 'abierta'`,
             [caja.caja_fisica_id]
         );
         if (turnoAbierto) {
@@ -275,7 +293,7 @@ async function reabrirCajaConPermiso(adminId, cajaId, motivo = 'Revisión admini
             `SELECT c.id, cf.nombre as caja_nombre
              FROM cajas c
              LEFT JOIN cajas_fisicas cf ON c.caja_fisica_id = cf.id
-             WHERE c.usuario_id = ? AND c.estado = 'abierta'`,
+             WHERE c.usuario_id = $1 AND c.estado = 'abierta'`,
             [caja.usuario_id]
         );
         if (turnoAbiertoTitular) {
@@ -293,8 +311,8 @@ async function reabrirCajaConPermiso(adminId, cajaId, motivo = 'Revisión admini
         await runQuery(
             `UPDATE cajas
              SET estado = 'abierta',
-                 veces_reabierta = ?,
-                 historial_reaperturas = ?,
+                 veces_reabierta = $1,
+                 historial_reaperturas = $2,
                  efectivo_esperado = NULL,
                  efectivo_real = NULL,
                  diferencia_efectivo = NULL,
@@ -302,7 +320,7 @@ async function reabrirCajaConPermiso(adminId, cajaId, motivo = 'Revisión admini
                  qr_real = NULL,
                  diferencia_qr = NULL,
                  fecha_cierre = NULL
-             WHERE id = ?`,
+             WHERE id = $3`,
             [numReapertura, nuevoHistorial, cajaId]
         );
         return true;
@@ -328,7 +346,7 @@ async function cerrarCaja(cajaId, efectivoRealFisico, usuarioId = null, qrRealCo
             throw new Error('El usuario que intenta cerrar la caja no existe o está inactivo.');
         }
 
-        const caja = await getQuery(`SELECT * FROM cajas WHERE id = ?`, [cajaId]);
+        const caja = await getQuery(`SELECT * FROM cajas WHERE id = $1 FOR NO KEY UPDATE`, [cajaId]);
         if (!caja) throw new Error('Caja no encontrada.');
         if (caja.estado !== 'abierta') throw new Error('Esta caja ya fue cerrada.');
 
@@ -350,7 +368,7 @@ async function cerrarCaja(cajaId, efectivoRealFisico, usuarioId = null, qrRealCo
                 COALESCE(SUM(m.monto), 0) as monto_grupo
              FROM movimientos m
              INNER JOIN movimientos_pagos mp ON mp.movimiento_id = m.id
-             WHERE m.caja_id = ? AND m.estado = 'completado'
+             WHERE m.caja_id = $1 AND m.estado = 'completado'
              GROUP BY m.tipo, canal_venta, m.metodo_pago, cat`,
             [cajaId]
         );
@@ -394,15 +412,15 @@ async function cerrarCaja(cajaId, efectivoRealFisico, usuarioId = null, qrRealCo
         await runQuery(
             `UPDATE cajas
              SET estado = 'cerrada',
-                 efectivo_esperado = ?,
-                 efectivo_real = ?,
-                 qr_esperado = ?,
-                 qr_real = ?,
-                 diferencia_efectivo = ?,
-                 diferencia_qr = ?,
-                 observaciones_cierre = ?,
+                 efectivo_esperado = $1,
+                 efectivo_real = $2,
+                 qr_esperado = $3,
+                 qr_real = $4,
+                 diferencia_efectivo = $5,
+                 diferencia_qr = $6,
+                 observaciones_cierre = $7,
                  fecha_cierre = CURRENT_TIMESTAMP
-             WHERE id = ?`,
+             WHERE id = $8`,
             [
                 efectivoEsperado,
                 efectivoRealValidado,
@@ -441,8 +459,8 @@ async function cerrarCaja(cajaId, efectivoRealFisico, usuarioId = null, qrRealCo
 async function obtenerResumenCaja(cajaId) {
     const caja = await getQuery(
         `SELECT c.*,
-                datetime(c.fecha_apertura, 'localtime') as fecha_apertura,
-                datetime(c.fecha_cierre, 'localtime') as fecha_cierre,
+                ${fechaLocal('c.fecha_apertura')} as fecha_apertura,
+                ${fechaLocal('c.fecha_cierre')} as fecha_cierre,
                 COALESCE(cf.nombre, 'Caja Principal') as caja_fisica_nombre,
                 COALESCE(cf.habilita_respaldo_fiscal, 1) as habilita_respaldo_fiscal,
                 COALESCE(u.nombre, '—') as usuario_nombre,
@@ -450,7 +468,7 @@ async function obtenerResumenCaja(cajaId) {
          FROM cajas c
          LEFT JOIN cajas_fisicas cf ON c.caja_fisica_id = cf.id
          LEFT JOIN usuarios u ON c.usuario_id = u.id
-         WHERE c.id = ?`,
+         WHERE c.id = $1`,
         [cajaId]
     );
     if (!caja) throw new Error('Caja no encontrada.');
@@ -464,9 +482,9 @@ async function obtenerResumenCaja(cajaId) {
                 COALESCE((SELECT SUM(mp.monto) FROM movimientos_pagos mp WHERE mp.movimiento_id = m.id AND mp.metodo_pago = 'qr'), m.monto_qr, 0) as pagado_qr,
                 COALESCE((SELECT SUM(mp.monto) FROM movimientos_pagos mp WHERE mp.movimiento_id = m.id AND mp.metodo_pago = 'pedidos_ya'), 0) as pagado_pedidos_ya,
                 COALESCE((SELECT SUM(mp.monto) FROM movimientos_pagos mp WHERE mp.movimiento_id = m.id AND mp.metodo_pago = 'yango'), 0) as pagado_yango,
-                m.descripcion, datetime(m.fecha_hora, 'localtime') as fecha_hora
+                m.descripcion, ${fechaLocal('m.fecha_hora')} as fecha_hora
          FROM movimientos m
-         WHERE m.caja_id = ? AND m.estado = 'completado'
+         WHERE m.caja_id = $1 AND m.estado = 'completado'
          ORDER BY m.id ASC`,
         [cajaId]
     );
@@ -567,8 +585,8 @@ async function obtenerDatosCierreParaNotificacion(cajaId) {
         `SELECT c.id, c.monto_inicial, c.efectivo_esperado, c.efectivo_real,
                 c.diferencia_efectivo, c.qr_esperado, c.qr_real, c.diferencia_qr, c.veces_reabierta,
                 COALESCE(c.observaciones_cierre, '') as observaciones_cierre,
-                datetime(c.fecha_apertura, 'localtime') as fecha_apertura,
-                datetime(c.fecha_cierre, 'localtime') as fecha_cierre,
+                ${fechaLocal('c.fecha_apertura')} as fecha_apertura,
+                ${fechaLocal('c.fecha_cierre')} as fecha_cierre,
                 c.estado,
                 COALESCE(cf.nombre, 'Caja Principal') as caja_nombre,
                 COALESCE(u.nombre, '—') as cajero_nombre,
@@ -576,7 +594,7 @@ async function obtenerDatosCierreParaNotificacion(cajaId) {
          FROM cajas c
          LEFT JOIN cajas_fisicas cf ON c.caja_fisica_id = cf.id
          LEFT JOIN usuarios u ON c.usuario_id = u.id
-         WHERE c.id = ?`,
+         WHERE c.id = $1`,
         [cajaId]
     );
     if (!caja) return null;
@@ -591,9 +609,9 @@ async function obtenerDatosCierreParaNotificacion(cajaId) {
                 COALESCE((SELECT SUM(mp.monto) FROM movimientos_pagos mp WHERE mp.movimiento_id = m.id AND mp.metodo_pago = 'qr'), m.monto_qr, 0) as pagado_qr,
                 COALESCE((SELECT SUM(mp.monto) FROM movimientos_pagos mp WHERE mp.movimiento_id = m.id AND mp.metodo_pago = 'pedidos_ya'), 0) as pagado_pedidos_ya,
                 COALESCE((SELECT SUM(mp.monto) FROM movimientos_pagos mp WHERE mp.movimiento_id = m.id AND mp.metodo_pago = 'yango'), 0) as pagado_yango,
-                m.descripcion, datetime(m.fecha_hora, 'localtime') as fecha_hora
+                m.descripcion, ${fechaLocal('m.fecha_hora')} as fecha_hora
          FROM movimientos m
-         WHERE m.caja_id = ? AND m.estado = 'completado'
+         WHERE m.caja_id = $1 AND m.estado = 'completado'
          ORDER BY m.id ASC`,
         [cajaId]
     );
