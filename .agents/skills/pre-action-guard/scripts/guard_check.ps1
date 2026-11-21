@@ -4,7 +4,7 @@
 .DESCRIPTION
     Checks destructive commands, file modifications, and plan alignment.
 .PARAMETER Action
-    The operation being performed (write_to_file, run_command, etc.)
+    The Codex operation being assessed (apply_patch, exec_command, etc.).
 .PARAMETER Target
     The file path or command string.
 .PARAMETER Plan
@@ -36,11 +36,11 @@ $Action = $Action.ToLower()
 $Target = $Target.ToLower()
 
 # 2. Category Check
-if ($Action -match "^(view_|list_|search_|read_|get-)") {
+if ($Action -match "^(view_|list_|search_|read_|find_|get-)") {
     $RiskLevel = "NONE"
     $Reason = "Read-only operation."
 }
-elseif ($Action -eq "write_to_file" -or $Action -eq "replace_file_content" -or $Action -eq "set-content") {
+elseif ($Action -eq "apply_patch" -or $Action -eq "set-content") {
     $RiskLevel = "MEDIUM"
     $Reason = "Modifying file content."
     
@@ -51,7 +51,7 @@ elseif ($Action -eq "write_to_file" -or $Action -eq "replace_file_content" -or $
         $Reason = "High risk target file."
     }
 }
-elseif ($Action -eq "run_command" -or $Action -eq "invoke-expression") {
+elseif ($Action -eq "exec_command" -or $Action -eq "invoke-expression") {
     $RiskLevel = "HIGH"
     $Reason = "Executing shell command."
     
@@ -68,9 +68,8 @@ elseif ($Action -eq "run_command" -or $Action -eq "invoke-expression") {
             $Reason = "Unsafe wide deletion attempt."
         }
         else {
-            # Critical but focused (e.g. rm file.txt) -> Requires Warning
-            $Allowed = $true 
-            $Warnings += "Confirm intent before execution."
+            $Allowed = $false
+            $Warnings += "Explicit authorization is required before execution."
         }
     }
 }

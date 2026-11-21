@@ -1,10 +1,11 @@
 ---
-name: Pre-Action Guard
+name: pre-action-guard
 description: A QA gate that validates potentially destructive or irreversible actions before execution.
-version: 1.0.0
-author: Antigravity Skills Library
-created: 2026-01-16
-leverage_score: 5/5
+metadata:
+  version: 1.0.0
+  author: Antigravity Skills Library
+  created: 2026-01-16
+  leverage_score: 5/5
 ---
 
 # SKILL-018: Pre-Action Guard
@@ -24,7 +25,7 @@ Enforces a **"Measure Twice, Cut Once"** philosophy. This skill intercepts high-
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `--Action` | string | Yes | - | The tool/verb being performed (e.g. `write_to_file`, `rm`) |
+| `--Action` | string | Yes | - | The Codex tool or operation (for example, `apply_patch` or a destructive shell command) |
 | `--Target` | string | Yes | - | The file path or command argument |
 | `--Plan` | string | No | $null | The current plan context for alignment check |
 
@@ -78,8 +79,9 @@ See `scripts/guard_check.ps1`.
 
 ## Integration with Other Skills
 
-**All agents must:**
+Use this gate before a potentially destructive or irreversible operation:
 
-1. Call this skill BEFORE running `write_to_file` on existing files.
-2. Call this skill BEFORE running any `run_command` containing `rm`, `del`, `drop`.
-3. If `allowed` is false, **STOP** and ask user for confirmation.
+1. Resolve the exact target with read-only checks.
+2. Assess `apply_patch` changes that delete material and `exec_command` operations that delete, overwrite, drop, reset, force-push, or recursively move data.
+3. For ordinary reversible edits inside the workspace, follow Codex's normal edit workflow without invoking this gate.
+4. If `allowed` is false, stop. Ask for confirmation only when approval can legitimately authorize the operation; otherwise choose a safer alternative.

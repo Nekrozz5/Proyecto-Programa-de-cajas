@@ -1,5 +1,5 @@
 ---
-name: State Overlay Consistency Checker
+name: state-consistency
 description: Detect and prevent state-visibility violations across execution contexts within a single transaction.
 ---
 
@@ -137,11 +137,9 @@ If a read does not observe a prior write within the same transaction, fail immed
 
 | Skill | Role |
 |-------|------|
-| **SKILL-007** | Requires invariants |
-| **SKILL-017** | Detects stuck execution |
-| **SKILL-018** | Hard pre-execution gate |
-| **SKILL-019** | Red-team scenario gen |
-| **SKILL-020** | Postmortem logging |
+| **impasse-detector** | Detects repeated failed execution |
+| **pre-action-guard** | Hard pre-execution gate |
+| **adversarial-reviewer** | Red-team scenario generation |
 
 ## Design Principle
 

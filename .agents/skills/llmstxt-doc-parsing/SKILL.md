@@ -1,10 +1,11 @@
 ---
-name: llms.txt & Doc Parsing
+name: llmstxt-doc-parsing
 description: Rapidly ingest documentation via the /llms.txt standard to gain "fast-track" understanding of libraries without scraping entire sites.
-version: 1.0.0
-author: Antigravity Skills Library
-created: 2026-01-16
-leverage_score: 5/5
+metadata:
+  version: 1.0.0
+  author: Antigravity Skills Library
+  created: 2026-01-16
+  leverage_score: 5/5
 ---
 
 # SKILL-011: llms.txt & Doc Parsing
@@ -75,6 +76,6 @@ A single, optimized markdown file containing the "fast-track" documentation cont
 
 **Agent Workflow:**
 1. User asks: "How do I use this new generic web3 library?"
-2. Agent runs: `.\skills\08_llmstxt_doc_parsing\fetch_docs.ps1 -Url "https://generic-web3.io"`
+2. Codex runs: `& '.\.agents\skills\llmstxt-doc-parsing\fetch_docs.ps1' -Url "https://generic-web3.io"`
 3. Script outputs: `CONSOLIDATED_KNOWLEDGE.md`
 4. Agent reads file and answers user instantly.

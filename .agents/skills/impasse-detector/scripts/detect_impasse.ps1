@@ -50,7 +50,7 @@ function Get-ImpasseScore {
     }
 
     # 3. Check for repetitive file reads (Heuristic)
-    $ReadMatches = [regex]::Matches($Text, "(view_file|list_dir|read_resource|run_command)", "IgnoreCase")
+    $ReadMatches = [regex]::Matches($Text, "(view_image|list_mcp_resources|read_mcp_resource|exec_command|apply_patch)", "IgnoreCase")
     if ($ReadMatches.Count -gt 6) { 
         $Score += 20
         $Reasons += "High frequency of tool operations ($($ReadMatches.Count) in window)"

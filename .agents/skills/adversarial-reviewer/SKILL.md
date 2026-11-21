@@ -1,10 +1,11 @@
 ---
-name: Adversarial Reviewer
+name: adversarial-reviewer
 description: Generates a 'Red Team' critique of recent code or plans to identify weak assumptions and edge cases.
-version: 1.0.0
-author: Antigravity Skills Library
-created: 2026-01-16
-leverage_score: 5/5
+metadata:
+  version: 1.0.0
+  author: Antigravity Skills Library
+  created: 2026-01-16
+  leverage_score: 5/5
 ---
 
 # SKILL-019: Adversarial Reviewer

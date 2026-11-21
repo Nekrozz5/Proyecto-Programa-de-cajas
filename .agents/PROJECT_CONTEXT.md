@@ -1,16 +1,17 @@
-# Contexto del Proyecto: Sistema POS y Control de Cajas (Cloud / AWS)
+# Contexto del Proyecto para Codex: Sistema POS y Control de Cajas (Cloud / AWS)
 
 ## 0. Protocolo de Entrada Obligatorio: Verificación de Modelo y Fases [GATEWAY-CHECK]
-Ante **CUALQUIER** solicitud de investigación, análisis, planificación, nueva funcionalidad o refactorización, la IA debe ejecutar este protocolo como primer paso ineludible:
-1. **Paso 1 (Lectura Mandatoria):** Leer y aplicar las pautas de [`.agents/skills/phase-planner/SKILL.md`](.agents/skills/phase-planner/SKILL.md).
+Ante **CUALQUIER** solicitud de investigación, análisis, planificación, nueva funcionalidad o refactorización, Codex debe ejecutar este protocolo como primer paso ineludible:
+1. **Paso 1 (Lectura Mandatoria):** Leer y aplicar las pautas de [`skills/phase-planner/SKILL.md`](skills/phase-planner/SKILL.md).
 2. **Paso 2 (Evaluación de Adecuación de Modelo y Esfuerzo):**
-   - Identificar el modelo activo en el chat y su nivel de razonamiento (`Low`, `Medium`, `High`, `XHigh`).
+   - Identificar el modelo activo y su nivel de razonamiento (`low`, `medium`, `high`, `xhigh`, `max` o `ultra`) solo cuando el runtime de Codex los exponga.
+   - Si el identificador exacto o el esfuerzo no están visibles, declararlo como `no expuesto`; nunca inferir nombres o niveles.
    - Evaluar si el modelo actual es **idóneo**, **excesivo (quema tokens en vano)** o **insuficiente (riesgo de alucinación)** para la tarea solicitada.
 3. **Paso 3 (Confirmación Previa al Desarrollo):**
    - **Si el modelo es idóneo:** Incluir obligatoriamente al inicio de la respuesta una breve confirmación:
-     > 🛡️ **[Validación de Modelo]:** *Confirmado: [Nombre del Modelo] ([Nivel]) es el modelo idóneo para esta tarea de [investigación/desarrollo/planificación].*
+     > 🛡️ **[Validación de Modelo]**: *Confirmado: [modelo visible o familia Codex] ([esfuerzo visible o no expuesto]) es adecuado para esta tarea de [investigación/desarrollo/planificación].*
      Y luego proceder inmediatamente con el desarrollo o desglose.
-   - **Si existe desajuste de modelo (Overkill o Underpowered):** **DETENERSE INMEDIATAMENTE**. No elaborar la solución en ese turno. Explicar al usuario por qué el modelo actual no es óptimo, sugerir la alternativa ideal (ej. cambiar a *Flash/Neon* para ahorrar cuota, o delegar a subagente `research`), y **solicitar confirmación expresa al usuario** antes de comenzar.
+   - **Si existe desajuste de modelo:** **DETENERSE INMEDIATAMENTE**. No elaborar la solución en ese turno. Explicar por qué el modelo actual no es óptimo, sugerir una alternativa disponible en Codex y **solicitar confirmación expresa** antes de comenzar.
 
 ## 1. Arquitectura y Punteros de Contexto
 - **Stack Principal:** Next.js (App Router), Node.js, Tailwind CSS, Shadcn UI (`components/ui/`), SQLite3 local (`caja.db`) y Drizzle ORM (`database/schema.js`).
@@ -19,9 +20,9 @@ Ante **CUALQUIER** solicitud de investigación, análisis, planificación, nueva
 - **Seguridad y Sesiones (`server/lib/sesion.js`):** JWT HttpOnly (`jose`), hash bcrypt (salt 10). `INSTANCE_BOOT_ID` para invalidación inmediata de tokens administrativos al reiniciar servidor. TTL: `developer` (15 min), `propietario`/`admin` (30 min), `user` (8 h). Rate limiting dual (IP con `cf-connecting-ip`/`TRUST_PROXY` y cuenta).
 - **Operación Cloud (AWS):** Despliegue en AWS con soporte para acceso desde PC y dispositivos móviles con cookies adaptativas y blindaje cliente (`notranslate` en `app/layout.js`, `Cache-Control: no-store` en endpoints de caja).
 - **Punteros Documentales:**
-  - Arquitectura detallada y diagramas de flujo: [`docs/ARQUITECTURA.md`](docs/ARQUITECTURA.md).
-  - Batería de escenarios de verificación funcional: [`docs/PRUEBAS.md`](docs/PRUEBAS.md).
-  - Guía de desarrollo y convenciones: [`GUIA_DESARROLLO.md`](GUIA_DESARROLLO.md).
+  - Arquitectura detallada y diagramas de flujo: [`docs/ARQUITECTURA.md`](../docs/ARQUITECTURA.md).
+  - Batería de escenarios de verificación funcional: [`docs/PRUEBAS.md`](../docs/PRUEBAS.md).
+  - Guía de desarrollo y convenciones: [`GUIA_DESARROLLO.md`](../GUIA_DESARROLLO.md).
 
 ## 2. Reglas de Negocio Inmutables
 - **Roles y Permisos:**
@@ -90,9 +91,9 @@ Para maximizar la densidad de información y el ahorro de tokens, las siguientes
 - **Planificación Estructurada y Presupuesto de Modelos (`phase-planner`):**
   - Ante nuevas funcionalidades o refactorizaciones extensas, invocar `.agents/skills/phase-planner/SKILL.md` para segmentar el trabajo en fases atómicas con prompt quirúrgico, archivos acotados y criterios de aceptación verificables.
   - **Asignación Racional de Modelo y Agente por Fase (Cero Quema Inútil de Tokens):** Cada fase planificada debe declarar obligatoriamente:
-    1. **Modelo y Esfuerzo de Pensamiento (`Low` / `Medium` / `High`):** Adaptado a la complejidad de la tarea y a la disponibilidad de cuota (diaria vs. semanal). Para tareas mecánicas, estilos o scripts directos usar *Gemini 3.8 Flash (Low/Medium)* o *Gemini 4 Neon (Low)*. Reservar modelos de cuota semanal y alto razonamiento (*Gemini 4 Argon*, *Claude Opus*) estrictamente para arquitectura crítica o bugs complejos.
-    2. **Agente / Entorno de Ejecución:** Indicar si se ejecuta directo en el chat o mediante subagente (ej. `research` para lectura masiva de archivos sin saturar el contexto principal; `browser` para pruebas visuales en navegador).
-    3. **Detección Activa de Desajuste y Confirmación:** Si el modelo configurado en el chat es excesivo (ej. Argon/Opus High para maquetación o scripts sencillos) o insuficiente (ej. Flash Low para concurrencia o arquitectura crítica), la IA debe advertir proactivamente el desajuste, sugerir el cambio al modelo/agente idóneo y solicitar confirmación al usuario antes de proceder con la ejecución.
+    1. **Modelo y Esfuerzo de Pensamiento:** Adaptados a la complejidad y al catálogo de modelos que Codex exponga en la sesión. Usar una variante rápida con esfuerzo `low`/`medium` para tareas mecánicas; reservar una variante de razonamiento avanzado con `high`/`xhigh` para arquitectura crítica o bugs complejos.
+    2. **Modo de Ejecución:** Ejecutar directamente en el chat por defecto. Delegar solo cuando el usuario lo pida o una instrucción de mayor prioridad lo autorice; los nombres de subagentes son tareas descriptivas, no capacidades fijas como `research` o `browser`.
+    3. **Detección Activa de Desajuste y Confirmación:** Si el modelo configurado es excesivo o insuficiente, advertir el desajuste, sugerir una alternativa realmente disponible y solicitar confirmación antes de proceder.
 
 ## 5. Comandos del Entorno
 - **Desarrollo:** `npm run dev` (abre en `http://localhost:3000`).

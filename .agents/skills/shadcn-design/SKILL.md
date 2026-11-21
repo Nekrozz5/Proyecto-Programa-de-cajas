@@ -1,5 +1,5 @@
 ---
-name: shadcn
+name: shadcn-design
 description: Shadcn/ui-inspired design with minimal, clean components, monochrome palette, and utility-first patterns.
 license: MIT
 metadata:

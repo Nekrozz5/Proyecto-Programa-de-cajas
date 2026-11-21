@@ -10,10 +10,10 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 ## Directiva Obligatoria de Entrada: Verificación de Modelo y Skill de Fases
 Ante cualquier solicitud de investigación, análisis, planificación o código en este proyecto:
-1. Consultar de forma obligatoria `GEMINI.md` y `.agents/skills/phase-planner/SKILL.md`.
-2. Verificar el modelo y esfuerzo activo en el chat.
-3. Si el modelo es el idóneo, confirmarlo explícitamente al inicio (`> 🛡️ **[Validación de Modelo]**: ...`) antes de responder.
-4. Si el modelo no es el óptimo (quema tokens en vano o es insuficiente), detenerse, alertar al usuario con la alternativa recomendada y pedir confirmación antes de elaborar la respuesta.
+1. Consultar de forma obligatoria `.agents/PROJECT_CONTEXT.md` y `.agents/skills/phase-planner/SKILL.md`.
+2. Verificar el modelo y esfuerzo activos usando solo la información expuesta por el runtime de Codex; si un dato no está visible, declararlo como no expuesto sin inventarlo.
+3. Si el modelo es idóneo, confirmarlo explícitamente al inicio (`> 🛡️ **[Validación de Modelo]**: ...`) antes de responder.
+4. Si el modelo no es óptimo (excesivo o insuficiente), detenerse, recomendar un modelo disponible de Codex y pedir confirmación antes de elaborar la respuesta.
 
 <!-- BEGIN AWS Agent Toolkit rules -->
 # AWS Guidance for the new AWS experience

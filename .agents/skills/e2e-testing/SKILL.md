@@ -1,10 +1,11 @@
 ---
 name: e2e-testing
 description: "End-to-end testing workflow with Playwright for browser automation, visual regression, cross-browser testing, and CI/CD integration."
-category: granular-workflow-bundle
-risk: safe
-source: personal
-date_added: "2026-02-27"
+metadata:
+  category: granular-workflow-bundle
+  risk: safe
+  source: personal
+  date_added: "2026-02-27"
 ---
 
 # E2E Testing Workflow
@@ -30,9 +31,7 @@ Choose phases needed for the current task, not every listed skill. Use dedicated
 
 ### Phase 1: Test Setup
 
-#### Skills to Invoke
-- `playwright-skill` - Playwright setup
-- `e2e-testing-patterns` - E2E patterns
+Use the repository's installed Playwright package and configuration. Read the relevant project files before changing setup.
 
 #### Actions
 1. Install Playwright
@@ -43,14 +42,12 @@ Choose phases needed for the current task, not every listed skill. Use dedicated
 
 #### Copy-Paste Prompts
 ```
-Use @playwright-skill to set up Playwright testing
+Use $e2e-testing to set up Playwright for this repository.
 ```
 
 ### Phase 2: Test Design
 
-#### Skills to Invoke
-- `e2e-testing-patterns` - Test patterns
-- `test-automator` - Test automation
+Derive scenarios from the requested user flows and the repository's existing fixtures.
 
 #### Actions
 1. Identify critical flows
@@ -61,14 +58,12 @@ Use @playwright-skill to set up Playwright testing
 
 #### Copy-Paste Prompts
 ```
-Use @e2e-testing-patterns to design E2E test strategy
+Use $e2e-testing to design the smallest E2E strategy that covers these flows.
 ```
 
 ### Phase 3: Test Implementation
 
-#### Skills to Invoke
-- `playwright-skill` - Playwright tests
-- `webapp-testing` - Web app testing
+Implement tests with the local Playwright APIs and conventions.
 
 #### Actions
 1. Write test scripts
@@ -79,14 +74,12 @@ Use @e2e-testing-patterns to design E2E test strategy
 
 #### Copy-Paste Prompts
 ```
-Use @playwright-skill to write E2E test scripts
+Use $e2e-testing to implement the approved Playwright scenarios.
 ```
 
 ### Phase 4: Browser Automation
 
-#### Skills to Invoke
-- `browser-automation` - Browser automation
-- `playwright-skill` - Playwright features
+Use Playwright through repository scripts or `exec_command`; request approval before browser installation, downloads, or GUI launches when required.
 
 #### Actions
 1. Configure headless mode
@@ -97,14 +90,12 @@ Use @playwright-skill to write E2E test scripts
 
 #### Copy-Paste Prompts
 ```
-Use @browser-automation to automate browser interactions
+Use $e2e-testing to automate these browser interactions with Playwright.
 ```
 
 ### Phase 5: Visual Regression
 
-#### Skills to Invoke
-- `playwright-skill` - Visual testing
-- `ui-visual-validator` - Visual validation
+Use Playwright screenshot assertions and keep reviewed baselines stable.
 
 #### Actions
 1. Set up visual testing
@@ -115,14 +106,12 @@ Use @browser-automation to automate browser interactions
 
 #### Copy-Paste Prompts
 ```
-Use @playwright-skill to implement visual regression testing
+Use $e2e-testing to add reviewed Playwright visual assertions.
 ```
 
 ### Phase 6: Cross-Browser Testing
 
-#### Skills to Invoke
-- `playwright-skill` - Multi-browser
-- `webapp-testing` - Browser testing
+Configure only the Playwright browser projects required by the task.
 
 #### Actions
 1. Configure Chromium
@@ -133,14 +122,12 @@ Use @playwright-skill to implement visual regression testing
 
 #### Copy-Paste Prompts
 ```
-Use @playwright-skill to run cross-browser tests
+Use $e2e-testing to run the requested Playwright browser matrix.
 ```
 
 ### Phase 7: CI/CD Integration
 
-#### Skills to Invoke
-- `github-actions-templates` - GitHub Actions
-- `cicd-automation-workflow-automate` - CI/CD
+Inspect the repository's existing CI provider and workflow before proposing changes.
 
 #### Actions
 1. Create CI workflow
@@ -151,7 +138,7 @@ Use @playwright-skill to run cross-browser tests
 
 #### Copy-Paste Prompts
 ```
-Use @github-actions-templates to integrate E2E tests with CI
+Use $e2e-testing to integrate the Playwright suite with the existing CI workflow.
 ```
 
 ## Quality Gates
@@ -161,12 +148,6 @@ Use @github-actions-templates to integrate E2E tests with CI
 - [ ] Visual tests stable
 - [ ] Cross-browser verified
 - [ ] CI integration working
-
-## Related Workflow Bundles
-
-- `testing-qa` - Testing workflow
-- `development` - Development
-- `web-performance-optimization` - Performance
 
 ## Limitations
 - Use this skill only when the task clearly matches the scope described above.

@@ -1,10 +1,11 @@
 ---
-name: Context Window Pruner
+name: context-pruner
 description: Optimize information density by filtering workspace files based on relevance to the current task. Excludes high-noise files (lockfiles, assets) and prioritizes source code matching semantic queries.
-version: 1.0.0
-author: Antigravity Skills Library
-created: 2026-01-16
-leverage_score: 5/5
+metadata:
+  version: 1.0.0
+  author: Antigravity Skills Library
+  created: 2026-01-16
+  leverage_score: 5/5
 ---
 
 # SKILL-008: Context Window Pruner
@@ -44,6 +45,6 @@ See `prune_context.ps1`.
 ## Integration
 
 ```powershell
-$files = .\skills\08_context_pruner\prune_context.ps1 -Focus "EVM opcode"
-# Agent works only with $files
+$files = & '.\.agents\skills\context-pruner\prune_context.ps1' -Focus "auth"
+# Codex reads only the returned relevant paths.
 ```

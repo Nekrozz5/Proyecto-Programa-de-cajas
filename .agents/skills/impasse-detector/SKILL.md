@@ -1,10 +1,11 @@
 ---
-name: Impasse Detector
+name: impasse-detector
 description: Detects when the agent is stuck in a reasoning loop or unproductive state by analyzing tool usage and sentiment patterns.
-version: 1.0.0
-author: Antigravity Skills Library
-created: 2026-01-16
-leverage_score: 5/5
+metadata:
+  version: 1.0.0
+  author: Antigravity Skills Library
+  created: 2026-01-16
+  leverage_score: 5/5
 ---
 
 # SKILL-017: Impasse Detector
@@ -74,8 +75,8 @@ See `scripts/detect_impasse.ps1`.
 
 ## Integration with Other Skills
 
-**All agent loops should:**
+Use this skill when repeated attempts, repeated tool failures, or circular reasoning indicate a real impasse:
 
-1. Call SKILL-017 every 5-10 turns.
-2. If status is `IMPASSE`, trigger **SKILL-020 (Failure Postmortem)** AND **SKILL-010 (Async Feedback)**.
-3. If score > 90, stop execution and warn user.
+1. Review the last attempts and identify the repeated blocking condition.
+2. If status is `IMPASSE`, summarize the evidence and choose a materially different safe approach.
+3. If no safe alternative remains, stop and tell the user exactly what input or external change is required.
