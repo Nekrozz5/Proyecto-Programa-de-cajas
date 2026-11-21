@@ -1,28 +1,31 @@
 # Contexto del Proyecto para Codex: Sistema POS y Control de Cajas (Cloud / AWS)
 
 ## 0. Protocolo de Entrada Obligatorio: Verificación de Modelo y Fases [GATEWAY-CHECK]
-Ante **CUALQUIER** solicitud de investigación, análisis, planificación, nueva funcionalidad o refactorización, Codex debe ejecutar este protocolo como primer paso ineludible:
+Ante solicitudes de investigación, análisis, planificación o diseño, Codex debe ejecutar este protocolo como primer paso ineludible:
 1. **Paso 1 (Lectura Mandatoria):** Leer y aplicar las pautas de [`skills/phase-planner/SKILL.md`](skills/phase-planner/SKILL.md).
 2. **Paso 2 (Evaluación de Adecuación de Modelo y Esfuerzo):**
    - Identificar el modelo activo y su nivel de razonamiento (`low`, `medium`, `high`, `xhigh`, `max` o `ultra`) solo cuando el runtime de Codex los exponga.
    - Si el identificador exacto o el esfuerzo no están visibles, declararlo como `no expuesto`; nunca inferir nombres o niveles.
    - Evaluar si el modelo actual es **idóneo**, **excesivo (quema tokens en vano)** o **insuficiente (riesgo de alucinación)** para la tarea solicitada.
-3. **Paso 3 (Confirmación Previa al Desarrollo):**
+3. **Paso 3 (Confirmación Previa a la Elaboración):**
    - **Si el modelo es idóneo:** Incluir obligatoriamente al inicio de la respuesta una breve confirmación:
      > 🛡️ **[Validación de Modelo]**: *Confirmado: [modelo visible o familia Codex] ([esfuerzo visible o no expuesto]) es adecuado para esta tarea de [investigación/desarrollo/planificación].*
      Y luego proceder inmediatamente con el desarrollo o desglose.
    - **Si existe desajuste de modelo:** **DETENERSE INMEDIATAMENTE**. No elaborar la solución en ese turno. Explicar por qué el modelo actual no es óptimo, sugerir una alternativa disponible en Codex y **solicitar confirmación expresa** antes de comenzar.
+
+Para tareas de ejecución —código, correcciones, migraciones o pruebas— no solicitar verificación de modelo ni lectura de `phase-planner`; consultar este contexto solo cuando el alcance lo requiera.
 
 ## 1. Arquitectura y Punteros de Contexto
 - **Stack Principal:** Next.js (App Router), Node.js, Tailwind CSS y Shadcn UI (`components/ui/`). PostgreSQL es el único motor de persistencia y `pg` es su cliente.
 - **Persistencia y Concurrencia:** `database/postgres.js` administra pools por URL. El registro central vive en la base de control. Cada negocio tiene su propia base operativa y las transacciones se vinculan al contexto del tenant.
 - **Esquema y Migraciones:** `database/migraciones-control.js` configura el registro central. `database/migraciones-tenant.js` aplica cambios operativos de forma transaccional y registra cada versión en `schema_migrations`.
 - **Seguridad y Sesiones (`server/lib/sesion.js`):** JWT HttpOnly (`jose`), hash bcrypt (salt 10). `INSTANCE_BOOT_ID` para invalidación inmediata de tokens administrativos al reiniciar servidor. TTL: `developer` (15 min), `propietario`/`admin` (30 min), `user` (8 h). Rate limiting dual (IP con `cf-connecting-ip`/`TRUST_PROXY` y cuenta).
-- **Operación Cloud (AWS):** Despliegue en AWS con soporte para acceso desde PC y dispositivos móviles con cookies adaptativas y blindaje cliente (`notranslate` en `app/layout.js`, `Cache-Control: no-store` en endpoints de caja).
+- **Operación Cloud (AWS):** Despliegue en AWS con soporte para acceso desde PC y dispositivos móviles con cookies adaptativas y blindaje cliente (`notranslate` en `app/layout.js`, `Cache-Control: no-store` en endpoints de caja). Si el servidor MCP de AWS no está conectado, no intentes usar `aws___search_documentation` ni `aws___retrieve_skill`; usa la documentación oficial de AWS.
 - **Punteros Documentales:**
   - Arquitectura detallada y diagramas de flujo: [`docs/ARQUITECTURA.md`](../docs/ARQUITECTURA.md).
   - Batería de escenarios de verificación funcional: [`docs/PRUEBAS.md`](../docs/PRUEBAS.md).
   - Guía de desarrollo y convenciones: [`GUIA_DESARROLLO.md`](../GUIA_DESARROLLO.md).
+  - Para revisar migraciones y consultas SQL, usar `supabase-postgres-best-practices`. Las reglas de RLS y auth de Supabase NO aplican: este proyecto usa aislamiento por tenant en la aplicación.
 
 ## 2. Reglas de Negocio Inmutables
 - **Roles y Permisos:**

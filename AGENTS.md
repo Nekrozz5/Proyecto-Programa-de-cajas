@@ -9,11 +9,13 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 <!-- END:nextjs-agent-rules -->
 
 ## Directiva Obligatoria de Entrada: Verificación de Modelo y Skill de Fases
-Ante cualquier solicitud de investigación, análisis, planificación o código en este proyecto:
+Ante solicitudes de planificación, investigación o diseño en este proyecto:
 1. Consultar de forma obligatoria `.agents/PROJECT_CONTEXT.md` y `.agents/skills/phase-planner/SKILL.md`.
 2. Verificar el modelo y esfuerzo activos usando solo la información expuesta por el runtime de Codex; si un dato no está visible, declararlo como no expuesto sin inventarlo.
 3. Si el modelo es idóneo, confirmarlo explícitamente al inicio (`> 🛡️ **[Validación de Modelo]**: ...`) antes de responder.
 4. Si el modelo no es óptimo (excesivo o insuficiente), detenerse, recomendar un modelo disponible de Codex y pedir confirmación antes de elaborar la respuesta.
+
+Para tareas de ejecución —código, correcciones, migraciones o pruebas— no solicitar verificación de modelo ni lectura de `phase-planner`; consultar `.agents/PROJECT_CONTEXT.md` cuando el alcance lo requiera.
 
 <!-- BEGIN AWS Agent Toolkit rules -->
 # AWS Guidance for the new AWS experience
@@ -61,6 +63,7 @@ Where this guidance conflicts with the project's own instructions, the project's
   4. If neither list shows the service, check the [Not supported for this experience list](https://docs.aws.amazon.com/accounts/latest/reference/supported-services-sign-up-new.html#unsupported-services). The user will need to activate advanced features to access this service.
 - Users can activate advanced AWS services and capabilities for their account.
 - For any AWS task or question — building, configuring, migrating, debugging, or operating a service, writing SDK code, authoring CDK/CloudFormation, or answering how a service works — first call `aws___search_documentation` with topic `agent_skills` and load the matching skill with `aws___retrieve_skill`. Do this even when you believe you know the answer: skills carry current service behavior that your training may not. Prefer the skill's guidance over general knowledge. Skip it only for work that does not involve AWS.
+- If the AWS MCP server is not connected, do not attempt to use `aws___search_documentation` or `aws___retrieve_skill`; use the official AWS documentation.
 
 ### Help level
 
