@@ -16,7 +16,9 @@
     "seed": "node --env-file-if-exists=.env.local scripts/seed_cafeteria.js",
     "demo:seed": "node --env-file-if-exists=.env.local scripts/seed_demo.js",
     "simular": "node --env-file-if-exists=.env.local tests/simulador_integral.js",
-    "backup": "node --env-file-if-exists=.env.local scripts/backup-postgres.js"
+    "backup": "node --env-file-if-exists=.env.local scripts/backup-postgres.js",
+    "cdk:synth": "cdk synth --strict",
+    "cdk:diff": "cdk diff"
   },
   "keywords": [],
   "author": "",
@@ -45,6 +47,9 @@
   "devDependencies": {
     "@playwright/test": "^1.65.1",
     "autoprefixer": "^10.6.2",
+    "aws-cdk": "^2.1149.0",
+    "aws-cdk-lib": "^2.278.0",
+    "constructs": "^10.8.1",
     "postcss": "^8.5.33",
     "tailwindcss": "^3.4.19"
   }

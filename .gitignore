@@ -4,6 +4,7 @@ node_modules/
 out/
 build/
 dist/
+cdk.out/
 
 # Bases de datos SQLite y archivos temporales WAL/Journal
 caja.db

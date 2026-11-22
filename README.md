@@ -104,6 +104,9 @@ PostgreSQL es el único motor de persistencia. El registro central y cada negoci
 │   ├── simulador_integral.js        # Flujo comercial completo sobre PostgreSQL
 │   └── e2e/                        # Escenarios de navegador con Playwright
 ├── docs/                            # Documentación técnica y pruebas
+├── infra/
+│   ├── bin/app.js                   # Entrada CDK y composición de stacks
+│   └── lib/                         # Stacks separados de red y PostgreSQL
 ├── ecosystem.config.js              # Configuración de PM2 para ejecución continua
 ├── instrumentation.js               # Validación temprana de seguridad en arranque de Next.js
 └── next.config.js                   # Configuración de empaquetado (serverExternalPackages)
@@ -187,3 +190,5 @@ ejecutan varias instancias; debe mantenerse igual en todas ellas.
 | `npm run demo:seed` | Crea o reutiliza el tenant `demo`, lo provisiona y carga datos aislados para una demostración. |
 | `npm run simular` | Ejecuta la simulación integral automatizada de punta a punta (turnos, ventas, recetas, arqueos y reportes). |
 | `npm run backup -- <slug>` | Genera un respaldo PostgreSQL por tenant en `backups/` con `pg_dump` y retención por negocio. |
+| `npm run cdk:synth` | Sintetiza los stacks AWS con validación estricta; no despliega recursos. |
+| `npm run cdk:diff` | Compara los stacks CDK con el entorno AWS; requiere Región y credenciales configuradas. |

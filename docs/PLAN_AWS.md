@@ -50,6 +50,8 @@ notificación de prueba al correo elegido.
 ### Fase 1: infraestructura reproducible
 
 - Crear una aplicación CDK sin desplegarla todavía.
+- Mantener `infra/lib/network-stack.js` y `infra/lib/database-stack.js` como
+  stacks separados.
 - Definir la Región `us-east-2` mediante configuración, no hardcodear otras
   Regiones.
 - Separar la infraestructura persistente de la aplicación.
@@ -59,6 +61,24 @@ notificación de prueba al correo elegido.
 
 **Terminado cuando:** `cdk synth --strict` genera plantillas sin crear recursos
 en AWS y `cdk diff` muestra solo los recursos esperados.
+
+La primera síntesis se ejecuta con:
+
+```powershell
+npm run cdk:synth
+```
+
+El diff contra el entorno usa el perfil autenticado y la Región seleccionada:
+
+```powershell
+$env:AWS_PROFILE='pos-aws'
+$env:CDK_DEFAULT_ACCOUNT='919800783621'
+$env:CDK_DEFAULT_REGION='us-east-2'
+npm run cdk:diff
+```
+
+Estos comandos no sustituyen la revisión del presupuesto ni autorizan un
+`cdk deploy`.
 
 ### Fase 2: PostgreSQL cloud de desarrollo
 
