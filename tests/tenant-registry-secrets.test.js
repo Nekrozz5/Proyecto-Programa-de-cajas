@@ -5,6 +5,7 @@ const {
     configurarResolverSecretoTenant,
     obtenerPoolTenant
 } = require('../server/tenancy/tenant-registry');
+const { cerrarPoolsPostgres } = require('../database/postgres');
 
 const TENANT = {
     tenant_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
@@ -25,6 +26,7 @@ test('un tenant con referencia de secreto usa el resolver configurado', async ()
         assert.deepEqual(argumentos, [TENANT.database_secret_ref, TENANT]);
     } finally {
         configurarResolverSecretoTenant(null);
+        await cerrarPoolsPostgres();
     }
 });
 

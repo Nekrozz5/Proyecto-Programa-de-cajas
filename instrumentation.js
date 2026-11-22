@@ -11,5 +11,12 @@ export async function register() {
         if (typeof validarOAbortarArranque === 'function') {
             validarOAbortarArranque();
         }
+
+        const secretosCloud = await import('./server/tenancy/aws-secrets-manager.js');
+        const configurarResolver = secretosCloud.configurarResolverSecretsManagerDesdeEntorno
+            || (secretosCloud.default && secretosCloud.default.configurarResolverSecretsManagerDesdeEntorno);
+        if (typeof configurarResolver === 'function') {
+            configurarResolver();
+        }
     }
 }

@@ -16,6 +16,8 @@ PostgreSQL es el único motor de persistencia. El registro central y cada negoci
 | [docs/ARQUITECTURA_MULTI_TENANT.md](docs/ARQUITECTURA_MULTI_TENANT.md) | Resolución de tenants, aislamiento y respaldo por negocio. |
 | [docs/ESTADO_MIGRACION_CLOUD.md](docs/ESTADO_MIGRACION_CLOUD.md) | Estado real de la migración a PostgreSQL multi-tenant y pendientes de AWS. |
 | [docs/ADR-001-POSTGRES-ONLY.md](docs/ADR-001-POSTGRES-ONLY.md) | Decisión aceptada de usar PostgreSQL como fuente canónica. |
+| [docs/MODELO_NEGOCIO_Y_PLANES.md](docs/MODELO_NEGOCIO_Y_PLANES.md) | Modelo comercial, funciones por plan, colaboración y uso obligatorio de Trello. |
+| [docs/CONTRATO_INFRA_AWS.md](docs/CONTRATO_INFRA_AWS.md) | Reglas de ramas, integración y contrato entre Red AWS, RDS y la aplicación. |
 | [.agents/PROJECT_CONTEXT.md](.agents/PROJECT_CONTEXT.md) | Reglas de negocio, directrices técnicas y variables de entorno. |
 
 ---
@@ -153,6 +155,20 @@ PostgreSQL es el único motor de persistencia. El registro central y cada negoci
    npm run dev
    ```
    Abre el subdominio del tenant en el navegador. [http://cafeteria.localhost:3000](http://cafeteria.localhost:3000)
+
+### Preparación de producción
+
+En AWS, `TENANT_HOST_SUFFIX` debe ser el dominio base y `ALLOWED_ORIGINS` debe
+contener los hosts permitidos para Server Actions, sin incluir `https://`.
+Ejemplo:
+
+```env
+TENANT_HOST_SUFFIX=miapp.com
+ALLOWED_ORIGINS=miapp.com,*.miapp.com
+```
+
+La clave `NEXT_SERVER_ACTIONS_ENCRYPTION_KEY` solo es necesaria cuando se
+ejecutan varias instancias; debe mantenerse igual en todas ellas.
 
 ---
 

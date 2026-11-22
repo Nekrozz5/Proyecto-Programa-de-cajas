@@ -24,6 +24,14 @@ en el [ADR-001](ADR-001-POSTGRES-ONLY.md).
 - `database/postgres.js`: pools PostgreSQL perezosos y separados por URL.
 - `server/tenancy/tenant-registry.js`: registro central y resolución de bases por tenant.
 - `server/tenancy/tenant-registry.js`: permite resolver referencias de secretos en cloud mediante un resolver inyectable y conserva `TENANT_DATABASE_URLS_JSON` para desarrollo.
+- `server/tenancy/secrets-manager-resolver.js`: contrato probado para adaptar `SecretsManagerClient` y `GetSecretValueCommand` sin credenciales durante el desarrollo local.
+- `server/tenancy/aws-secrets-manager.js`: activa ese adaptador al arrancar solo cuando `TENANT_SECRETS_PROVIDER=aws` y exige `AWS_REGION`.
+
+El adaptador exige un secreto JSON con `connectionString` o `databaseUrl` y
+valida que la URL use `postgres` o `postgresql`. La conexión AWS usa
+`@aws-sdk/client-secrets-manager`, la Región seleccionada y las credenciales
+de la cadena estándar del SDK. El arranque local conserva el proveedor `env` y
+no realiza llamadas externas si no se activa explícitamente `aws`.
 - `server/tenancy/tenant-context.js`: resolución por subdominio y contexto `AsyncLocalStorage`.
 - `server/tenancy/request-context.js`: wrapper para ejecutar Route Handlers dentro del tenant correcto.
 - `database/migraciones-control.js`: tabla `control_tenants`.

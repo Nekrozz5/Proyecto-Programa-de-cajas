@@ -5,8 +5,19 @@
  * nunca se construye a partir de datos enviados por el navegador.
  */
 const { Pool } = require('pg');
+const { readFileSync } = require('node:fs');
 
 const pools = new Map();
+
+function obtenerSslDesdeEntorno() {
+    if (process.env.PG_SSL !== 'true') return undefined;
+    const caPath = String(process.env.PG_SSL_CA || '').trim();
+    if (!caPath) return { rejectUnauthorized: true };
+    return {
+        rejectUnauthorized: true,
+        ca: readFileSync(caPath, 'utf8')
+    };
+}
 
 function obtenerPool(databaseUrl, options = {}) {
     if (!databaseUrl || typeof databaseUrl !== 'string') {
@@ -20,7 +31,7 @@ function obtenerPool(databaseUrl, options = {}) {
             max: Number(options.max || process.env.PG_POOL_MAX || 10),
             idleTimeoutMillis: Number(options.idleTimeoutMillis || 30_000),
             connectionTimeoutMillis: Number(options.connectionTimeoutMillis || 5_000),
-            ssl: options.ssl ?? (process.env.PG_SSL === 'true' ? { rejectUnauthorized: false } : undefined)
+            ssl: options.ssl ?? obtenerSslDesdeEntorno()
         }));
     }
 
@@ -49,4 +60,4 @@ async function enTransaccionPostgres(pool, ejecutar) {
     }
 }
 
-module.exports = { obtenerPool, cerrarPoolsPostgres, enTransaccionPostgres };
+module.exports = { obtenerPool, cerrarPoolsPostgres, enTransaccionPostgres, obtenerSslDesdeEntorno };

@@ -16,7 +16,10 @@ async function prepararConexion(databaseUrl, directorio) {
     for (const clave of ['PGPASSWORD', 'PGHOSTADDR', 'PGSERVICE', 'PGSERVICEFILE', 'PGREQUIRESSL']) delete env[clave];
     env.PGCONNECT_TIMEOUT = url.searchParams.get('connect_timeout') || env.PGCONNECT_TIMEOUT || '10';
     env.PGSSLMODE = url.searchParams.get('sslmode')
-        || (process.env.PG_SSL === 'true' || url.searchParams.get('ssl') === 'true' ? 'require' : env.PGSSLMODE || 'prefer');
+        || (process.env.PG_SSL_CA
+            ? 'verify-full'
+            : (process.env.PG_SSL === 'true' || url.searchParams.get('ssl') === 'true' ? 'require' : env.PGSSLMODE || 'prefer'));
+    if (process.env.PG_SSL_CA) env.PGSSLROOTCERT = process.env.PG_SSL_CA;
     for (const clave of ['sslrootcert', 'sslcert', 'sslkey', 'options', 'application_name']) {
         const valor = url.searchParams.get(clave);
         if (valor !== null) env[clave === 'application_name' ? 'PGAPPNAME' : `PG${clave.toUpperCase()}`] = valor;
@@ -94,6 +97,14 @@ async function respaldarTenant(slug) {
     } catch {
         console.warn('El respaldo se generó, pero no se completó la retención local.');
     }
+
+    const control = obtenerPool(process.env.CONTROL_DATABASE_URL);
+    await control.query(`
+        UPDATE control_tenants
+        SET ultimo_backup_exitoso = CURRENT_TIMESTAMP,
+            actualizado_en = CURRENT_TIMESTAMP
+        WHERE tenant_id = $1
+    `, [tenant.tenant_id]);
     return destino;
 }
 

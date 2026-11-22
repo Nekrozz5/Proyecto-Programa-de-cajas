@@ -33,10 +33,10 @@ test('la base PostgreSQL vacía migra de forma atómica, concurrente e idempoten
 
         assert.deepEqual(await Promise.all([
             ejecutarMigracionesEnPool(pool), ejecutarMigracionesEnPool(pool)
-        ]), [2, 2]);
+        ]), [3, 3]);
         const historial = () => pool.query('SELECT version, applied_at FROM schema_migrations ORDER BY version');
         const { rows: aplicadas } = await historial();
-        assert.deepEqual(aplicadas.map(({ version }) => version), [1, 2]);
+        assert.deepEqual(aplicadas.map(({ version }) => version), [1, 2, 3]);
         assert.ok(aplicadas.every(({ applied_at }) => applied_at instanceof Date));
         assert.deepEqual((await tablasPublicas()).rows.map(({ tablename }) => tablename), [
             'cajas', 'cajas_fisicas', 'categorias', 'combo_componentes', 'configuracion_negocio',
@@ -63,7 +63,7 @@ test('la base PostgreSQL vacía migra de forma atómica, concurrente e idempoten
         assert.deepEqual(leido, {
             precio: 0.3, costo: 1.23456789, fecha_inicio_vigencia: new Date('2026-01-01T12:00:00Z')
         });
-        assert.equal(await ejecutarMigracionesEnPool(pool), 2);
+        assert.equal(await ejecutarMigracionesEnPool(pool), 3);
         assert.deepEqual((await historial()).rows, aplicadas);
 
         await pool.query("INSERT INTO categorias (nombre) VALUES ('Papelería')");

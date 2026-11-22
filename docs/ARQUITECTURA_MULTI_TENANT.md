@@ -64,9 +64,12 @@ temporales que tienen IDs de turno coincidentes y totales distintos.
 ## Backups y restauración
 
 - RDS Multi-AZ y backups automáticos para continuidad de la instancia.
+- Las conexiones cloud usan `PG_SSL=true`; cuando `PG_SSL_CA` está definida,
+  Node.js y `pg_dump` validan la cadena de confianza y el hostname del servidor.
 - `npm run backup -- <slug>` genera un archivo de formato personalizado con
   `pg_dump` y retención local por tenant. El almacenamiento en S3 queda para el
   despliegue cloud.
+- Después de generar el archivo, actualiza `control_tenants.ultimo_backup_exitoso`.
 - Prueba periódica de restauración en una base temporal.
 - Registro del resultado y versión de esquema de cada backup.
 

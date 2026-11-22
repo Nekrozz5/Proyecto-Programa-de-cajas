@@ -285,7 +285,13 @@ function AdminShell({ children }) {
     const pestanaActiva = pestanas.find((p) => pathname === p.href || pathname.startsWith(p.href + '/')) || pestanas[0];
 
     return (
-        <div className="min-h-screen bg-slate-100 text-slate-900 font-sans relative flex flex-col">
+        <div
+            className="min-h-screen bg-slate-100 text-slate-900 font-sans relative flex flex-col"
+            style={{
+                '--brand-primary': configActual.color_primario || '#0284C7',
+                '--brand-secondary': configActual.color_secundario || '#0F172A'
+            }}
+        >
             {/* BACKDROP SEMITRANSPARENTE */}
             {sidebarAbierto && (
                 <div
@@ -311,12 +317,22 @@ function AdminShell({ children }) {
                     <div className="p-4 border-b border-slate-800 flex items-center justify-between gap-2">
                         <div className="min-w-0 flex-1">
                             <div className="flex items-center gap-2">
-                                <Briefcase className="w-5 h-5 text-sky-400 shrink-0" />
+                                {configActual.logo_url ? (
+                                    <img
+                                        src={configActual.logo_url}
+                                        alt=""
+                                        aria-hidden="true"
+                                        className="h-6 w-6 rounded object-contain bg-white/95 p-0.5 shrink-0"
+                                        onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                                    />
+                                ) : (
+                                    <Briefcase className="w-5 h-5 text-sky-400 shrink-0" style={{ color: 'var(--brand-primary)' }} aria-hidden="true" />
+                                )}
                                 <h2 className="font-bold text-sm tracking-tight text-white truncate">
                                     {configActual.nombre_negocio || 'Panel Admin'}
                                 </h2>
                             </div>
-                            <div className="text-[11px] font-medium text-sky-400 mt-0.5 truncate">
+                            <div className="text-[11px] font-medium text-sky-400 mt-0.5 truncate" style={{ color: 'var(--brand-primary)' }}>
                                 {configActual.modalidad_nombre}
                             </div>
                             <div className="text-[11px] mt-1">

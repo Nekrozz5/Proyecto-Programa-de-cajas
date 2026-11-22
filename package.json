@@ -1,10 +1,10 @@
 {
   "name": "programa-cajas",
-  "version": "3.0.1",
+  "version": "3.1.0",
   "description": "Sistema POS y Control de Cajas en AWS con Next.js y PostgreSQL",
   "scripts": {
     "test": "npm run simular",
-    "test:postgres": "node --env-file-if-exists=.env.local -e \"require('./tests/postgres-fixture').urlPruebas()\" && node --env-file-if-exists=.env.local --test --test-concurrency=1 \"tests/**/*.test.js\"",
+    "test:postgres": "node --env-file-if-exists=.env.local scripts/test-postgres.js",
     "test:e2e": "node --env-file-if-exists=.env.local tests/postgres-fixture.js",
     "test:all": "npm run test:postgres && npm run simular && npm run test:e2e",
     "dev": "next dev",
@@ -22,6 +22,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@aws-sdk/client-secrets-manager": "^3.1175.0",
     "@base-ui/react": "^1.9.0",
     "bcryptjs": "^3.0.3",
     "class-variance-authority": "^0.7.1",

@@ -27,6 +27,45 @@ function sistemaEstaInstalado(configuracion) {
 
 const CONSULTA_CONFIGURACION = 'SELECT * FROM configuracion_negocio WHERE id = 1';
 
+function normalizarColor(valor, predeterminado, campo) {
+    const color = valor === undefined || valor === null || String(valor).trim() === ''
+        ? predeterminado
+        : String(valor).trim().toUpperCase();
+    if (!/^#[0-9A-F]{6}$/.test(color)) {
+        throw new Error(`${campo} debe ser un color hexadecimal de 6 dígitos.`);
+    }
+    return color;
+}
+
+function normalizarLogoUrl(valor) {
+    const logo = valor === undefined || valor === null ? '' : String(valor).trim();
+    if (!logo) return '';
+    let url;
+    try {
+        url = new URL(logo);
+    } catch {
+        throw new Error('La URL del logo no es válida.');
+    }
+    if (!['http:', 'https:'].includes(url.protocol)) {
+        throw new Error('La URL del logo debe usar http o https.');
+    }
+    return url.toString().slice(0, 500);
+}
+
+function obtenerBranding(config) {
+    return {
+        nombreCorto: config.nombreCorto !== undefined
+            ? String(config.nombreCorto).trim().slice(0, 80)
+            : (config.nombre_corto !== undefined ? String(config.nombre_corto).trim().slice(0, 80) : null),
+        logoUrl: normalizarLogoUrl(config.logoUrl ?? config.logo_url),
+        colorPrimario: normalizarColor(config.colorPrimario ?? config.color_primario, '#0284C7', 'El color primario'),
+        colorSecundario: normalizarColor(config.colorSecundario ?? config.color_secundario, '#0F172A', 'El color secundario'),
+        temaVisual: ['claro', 'oscuro', 'sistema'].includes(config.temaVisual ?? config.tema_visual)
+            ? (config.temaVisual ?? config.tema_visual)
+            : 'claro'
+    };
+}
+
 async function inicializarConfiguracion() {
     await runQuery(
         `INSERT INTO configuracion_negocio (id, nombre_negocio, modalidad_nombre, usa_stock_directo, usa_vencimiento, usa_recetas_ensamblaje, habilita_apps_comida, habilita_delivery, configurado)
@@ -70,6 +109,7 @@ async function guardarConfiguracionNegocio(adminId, config) {
     const habilitaDeliveryVal = config.habilitaDelivery !== undefined
         ? (config.habilitaDelivery ? 1 : 0)
         : (config.habilita_delivery !== undefined ? (config.habilita_delivery ? 1 : 0) : null);
+    const branding = obtenerBranding(config);
 
     return actualizarConfiguracionSingleton(
         `UPDATE configuracion_negocio
@@ -80,13 +120,18 @@ async function guardarConfiguracionNegocio(adminId, config) {
              usa_recetas_ensamblaje = $5,
              habilita_apps_comida = COALESCE($6, habilita_apps_comida, 0),
              habilita_delivery = COALESCE($7, habilita_delivery, 0),
-             nit_negocio = COALESCE($8, nit_negocio, ''),
-             regimen_tributario = COALESCE($9, regimen_tributario, 'simplificado_control_interno'),
-             emite_factura = COALESCE($10, emite_factura, 0),
-             iva_porcentaje = $11,
-             it_porcentaje = $12,
-             it_base = COALESCE($13, it_base, 'todas_las_ventas'),
-             usa_respaldo_compras_egresos = COALESCE($14, usa_respaldo_compras_egresos, 1),
+             nombre_corto = COALESCE($8, nombre_corto, ''),
+             logo_url = COALESCE($9, logo_url, ''),
+             color_primario = $10,
+             color_secundario = $11,
+             tema_visual = $12,
+             nit_negocio = COALESCE($13, nit_negocio, ''),
+             regimen_tributario = COALESCE($14, regimen_tributario, 'simplificado_control_interno'),
+             emite_factura = COALESCE($15, emite_factura, 0),
+             iva_porcentaje = $16,
+             it_porcentaje = $17,
+             it_base = COALESCE($18, it_base, 'todas_las_ventas'),
+             usa_respaldo_compras_egresos = COALESCE($19, usa_respaldo_compras_egresos, 1),
              configurado = 1
          WHERE id = 1`,
         [
@@ -97,6 +142,11 @@ async function guardarConfiguracionNegocio(adminId, config) {
             config.usaRecetasEnsamblaje ? 1 : 0,
             config.habilitaAppsComida !== undefined ? (config.habilitaAppsComida ? 1 : 0) : null,
             habilitaDeliveryVal,
+            branding.nombreCorto,
+            branding.logoUrl,
+            branding.colorPrimario,
+            branding.colorSecundario,
+            branding.temaVisual,
             config.nitNegocio !== undefined ? String(config.nitNegocio).trim() : null,
             config.regimenTributario !== undefined ? regimen : null,
             emiteFacturaFinal,
@@ -147,6 +197,7 @@ async function actualizarConfiguracionNegocio(config, adminId = null) {
     const nitNegocio = config.nit_negocio !== undefined
         ? String(config.nit_negocio).trim()
         : (config.nitNegocio !== undefined ? String(config.nitNegocio).trim() : null);
+    const branding = obtenerBranding(config);
 
     return actualizarConfiguracionSingleton(
         `UPDATE configuracion_negocio
@@ -157,7 +208,12 @@ async function actualizarConfiguracionNegocio(config, adminId = null) {
              usa_recetas_ensamblaje = COALESCE($5, usa_recetas_ensamblaje),
              habilita_apps_comida = COALESCE($6, habilita_apps_comida),
              habilita_delivery = COALESCE($7, habilita_delivery),
-             nit_negocio = COALESCE($8, nit_negocio)
+             nit_negocio = COALESCE($8, nit_negocio),
+             nombre_corto = COALESCE($9, nombre_corto),
+             logo_url = COALESCE($10, logo_url),
+             color_primario = COALESCE($11, color_primario),
+             color_secundario = COALESCE($12, color_secundario),
+             tema_visual = COALESCE($13, tema_visual)
          WHERE id = 1`,
         [
             nombreNegocio,
@@ -167,7 +223,12 @@ async function actualizarConfiguracionNegocio(config, adminId = null) {
             usaRecetas,
             habilitaAppsComidaVal,
             habilitaDeliveryVal,
-            nitNegocio
+            nitNegocio,
+            branding.nombreCorto,
+            branding.logoUrl,
+            branding.colorPrimario,
+            branding.colorSecundario,
+            branding.temaVisual
         ]
     );
 

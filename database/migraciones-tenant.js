@@ -434,6 +434,30 @@ const migraciones = [
             CREATE INDEX idx_movimientos_insumos_movimiento_id ON movimientos_insumos (movimiento_id);
             CREATE INDEX idx_producto_lotes_fecha_vencimiento ON producto_lotes (fecha_vencimiento);
         `
+    },
+    {
+        version: 3,
+        sql: `
+            ALTER TABLE configuracion_negocio
+                ADD COLUMN IF NOT EXISTS nombre_corto TEXT DEFAULT '',
+                ADD COLUMN IF NOT EXISTS logo_url TEXT DEFAULT '',
+                ADD COLUMN IF NOT EXISTS color_primario TEXT NOT NULL DEFAULT '#0284C7',
+                ADD COLUMN IF NOT EXISTS color_secundario TEXT NOT NULL DEFAULT '#0F172A',
+                ADD COLUMN IF NOT EXISTS tema_visual TEXT NOT NULL DEFAULT 'claro';
+
+            ALTER TABLE configuracion_negocio
+                DROP CONSTRAINT IF EXISTS configuracion_negocio_color_primario_ck,
+                DROP CONSTRAINT IF EXISTS configuracion_negocio_color_secundario_ck,
+                DROP CONSTRAINT IF EXISTS configuracion_negocio_tema_visual_ck;
+
+            ALTER TABLE configuracion_negocio
+                ADD CONSTRAINT configuracion_negocio_color_primario_ck
+                    CHECK (color_primario ~ '^#[0-9A-Fa-f]{6}$'),
+                ADD CONSTRAINT configuracion_negocio_color_secundario_ck
+                    CHECK (color_secundario ~ '^#[0-9A-Fa-f]{6}$'),
+                ADD CONSTRAINT configuracion_negocio_tema_visual_ck
+                    CHECK (tema_visual IN ('claro', 'oscuro', 'sistema'));
+        `
     }
 ];
 

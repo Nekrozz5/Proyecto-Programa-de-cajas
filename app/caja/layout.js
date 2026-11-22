@@ -206,7 +206,13 @@ function CajaShell({ children }) {
     const esRutaMovimientos = pathname === '/caja/movimientos';
 
     return (
-        <div className="min-h-screen bg-slate-100 text-slate-900 font-sans relative flex flex-col">
+        <div
+            className="min-h-screen bg-slate-100 text-slate-900 font-sans relative flex flex-col"
+            style={{
+                '--brand-primary': configuracionNegocio?.color_primario || '#0284C7',
+                '--brand-secondary': configuracionNegocio?.color_secundario || '#0F172A'
+            }}
+        >
             {/* BACKDROP SEMITRANSPARENTE */}
             {sidebarAbierto && (
                 <div
@@ -232,7 +238,17 @@ function CajaShell({ children }) {
                     <div className="p-4 border-b border-slate-800 flex items-center justify-between gap-2">
                         <div className="min-w-0 flex-1">
                             <div className="flex items-center gap-2">
-                                <ShoppingCart className="w-5 h-5 text-sky-400 shrink-0" />
+                                {configuracionNegocio?.logo_url ? (
+                                    <img
+                                        src={configuracionNegocio.logo_url}
+                                        alt=""
+                                        aria-hidden="true"
+                                        className="h-6 w-6 rounded object-contain bg-white/95 p-0.5 shrink-0"
+                                        onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                                    />
+                                ) : (
+                                    <ShoppingCart className="w-5 h-5 text-sky-400 shrink-0" aria-hidden="true" />
+                                )}
                                 <h2 className="font-bold text-sm tracking-tight text-white truncate">
                                     {configuracionNegocio?.nombre_negocio || 'Módulo de Caja'}
                                 </h2>

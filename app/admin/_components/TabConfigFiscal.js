@@ -37,6 +37,11 @@ export default function TabConfigFiscal({
 
     // Estado Modalidad del Inventario
     const [cfgNombreNegocio, setCfgNombreNegocio] = useState(configActual.nombre_negocio || 'Mi Negocio');
+    const [cfgNombreCorto, setCfgNombreCorto] = useState(configActual.nombre_corto || '');
+    const [cfgLogoUrl, setCfgLogoUrl] = useState(configActual.logo_url || '');
+    const [cfgColorPrimario, setCfgColorPrimario] = useState(configActual.color_primario || '#0284C7');
+    const [cfgColorSecundario, setCfgColorSecundario] = useState(configActual.color_secundario || '#0F172A');
+    const [cfgTemaVisual, setCfgTemaVisual] = useState(configActual.tema_visual || 'claro');
     const [cfgModalidadNombre, setCfgModalidadNombre] = useState(configActual.modalidad_nombre || 'Venta Directa de Artículos No Perecederos');
     const [cfgUsaStockDirecto, setCfgUsaStockDirecto] = useState(Boolean(configActual.usa_stock_directo ?? true));
     const [cfgUsaVencimiento, setCfgUsaVencimiento] = useState(Boolean(configActual.usa_vencimiento ?? false));
@@ -82,6 +87,11 @@ export default function TabConfigFiscal({
         try {
             const res = await guardarConfiguracionAction({
                 nombreNegocio: cfgNombreNegocio,
+                nombreCorto: cfgNombreCorto,
+                logoUrl: cfgLogoUrl,
+                colorPrimario: cfgColorPrimario,
+                colorSecundario: cfgColorSecundario,
+                temaVisual: cfgTemaVisual,
                 modalidadNombre: cfgModalidadNombre,
                 usaStockDirecto: cfgUsaStockDirecto,
                 usaVencimiento: cfgUsaVencimiento,
@@ -213,6 +223,75 @@ export default function TabConfigFiscal({
                         </span>
                         <small className="text-sky-600 text-[11px] mt-auto font-medium">Ej: Cafetería, restaurante, panadería.</small>
                     </button>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-5 rounded-lg border border-slate-200 bg-slate-50 p-4">
+                    <div className="md:col-span-2">
+                        <h3 className="text-sm font-bold text-slate-900">Identidad visual del negocio</h3>
+                        <p className="mt-1 text-xs text-slate-600">
+                            Personaliza el encabezado sin cambiar la lógica del sistema. El logo podrá administrarse desde almacenamiento cloud en una fase posterior.
+                        </p>
+                    </div>
+                    <label className="text-sm font-semibold text-slate-800 flex flex-col gap-1">
+                        Nombre corto (opcional):
+                        <Input
+                            type="text"
+                            maxLength={80}
+                            value={cfgNombreCorto}
+                            onChange={(e) => setCfgNombreCorto(e.target.value)}
+                            placeholder="Ej. Café Central"
+                            className="bg-white"
+                        />
+                    </label>
+                    <label className="text-sm font-semibold text-slate-800 flex flex-col gap-1">
+                        URL del logo (opcional):
+                        <Input
+                            type="url"
+                            maxLength={500}
+                            value={cfgLogoUrl}
+                            onChange={(e) => setCfgLogoUrl(e.target.value)}
+                            placeholder="https://.../logo.png"
+                            className="bg-white"
+                        />
+                    </label>
+                    <label className="text-sm font-semibold text-slate-800 flex flex-col gap-1">
+                        Color primario:
+                        <span className="flex items-center gap-3 rounded-md border border-slate-300 bg-white px-3 py-1.5">
+                            <input
+                                type="color"
+                                aria-label="Color primario del negocio"
+                                value={cfgColorPrimario}
+                                onChange={(e) => setCfgColorPrimario(e.target.value.toUpperCase())}
+                                className="h-9 w-14 cursor-pointer rounded border-0 bg-transparent p-0"
+                            />
+                            <code className="text-xs text-slate-600">{cfgColorPrimario}</code>
+                        </span>
+                    </label>
+                    <label className="text-sm font-semibold text-slate-800 flex flex-col gap-1">
+                        Color secundario:
+                        <span className="flex items-center gap-3 rounded-md border border-slate-300 bg-white px-3 py-1.5">
+                            <input
+                                type="color"
+                                aria-label="Color secundario del negocio"
+                                value={cfgColorSecundario}
+                                onChange={(e) => setCfgColorSecundario(e.target.value.toUpperCase())}
+                                className="h-9 w-14 cursor-pointer rounded border-0 bg-transparent p-0"
+                            />
+                            <code className="text-xs text-slate-600">{cfgColorSecundario}</code>
+                        </span>
+                    </label>
+                    <label className="text-sm font-semibold text-slate-800 flex flex-col gap-1">
+                        Tema visual:
+                        <select
+                            value={cfgTemaVisual}
+                            onChange={(e) => setCfgTemaVisual(e.target.value)}
+                            className="h-10 w-full rounded-md border border-slate-300 bg-white px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-slate-950"
+                        >
+                            <option value="claro">Claro</option>
+                            <option value="oscuro">Oscuro (preparado)</option>
+                            <option value="sistema">Según el dispositivo (preparado)</option>
+                        </select>
+                    </label>
                 </div>
 
                 <form onSubmit={handleGuardarConfiguracion} className="flex flex-col gap-4 bg-slate-50 p-4 rounded-lg border border-slate-200">
