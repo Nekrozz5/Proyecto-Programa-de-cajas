@@ -1,5 +1,5 @@
 const bcrypt = require('bcryptjs');
-const { obtenerPool, cerrarPoolsPostgres, enTransaccionPostgres } = require('./postgres');
+const { obtenerPool, cerrarPoolsPostgres } = require('./postgres');
 const { ejecutarMigracionesEnPool } = require('./migraciones-tenant');
 const { obtenerPoolTenant, validarSlug } = require('../server/tenancy/tenant-registry');
 const { motivoPasswordDeveloperInvalida } = require('../server/lib/secretos');
@@ -45,13 +45,36 @@ async function provisionarTenant(slug) {
     }
 
     const control = obtenerPool(process.env.CONTROL_DATABASE_URL);
-    return enTransaccionPostgres(control, async (clientControl) => {
-        const { rows: [tenant] } = await clientControl.query(`
-            SELECT tenant_id, slug, database_name, database_secret_ref FROM control_tenants
-            WHERE slug = $1 AND estado = 'activo'
-            FOR UPDATE
-        `, [slugNormalizado]);
-        if (!tenant) throw new ErrorAprovisionamiento('El tenant debe estar registrado y activo en control_tenants.');
+    const clientControl = await control.connect();
+    let tenant;
+    const claveBloqueo = `provisionar-tenant:${slugNormalizado}`;
+
+    try {
+        await clientControl.query('SELECT pg_advisory_lock(hashtextextended($1, 0))', [claveBloqueo]);
+        await clientControl.query('BEGIN');
+        try {
+            const { rows: [encontrado] } = await clientControl.query(`
+                SELECT tenant_id, slug, database_name, database_secret_ref FROM control_tenants
+                WHERE slug = $1 AND estado IN ('activo', 'error')
+                FOR UPDATE
+            `, [slugNormalizado]);
+            if (!encontrado) {
+                throw new ErrorAprovisionamiento('El tenant debe estar registrado y activo o en estado de error en control_tenants.');
+            }
+
+            await clientControl.query(`
+                UPDATE control_tenants
+                SET estado = 'migrando',
+                    ultimo_error_provisionamiento = NULL,
+                    provisionamiento_iniciado_en = CURRENT_TIMESTAMP
+                WHERE tenant_id = $1
+            `, [encontrado.tenant_id]);
+            tenant = encontrado;
+            await clientControl.query('COMMIT');
+        } catch (error) {
+            await clientControl.query('ROLLBACK').catch(() => {});
+            throw error;
+        }
 
         const poolTenant = await obtenerPoolTenant(tenant);
         if (poolTenant === control) {
@@ -71,13 +94,34 @@ async function provisionarTenant(slug) {
             await sincronizarDeveloper(clientTenant, tenant.tenant_id, password);
         });
 
-        // El historial operativo solo se refleja en control después del COMMIT operativo.
         await clientControl.query(`
-            UPDATE control_tenants SET schema_version = $2, actualizado_en = CURRENT_TIMESTAMP
-            WHERE tenant_id = $1 AND schema_version IS DISTINCT FROM $2
+            UPDATE control_tenants
+            SET schema_version = $2,
+                estado = 'activo',
+                ultimo_error_provisionamiento = NULL,
+                actualizado_en = CASE
+                    WHEN schema_version IS DISTINCT FROM $2 THEN CURRENT_TIMESTAMP
+                    ELSE actualizado_en
+                END
+            WHERE tenant_id = $1
         `, [tenant.tenant_id, version]);
         return version;
-    });
+    } catch (error) {
+        const mensaje = error instanceof Error ? error.message : 'Error desconocido de aprovisionamiento.';
+        if (tenant) {
+            await clientControl.query(`
+                UPDATE control_tenants
+                SET estado = 'error',
+                    ultimo_error_provisionamiento = $2,
+                    actualizado_en = CURRENT_TIMESTAMP
+                WHERE tenant_id = $1
+            `, [tenant.tenant_id, mensaje]).catch(() => {});
+        }
+        throw error;
+    } finally {
+        await clientControl.query('SELECT pg_advisory_unlock(hashtextextended($1, 0))', [claveBloqueo]).catch(() => {});
+        clientControl.release();
+    }
 }
 
 if (require.main === module) {

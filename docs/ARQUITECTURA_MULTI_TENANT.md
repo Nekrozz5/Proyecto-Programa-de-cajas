@@ -39,6 +39,7 @@ La base de control tendrá, como mínimo:
 - nombre lógico de la base del tenant.
 - referencia al secreto de conexión en AWS Secrets Manager.
 - versión de esquema y último backup exitoso.
+- estado del último aprovisionamiento y su error, si existiera.
 
 ### Base de cada negocio
 
@@ -78,6 +79,16 @@ Un snapshot completo de RDS no sustituye al backup individual por tenant.
 3. Conciliar los datos del primer negocio antes del corte operativo.
 4. Verificar un respaldo PostgreSQL y su restauración en una base temporal.
 
+Durante el aprovisionamiento, `control_tenants.estado` sigue este flujo:
+
+```text
+activo/error -> migrando -> activo
+                    └----> error
+```
+
+`ultimo_error_provisionamiento` conserva el motivo técnico del último fallo y
+permite reintentar el tenant sin registrarlo nuevamente.
+
 La decisión de adoptar PostgreSQL queda registrada en el [ADR-001](ADR-001-POSTGRES-ONLY.md).
 
 ## Restricciones
@@ -86,5 +97,7 @@ La decisión de adoptar PostgreSQL queda registrada en el [ADR-001](ADR-001-POST
 - No se ejecutará una migración destructiva sobre todos los tenants a la vez.
 - Los reportes de plataforma recorrerán bases autorizadas; no se mezclarán datos
   financieros en una consulta operativa común.
-- Los cambios existentes del usuario en `app/api/reportes/route.js` y
-  `package-lock.json` deben preservarse.
+- En desarrollo, las conexiones se resuelven con `TENANT_DATABASE_URLS_JSON`.
+- En cloud, `database_secret_ref` se resuelve mediante el resolver de secretos
+  configurado en `server/tenancy/tenant-registry.js`; si no existe, el tenant no
+  puede abrirse accidentalmente con una conexión incompleta.

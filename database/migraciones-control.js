@@ -17,14 +17,22 @@ async function ejecutarMigracionesControl() {
                 database_secret_ref TEXT,
                 plan TEXT NOT NULL DEFAULT 'standard',
                 estado TEXT NOT NULL DEFAULT 'activo'
-                    CHECK (estado IN ('activo', 'suspendido', 'migrando', 'archivado')),
+                    CHECK (estado IN ('activo', 'suspendido', 'migrando', 'error', 'archivado')),
                 schema_version INTEGER NOT NULL DEFAULT 0,
                 ultimo_backup_exitoso TIMESTAMPTZ,
+                ultimo_error_provisionamiento TEXT,
+                provisionamiento_iniciado_en TIMESTAMPTZ,
                 creado_en TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 actualizado_en TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
 
             ALTER TABLE control_tenants ADD COLUMN IF NOT EXISTS schema_version INTEGER NOT NULL DEFAULT 0;
+            ALTER TABLE control_tenants ADD COLUMN IF NOT EXISTS ultimo_error_provisionamiento TEXT;
+            ALTER TABLE control_tenants ADD COLUMN IF NOT EXISTS provisionamiento_iniciado_en TIMESTAMPTZ;
+
+            ALTER TABLE control_tenants DROP CONSTRAINT IF EXISTS control_tenants_estado_check;
+            ALTER TABLE control_tenants ADD CONSTRAINT control_tenants_estado_check
+                CHECK (estado IN ('activo', 'suspendido', 'migrando', 'error', 'archivado'));
 
             CREATE INDEX IF NOT EXISTS control_tenants_estado_idx
                 ON control_tenants (estado);

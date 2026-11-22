@@ -1276,14 +1276,16 @@ async function cargarDatos({ tenantId, password, pin }) {
 
 }
 
-async function sembrarCafeteria() {
-    const password = process.env.CAFETERIA_SEED_PASSWORD;
-    const pin = process.env.CAFETERIA_SEED_PIN;
+async function sembrarCafeteria({
+    slug = 'cafeteria',
+    password = process.env.CAFETERIA_SEED_PASSWORD,
+    pin = process.env.CAFETERIA_SEED_PIN
+} = {}) {
     if (!password || !pin) {
         throw new ErrorSeed('Configura CAFETERIA_SEED_PASSWORD y CAFETERIA_SEED_PIN para cargar el fixture.');
     }
-    const tenant = await obtenerTenantPorSlug('cafeteria');
-    if (!tenant) throw new ErrorSeed('El tenant piloto cafeteria debe estar registrado y activo.');
+    const tenant = await obtenerTenantPorSlug(slug);
+    if (!tenant) throw new ErrorSeed(`El tenant ${slug} debe estar registrado y activo.`);
     const pool = await obtenerPoolTenant(tenant);
     if (pool === obtenerPool(process.env.CONTROL_DATABASE_URL)) {
         throw new ErrorSeed('El fixture requiere una base operativa separada del registro de control.');
@@ -1292,12 +1294,12 @@ async function sembrarCafeteria() {
         "SELECT current_database() AS nombre, to_regclass('control_tenants') IS NOT NULL AS control"
     );
     if (base.control || base.nombre !== tenant.database_name) {
-        throw new ErrorSeed('La conexión operativa no coincide con la base registrada para cafeteria.');
+        throw new ErrorSeed(`La conexión operativa no coincide con la base registrada para ${slug}.`);
     }
     await ejecutarMigracionesEnPool(pool, async (client) => {
         const { rows: [{ version }] } = await client.query('SELECT MAX(version) AS version FROM schema_migrations');
         if (tenant.schema_version !== version) {
-            throw new ErrorSeed('Aprovisiona el tenant piloto con npm run provision:tenant -- cafeteria antes de sembrar.');
+            throw new ErrorSeed(`Aprovisiona el tenant con npm run provision:tenant -- ${slug} antes de sembrar.`);
         }
         const contexto = { tenantId: tenant.tenant_id, tenant, pool, client };
         await ejecutarConContextoTenant(contexto, () => cargarDatos({ tenantId: tenant.tenant_id, password, pin }));
@@ -1315,4 +1317,4 @@ if (require.main === module) {
         });
 }
 
-module.exports = { sembrarCafeteria };
+module.exports = { cargarDatos, sembrarCafeteria };

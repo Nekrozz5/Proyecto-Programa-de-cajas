@@ -23,6 +23,7 @@ en el [ADR-001](ADR-001-POSTGRES-ONLY.md).
 
 - `database/postgres.js`: pools PostgreSQL perezosos y separados por URL.
 - `server/tenancy/tenant-registry.js`: registro central y resolución de bases por tenant.
+- `server/tenancy/tenant-registry.js`: permite resolver referencias de secretos en cloud mediante un resolver inyectable y conserva `TENANT_DATABASE_URLS_JSON` para desarrollo.
 - `server/tenancy/tenant-context.js`: resolución por subdominio y contexto `AsyncLocalStorage`.
 - `server/tenancy/request-context.js`: wrapper para ejecutar Route Handlers dentro del tenant correcto.
 - `database/migraciones-control.js`: tabla `control_tenants`.
@@ -59,6 +60,7 @@ en el [ADR-001](ADR-001-POSTGRES-ONLY.md).
 
 - `database/migraciones-tenant.js`: migraciones SQL versionadas de las tablas operativas del POS.
 - `database/provisionar-tenant.js`: inicialización de cada base operativa y sincronización de la versión con el registro central.
+- El aprovisionamiento marca el tenant como `migrando`, `activo` o `error`; `ultimo_error_provisionamiento` permite diagnosticar y reintentar fallos.
 - La migración incluye configuración, usuarios, cajas, productos, insumos, recetas, ventas, pagos, kardex, lotes, SMTP, notificaciones y dispositivos.
 
 ### Reportes y analíticas
@@ -70,8 +72,8 @@ en el [ADR-001](ADR-001-POSTGRES-ONLY.md).
 ### Semilla y respaldos
 
 - `npm run seed` carga los datos de prueba en el tenant PostgreSQL ya aprovisionado.
+- `npm run demo:seed` crea/provisiona el tenant `demo` y carga un fixture aislado en `negocio_demo`.
 - `npm run backup -- <slug>` genera un respaldo por tenant con `pg_dump`.
-- En la Fase 3 se verificó la semilla y se restauró un respaldo en una base temporal con `pg_restore`. Coincidieron los movimientos y sus importes.
 
 ## Dependencias añadidas
 
@@ -158,6 +160,7 @@ sus bases temporales.
 
 ## Estado actual
 
-- La Fase 3 pasó 20 pruebas PostgreSQL, 37 pasos del simulador y 7 E2E en Chromium, sin omisiones.
-- La Fase 4 retiró los módulos, dependencias y pruebas del motor anterior. Con una instalación limpia, pasaron `npm run build` y `npm run test:all` (20 pruebas PostgreSQL, 37 pasos del simulador y 7 E2E en Chromium, sin omisiones).
-- El despliegue en AWS y la migración de los datos del piloto siguen pendientes.
+- El runtime y las pruebas del repositorio usan PostgreSQL; no se mantiene una ruta operativa para el motor anterior.
+- El tenant `demo` dispone de un flujo reproducible para demostraciones sin modificar `cafeteria`.
+- El despliegue en AWS, la resolución productiva de secretos y la migración de los datos del piloto siguen pendientes.
+- La validación ejecutable se mantiene en [docs/PRUEBAS.md](PRUEBAS.md); los resultados generados por una ejecución no se versionan como documentación permanente.

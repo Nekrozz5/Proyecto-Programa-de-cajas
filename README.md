@@ -14,6 +14,8 @@ PostgreSQL es el único motor de persistencia. El registro central y cada negoci
 | [docs/ARQUITECTURA.md](docs/ARQUITECTURA.md) | Diseño técnico, modelo de seguridad, base de datos relacional, migraciones, motor fiscal, Kardex dual, lotes PEPS, delivery, SMTP dinámico y reportes. |
 | [docs/PRUEBAS.md](docs/PRUEBAS.md) | Batería de escenarios de verificación funcional, concurrencia, stock, lotes, arqueo, combos, modificadores, régimen fiscal, pagos mixtos, delivery y SMTP. |
 | [docs/ARQUITECTURA_MULTI_TENANT.md](docs/ARQUITECTURA_MULTI_TENANT.md) | Resolución de tenants, aislamiento y respaldo por negocio. |
+| [docs/ESTADO_MIGRACION_CLOUD.md](docs/ESTADO_MIGRACION_CLOUD.md) | Estado real de la migración a PostgreSQL multi-tenant y pendientes de AWS. |
+| [docs/ADR-001-POSTGRES-ONLY.md](docs/ADR-001-POSTGRES-ONLY.md) | Decisión aceptada de usar PostgreSQL como fuente canónica. |
 | [.agents/PROJECT_CONTEXT.md](.agents/PROJECT_CONTEXT.md) | Reglas de negocio, directrices técnicas y variables de entorno. |
 
 ---
@@ -93,7 +95,8 @@ PostgreSQL es el único motor de persistencia. El registro central y cada negoci
 │   └── icons/                       # Iconos de la aplicación en múltiples resoluciones
 ├── scripts/
 │   ├── backup-postgres.js           # Respaldo lógico por tenant con pg_dump y retención
-│   └── seed_cafeteria.js            # Sembrado integral con catálogo, lotes, fiscal y Kardex
+│   ├── seed_cafeteria.js            # Sembrado integral con catálogo, lotes, fiscal y Kardex
+│   └── seed_demo.js                 # Crea/provisiona un tenant demo aislado
 ├── tests/
 │   ├── postgres-*.test.js           # Integración PostgreSQL con bases temporales
 │   ├── simulador_integral.js        # Flujo comercial completo sobre PostgreSQL
@@ -143,6 +146,8 @@ PostgreSQL es el único motor de persistencia. El registro central y cada negoci
 
 4. **Cargar datos de prueba (opcional).** En un tenant local de pruebas ya aprovisionado, define `CAFETERIA_SEED_PASSWORD` y `CAFETERIA_SEED_PIN` y ejecuta `npm run seed`.
 
+   Para una demostración aislada, define `DEMO_SEED_PASSWORD` y `DEMO_SEED_PIN` y ejecuta `npm run demo:seed`. El comando crea la base `negocio_demo`, registra el tenant `demo` y carga el fixture sin modificar `cafeteria`. Abre `http://demo.localhost:3000`.
+
 5. **Iniciar el servidor de desarrollo.**
    ```bash
    npm run dev
@@ -158,7 +163,11 @@ PostgreSQL es el único motor de persistencia. El registro central y cada negoci
 | `npm run dev` | Inicia el servidor de desarrollo de Next.js. |
 | `npm run build` | Compila la aplicación para producción (`next build --webpack`). |
 | `npm run start` | Inicia la aplicación compilada en modo producción. |
+| `npm run migrate:control` | Aplica o actualiza el esquema del registro central de tenants. |
+| `npm run migrate:tenant` | Aplica el esquema operativo usando `TENANT_DATABASE_URL`. |
+| `npm run provision:tenant -- <slug>` | Provisiona un tenant registrado y sincroniza su versión de esquema. |
 | `npm run test:all` | Ejecuta integración PostgreSQL, simulador comercial y E2E. La configuración está en [docs/PRUEBAS.md](docs/PRUEBAS.md). |
 | `npm run seed` | Carga el seed integral de prueba con régimen fiscal, combos, modificadores, compras con factura, pagos mixtos y auditoría de Kardex. |
+| `npm run demo:seed` | Crea o reutiliza el tenant `demo`, lo provisiona y carga datos aislados para una demostración. |
 | `npm run simular` | Ejecuta la simulación integral automatizada de punta a punta (turnos, ventas, recetas, arqueos y reportes). |
 | `npm run backup -- <slug>` | Genera un respaldo PostgreSQL por tenant en `backups/` con `pg_dump` y retención por negocio. |

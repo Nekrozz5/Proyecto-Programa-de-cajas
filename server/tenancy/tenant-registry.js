@@ -8,6 +8,8 @@
 const crypto = require('crypto');
 const { obtenerPool } = require('../../database/postgres');
 
+let resolverSecretoTenant = null;
+
 function obtenerPoolControl() {
     return obtenerPool(process.env.CONTROL_DATABASE_URL, { max: 5 });
 }
@@ -20,7 +22,22 @@ function validarSlug(slug) {
     return valor;
 }
 
-function obtenerTenantDatabaseUrl(tenant) {
+function configurarResolverSecretoTenant(resolver) {
+    if (resolver !== null && typeof resolver !== 'function') {
+        throw new TypeError('El resolver de secretos del tenant debe ser una función o null.');
+    }
+    resolverSecretoTenant = resolver;
+}
+
+async function obtenerTenantDatabaseUrl(tenant) {
+    if (tenant.database_secret_ref && resolverSecretoTenant) {
+        const urlDesdeSecreto = await resolverSecretoTenant(tenant.database_secret_ref, tenant);
+        if (typeof urlDesdeSecreto === 'string' && urlDesdeSecreto.trim()) {
+            return urlDesdeSecreto;
+        }
+        throw new Error(`El secreto de conexión del tenant ${tenant.slug} no contiene una URL válida.`);
+    }
+
     const mapaRaw = process.env.TENANT_DATABASE_URLS_JSON;
     if (mapaRaw) {
         let mapa;
@@ -35,6 +52,10 @@ function obtenerTenantDatabaseUrl(tenant) {
         const clave = Object.hasOwn(mapa, tenant.tenant_id) ? tenant.tenant_id : tenant.slug;
         const url = Object.hasOwn(mapa, clave) ? mapa[clave] : null;
         if (typeof url === 'string' && url.trim()) return url;
+    }
+
+    if (tenant.database_secret_ref) {
+        throw new Error(`El tenant ${tenant.slug} requiere un resolver de secretos configurado.`);
     }
 
     throw new Error(`No hay resolver de conexión configurado para el tenant ${tenant.slug}.`);
@@ -73,11 +94,12 @@ async function obtenerTenantPorSlug(slug) {
 
 async function obtenerPoolTenant(tenant) {
     if (!tenant || !tenant.tenant_id) throw new Error('Contexto de tenant requerido.');
-    return obtenerPool(obtenerTenantDatabaseUrl(tenant));
+    return obtenerPool(await obtenerTenantDatabaseUrl(tenant));
 }
 
 module.exports = {
     crearTenant,
+    configurarResolverSecretoTenant,
     obtenerTenantPorId,
     obtenerTenantPorSlug,
     obtenerPoolTenant,

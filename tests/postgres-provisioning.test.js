@@ -105,7 +105,10 @@ test('el aprovisionamiento inicial y repetido conserva la configuración y sincr
     } catch (error) {
         if (error instanceof assert.AssertionError) throw error;
         const codigo = /^[A-Z0-9]{5}$/.test(error.code) ? ` (${error.code})` : '';
-        throw new Error(`Falló la verificación de aprovisionamiento PostgreSQL${codigo}.`);
+        const detalle = error instanceof Error
+            ? ` ${error.name}: ${error.message || '(sin mensaje)'}${error.stack ? `\n${error.stack}` : ''}`
+            : ` ${String(error)}`;
+        throw new Error(`Falló la verificación de aprovisionamiento PostgreSQL${codigo}.${detalle}`);
     } finally {
         try {
             await cerrarPoolsPostgres();
