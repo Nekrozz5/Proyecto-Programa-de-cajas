@@ -1,0 +1,8 @@
+{
+  "app": "node infra/bin/app.js",
+  "context": {
+    "environment": "dev",
+    "region": "us-east-2",
+    "@aws-cdk/core:defaultCrossStackReferences": "strong"
+  }
+}
