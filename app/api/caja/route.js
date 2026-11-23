@@ -31,6 +31,7 @@ import {
     adjuntarCookieSesion
 } from '../../../server/lib/sesion';
 import { verificarEstadoEmail } from '../../../server/lib/mailer';
+import { verificarLimitePublicoIp } from '../../../server/repositories/auth.repo';
 import { ejecutarRequestEnTenant } from '../../../server/tenancy/request-context';
 
 export const dynamic = 'force-dynamic';
@@ -54,6 +55,10 @@ export async function GET(request) {
         // Si no hay sesión autenticada, devolver únicamente lo necesario para el arranque / selector de login:
         // solo cajeros (id y nombre, sin rol). Las cuentas privilegiadas no se exponen.
         if (!usuarioSesion) {
+            const ip = String(process.env.TRUST_PROXY || '').trim().toLowerCase() === 'true'
+                ? String(request.headers.get('cf-connecting-ip') || request.headers.get('x-real-ip') || request.headers.get('x-forwarded-for') || 'local').split(',')[0].trim()
+                : 'local';
+            await verificarLimitePublicoIp(ip);
             const usuarios = await obtenerCajerosParaLogin();
             const respuestaSinSesion = NextResponse.json({
                 usuarioSesion: null,

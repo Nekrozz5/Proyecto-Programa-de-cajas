@@ -102,7 +102,7 @@ export default function TabConfiguracionCorreos({
                 setSmtpPuerto(String(s.puerto || '465'));
                 setSmtpSecure(Boolean(s.secure));
                 setSmtpUsuario(s.usuario || '');
-                setSmtpPassword(s.password || '');
+                setSmtpPassword('');
                 setSmtpRemitenteNombre(s.remitente_nombre || 'Sistema POS');
                 setSmtpActivo(s.activo !== 0);
             }
@@ -146,15 +146,16 @@ export default function TabConfiguracionCorreos({
         limpiarAlertas();
         try {
             setGuardandoSmtp(true);
-            const res = await guardarConfigSmtpAction({
+            const datos = {
                 host: smtpHost.trim(),
                 puerto: Number(smtpPuerto) || 465,
                 secure: smtpSecure,
                 usuario: smtpUsuario.trim(),
-                password: smtpPassword.trim(),
                 remitenteNombre: smtpRemitenteNombre.trim(),
                 activo: smtpActivo ? 1 : 0
-            });
+            };
+            if (smtpPassword.trim()) datos.password = smtpPassword.trim();
+            const res = await guardarConfigSmtpAction(datos);
 
             if (!res.ok) throw new Error(res.error || 'No se pudo guardar la configuración SMTP.');
 

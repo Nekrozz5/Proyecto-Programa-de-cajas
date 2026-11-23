@@ -1,8 +1,18 @@
 const { runQuery, getQuery, allQuery, enTransaccion } = require('./db');
 const { obtenerUsuarioPorId, esRolAdministrativo } = require('./auth.repo');
+const { cifrarPasswordSmtp, descifrarPasswordSmtp, obtenerClaveSmtp } = require('../lib/cifrado-smtp');
+
+const PASSWORD_SMTP_MASCARA = '••••••••';
 
 async function obtenerConfiguracionSmtp() {
-    return await getQuery(`SELECT * FROM configuracion_smtp WHERE id = 1`);
+    const config = await getQuery(`SELECT * FROM configuracion_smtp WHERE id = 1`);
+    if (!config) return config;
+    return { ...config, password: config.password ? PASSWORD_SMTP_MASCARA : '' };
+}
+
+async function obtenerPasswordSmtp() {
+    const config = await getQuery(`SELECT password FROM configuracion_smtp WHERE id = 1`);
+    return config?.password ? (obtenerClaveSmtp(), descifrarPasswordSmtp(config.password)) : '';
 }
 
 async function guardarConfiguracionSmtp(adminIdODatos, posibleDatos) {
@@ -24,19 +34,25 @@ async function guardarConfiguracionSmtp(adminIdODatos, posibleDatos) {
     }
 
     return enTransaccion(async () => {
+        obtenerClaveSmtp();
         await runQuery('LOCK TABLE configuracion_smtp IN SHARE ROW EXCLUSIVE MODE');
         const actual = await getQuery(`SELECT * FROM configuracion_smtp WHERE id = 1`);
         const host = datos.host !== undefined ? String(datos.host).trim() : (actual?.host || '');
         const puerto = datos.puerto !== undefined ? Number(datos.puerto) : (actual?.puerto || 587);
         const secure = datos.secure !== undefined ? (datos.secure ? 1 : 0) : (actual?.secure ?? 0);
         const usuario = datos.usuario !== undefined ? String(datos.usuario).trim() : (actual?.usuario || '');
-        const password = (datos.password !== undefined && String(datos.password).trim() !== '')
-            ? String(datos.password).trim()
-            : (actual?.password || '');
+        const passwordNueva = datos.password !== undefined ? String(datos.password).trim() : '';
+        const conservar = !passwordNueva || passwordNueva === PASSWORD_SMTP_MASCARA;
+        const password = conservar
+            ? (actual?.password || '')
+            : cifrarPasswordSmtp(passwordNueva);
         const remitenteNombre = datos.remitenteNombre !== undefined
             ? String(datos.remitenteNombre).trim()
             : (datos.remitente_nombre !== undefined ? String(datos.remitente_nombre).trim() : (actual?.remitente_nombre || 'Sistema POS'));
         const activo = datos.activo !== undefined ? (datos.activo ? 1 : 0) : (actual?.activo ?? 0);
+        if (!password && (activo || usuario)) {
+            throw new Error('SMTP_ENCRYPTION_KEY y una contraseña SMTP válida son obligatorias para activar el correo.');
+        }
         const ahora = new Date().toISOString();
 
         if (actual) {
@@ -206,6 +222,7 @@ async function obtenerNombreNegocioNotificaciones() {
 
 module.exports = {
     obtenerConfiguracionSmtp,
+    obtenerPasswordSmtp,
     guardarConfiguracionSmtp,
     listarDestinatariosNotificaciones,
     crearDestinatarioPendiente,

@@ -4,6 +4,7 @@
 const nodemailer = require('nodemailer');
 const {
     obtenerConfiguracionSmtp,
+    obtenerPasswordSmtp,
     listarCorreosNotificacionVerificados,
     obtenerNombreNegocioNotificaciones
 } = require('../repositories/notificaciones.repo');
@@ -32,9 +33,7 @@ async function obtenerConfiguracionEmail() {
     const user = (dbSmtp && dbSmtp.usuario && String(dbSmtp.usuario).trim())
         ? String(dbSmtp.usuario).trim()
         : String(process.env.SMTP_USER || '').trim();
-    const pass = (dbSmtp && dbSmtp.password && String(dbSmtp.password).trim())
-        ? String(dbSmtp.password).trim()
-        : String(process.env.SMTP_PASS || '').trim();
+    const pass = dbSmtp?.password ? await obtenerPasswordSmtp() : String(process.env.SMTP_PASS || '').trim();
     const remitenteNombre = (dbSmtp && dbSmtp.remitente_nombre && String(dbSmtp.remitente_nombre).trim())
         ? String(dbSmtp.remitente_nombre).trim()
         : '';

@@ -6,22 +6,13 @@ const { obtenerUsuarioPorIdEnTenant, obtenerEstadoDispositivoParaSesion } = requ
 const { obtenerPoolTenant, obtenerTenantPorId } = require('../tenancy/tenant-registry');
 const {
     obtenerContextoTenantDesdeRequest,
+    obtenerContextoTenantActual,
     tenantDelPayload
 } = require('../tenancy/tenant-context');
 const { esProduccion, exigirSecretoSesionProduccion } = require('./secretos');
 
 const NOMBRE_COOKIE_SESION = 'pos_session';
 const UUID_TENANT = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
-// Identificador único en memoria generado por cada arranque del servidor/proyecto.
-// Si el servidor se detiene o reinicia (npm run dev), cualquier sesión previa
-// de developer o administradores queda automáticamente invalidada.
-// Se preserva en globalThis para garantizar consistencia absoluta entre todos los bundles
-// de Next.js (Route Handlers, Server Actions, Server Components) durante la vida del proceso.
-if (!globalThis.__POS_INSTANCE_BOOT_ID__) {
-    globalThis.__POS_INSTANCE_BOOT_ID__ = crypto.randomUUID();
-}
-const INSTANCE_BOOT_ID = globalThis.__POS_INSTANCE_BOOT_ID__;
 
 const ROLES_ADMINISTRATIVOS_O_TECNICOS = ['developer', 'propietario', 'admin'];
 
@@ -110,10 +101,21 @@ async function crearTokenSesion(usuario) {
         payload.deviceId = deviceId;
     }
 
-    // Para developer y administradores, vincular la sesión estrictamente a la ejecución actual del servidor.
-    // Al reiniciar el proyecto (npm run dev), el bootId cambia y el token anterior queda invalidado.
+    // Las sesiones administrativas se registran en PostgreSQL para ser válidas detrás del balanceador.
     if (esAdminODev) {
-        payload.bootId = INSTANCE_BOOT_ID;
+        payload.sid = crypto.randomUUID();
+        const contextoActual = obtenerContextoTenantActual();
+        const tenant = await obtenerTenantPorId(tenantId);
+        const pool = contextoActual?.tenantId === tenantId && contextoActual.pool
+            ? contextoActual.pool
+            : (tenant ? await obtenerPoolTenant(tenant) : null);
+        if (pool) {
+            const expiraEn = new Date(Date.now() + ttlSegundos * 1000).toISOString();
+            await pool.query(`
+                INSERT INTO sesiones_admin (tenant_id, sesion_id, usuario_id, expira_en)
+                VALUES ($1, $2, $3, $4)
+            `, [tenantId, payload.sid, payload.id, expiraEn]);
+        }
     }
 
     return await new SignJWT(payload)
@@ -134,12 +136,12 @@ async function verificarTokenSesion(token) {
         });
         if (!payload || !payload.id || !payload.tenantId || !UUID_TENANT.test(String(payload.tenantId))) return null;
 
-        // Si es rol administrativo o developer, invalidar inmediatamente si el proceso del servidor se reinició
+        // Las sesiones administrativas se validan contra el registro compartido del tenant.
         if (ROLES_ADMINISTRATIVOS_O_TECNICOS.includes(payload.rol)) {
-            if (!payload.bootId || payload.bootId !== INSTANCE_BOOT_ID) {
-                console.warn(`[Sesión] Token administrativo invalidado por reinicio de proceso (usuario ${payload.nombre || payload.id}).`);
-                return null;
-            }
+            if (!payload.sid) return null;
+            const tenant = await obtenerTenantPorId(String(payload.tenantId));
+            const pool = tenant ? await obtenerPoolTenant(tenant) : null;
+            if (pool) await exigirSesionAdministrativaEnPool(payload, pool);
         }
 
         if (payload.rol === 'user' && (!Number.isSafeInteger(Number(payload.deviceId)) || Number(payload.deviceId) <= 0)) {
@@ -151,6 +153,26 @@ async function verificarTokenSesion(token) {
         console.warn('[Sesión] Token inválido o expirado:', err && err.message ? err.message : err);
         return null;
     }
+}
+
+async function exigirSesionAdministrativaEnPool(payload, pool) {
+    const { rows } = await pool.query(`
+        SELECT 1 FROM sesiones_admin
+        WHERE tenant_id = $1 AND sesion_id = $2 AND usuario_id = $3
+          AND revocada_en IS NULL AND expira_en > CURRENT_TIMESTAMP
+    `, [payload.tenantId, payload.sid, payload.id]);
+    if (!rows.length) return false;
+    return true;
+}
+
+async function revocarSesionesAdministrativas(tenantId, usuarioId = null) {
+    const tenant = await obtenerTenantPorId(String(tenantId));
+    const pool = tenant ? await obtenerPoolTenant(tenant) : null;
+    if (!pool) throw new Error('Tenant inválido para revocar sesiones administrativas.');
+    const params = [tenantId];
+    const filtro = usuarioId ? ' AND usuario_id = $2' : '';
+    if (usuarioId) params.push(Number(usuarioId));
+    await pool.query(`UPDATE sesiones_admin SET revocada_en = CURRENT_TIMESTAMP WHERE tenant_id = $1${filtro} AND revocada_en IS NULL`, params);
 }
 
 /**
@@ -257,6 +279,7 @@ async function obtenerUsuarioSesion(request) {
     const pool = await obtenerPoolTenant(contexto.tenant);
     const usuarioActivo = await obtenerUsuarioPorIdEnTenant(pool, contexto.tenantId, Number(payload.id));
     if (!usuarioActivo) return null;
+    if (ROLES_ADMINISTRATIVOS_O_TECNICOS.includes(usuarioActivo.rol) && !(await exigirSesionAdministrativaEnPool(payload, pool))) return null;
     if (usuarioActivo.rol === 'user' && !await obtenerEstadoDispositivoParaSesion(
         contexto.tenantId,
         payload.deviceId,
@@ -327,6 +350,11 @@ async function exigirUsuarioSesionAction(rolesPermitidos = null) {
         err.status = 401;
         throw err;
     }
+    if (ROLES_ADMINISTRATIVOS_O_TECNICOS.includes(usuarioActivo.rol) && !(await exigirSesionAdministrativaEnPool(payload, pool))) {
+        const err = new Error('La sesión administrativa fue revocada o expiró.');
+        err.status = 401;
+        throw err;
+    }
 
     if (usuarioActivo.rol === 'user' && !await obtenerEstadoDispositivoParaSesion(
         tenantId,
@@ -372,4 +400,5 @@ module.exports = {
     exigirUsuarioSesionAction,
     adjuntarCookieSesion,
     limpiarCookieSesion
+    ,revocarSesionesAdministrativas
 };

@@ -4,6 +4,7 @@
  */
 const { obtenerPool, cerrarPoolsPostgres, enTransaccionPostgres } = require('./postgres');
 const { obtenerPoolTenant } = require('../server/tenancy/tenant-registry');
+const { cifrarPasswordSmtp, PREFIJO, obtenerClaveSmtp } = require('../server/lib/cifrado-smtp');
 
 const migraciones = [
     {
@@ -459,6 +460,51 @@ const migraciones = [
                     CHECK (tema_visual IN ('claro', 'oscuro', 'sistema'));
         `
     }
+    ,{
+        version: 4,
+        sql: `
+            CREATE TABLE IF NOT EXISTS login_intentos (
+                clave TEXT PRIMARY KEY,
+                contador INTEGER NOT NULL DEFAULT 0,
+                primer_intento TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                bloqueado_hasta TIMESTAMPTZ
+            );
+            CREATE INDEX IF NOT EXISTS login_intentos_bloqueado_idx ON login_intentos (bloqueado_hasta);
+            CREATE TABLE IF NOT EXISTS dispositivo_pruebas_usadas (
+                tenant_id UUID NOT NULL,
+                device_id BIGINT NOT NULL,
+                hash_desafio TEXT NOT NULL,
+                expira_en TIMESTAMPTZ NOT NULL,
+                PRIMARY KEY (tenant_id, device_id, hash_desafio)
+            );
+            CREATE INDEX IF NOT EXISTS dispositivo_pruebas_expira_idx ON dispositivo_pruebas_usadas (expira_en);
+        `,
+        async aplicar(client) {
+            const { rows } = await client.query("SELECT id, password FROM configuracion_smtp WHERE password IS NOT NULL AND password <> '' FOR UPDATE");
+            if (rows.length) obtenerClaveSmtp();
+            for (const fila of rows) {
+                if (!String(fila.password).startsWith(PREFIJO)) {
+                    await client.query('UPDATE configuracion_smtp SET password = $1 WHERE id = $2', [cifrarPasswordSmtp(fila.password), fila.id]);
+                }
+            }
+        }
+    },
+    {
+        version: 5,
+        sql: `
+            CREATE TABLE IF NOT EXISTS sesiones_admin (
+                tenant_id UUID NOT NULL,
+                sesion_id UUID PRIMARY KEY,
+                usuario_id BIGINT NOT NULL,
+                creada_en TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                expira_en TIMESTAMPTZ NOT NULL,
+                revocada_en TIMESTAMPTZ,
+                CONSTRAINT sesiones_admin_tenant_usuario_fk FOREIGN KEY (tenant_id, usuario_id) REFERENCES usuarios (tenant_id, id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS sesiones_admin_tenant_idx ON sesiones_admin (tenant_id, usuario_id, revocada_en);
+            CREATE INDEX IF NOT EXISTS sesiones_admin_expira_idx ON sesiones_admin (expira_en);
+        `
+    }
 ];
 
 async function ejecutarMigracionesEnPool(pool, inicializar) {
@@ -478,7 +524,9 @@ async function ejecutarMigracionesEnPool(pool, inicializar) {
         }
 
         for (const { version, sql } of migraciones.slice(aplicadas.length)) {
+            const migracion = migraciones.find((item) => item.version === version);
             await client.query(sql);
+            if (migracion.aplicar) await migracion.aplicar(client);
             await client.query('INSERT INTO schema_migrations (version) VALUES ($1)', [version]);
         }
         if (inicializar) await inicializar(client);

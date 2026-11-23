@@ -1,7 +1,7 @@
 /**
  * server/repositories/auth.repo.js
  * Repositorio de autenticación, usuarios, roles y seguridad.
- * Control de intentos fallidos, rate limiting dual en memoria y hashing bcrypt.
+ * Control de intentos fallidos, rate limiting persistente y hashing bcrypt.
  */
 
 const bcrypt = require('bcryptjs');
@@ -14,29 +14,13 @@ const UUID_TENANT = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}
 const BCRYPT_ROUNDS = 10;
 const MAX_INTENTOS_LOGIN = 5;
 const TIEMPO_BLOQUEO_LOGIN_MS = 15 * 60 * 1000; // 15 minutos
-const intentosFallidosLogin = new Map();
 
 // Segundo contador por cuenta (sin IP): evita que rotar la IP permita fuerza bruta ilimitada.
 // 20 intentos fallidos dentro de una ventana de 15 minutos bloquean la cuenta 15 minutos.
 const MAX_INTENTOS_CUENTA = 20;
 const VENTANA_INTENTOS_CUENTA_MS = 15 * 60 * 1000;
 const TIEMPO_BLOQUEO_CUENTA_MS = 15 * 60 * 1000;
-const intentosFallidosCuenta = new Map();
-const pruebasDispositivoUsadas = new Map();
 const PRUEBA_DISPOSITIVO_TTL_MS = 5 * 60 * 1000;
-
-// Límite de entradas en memoria para que nombres aleatorios no hagan crecer los mapas sin control
-const MAX_ENTRADAS_RATE_LIMIT = 10000;
-
-function purgarEntradasExpiradas(mapa, ventanaMs) {
-    if (mapa.size < MAX_ENTRADAS_RATE_LIMIT) return;
-    const ahora = Date.now();
-    for (const [clave, reg] of mapa) {
-        const bloqueoVencido = !reg.bloqueadoHasta || reg.bloqueadoHasta <= ahora;
-        const ventanaVencida = !reg.primerIntento || ahora - reg.primerIntento > ventanaMs;
-        if (bloqueoVencido && ventanaVencida) mapa.delete(clave);
-    }
-}
 
 function esHashBcrypt(valor) {
     return typeof valor === 'string' && /^\$2[aby]\$\d{2}\$/.test(valor);
@@ -89,13 +73,6 @@ function decodificarFirma(firma) {
     }
 }
 
-function purgarPruebasDispositivo() {
-    const ahora = Date.now();
-    for (const [clave, expiraEn] of pruebasDispositivoUsadas) {
-        if (expiraEn <= ahora) pruebasDispositivoUsadas.delete(clave);
-    }
-}
-
 function errorDispositivoNoAutorizado() {
     const error = new Error('El dispositivo no está activo o la prueba criptográfica no es válida.');
     error.status = 403;
@@ -143,10 +120,17 @@ async function verificarPruebaDispositivo({ tenantId, deviceId, challenge, signa
     }
     if (!válida) throw errorDispositivoNoAutorizado();
 
-    purgarPruebasDispositivo();
-    const clavePrueba = `${tenant}:${id}:${crypto.createHash('sha256').update(desafio).digest('hex')}`;
-    if (pruebasDispositivoUsadas.has(clavePrueba)) throw errorDispositivoNoAutorizado();
-    pruebasDispositivoUsadas.set(clavePrueba, Date.now() + PRUEBA_DISPOSITIVO_TTL_MS);
+    const hashDesafio = crypto.createHash('sha256').update(desafio).digest('hex');
+    const limpiar = pool
+        ? (sql, params) => consultarConPoolTenant(pool, tenant, sql, params)
+        : async (sql, params) => ({ rowCount: (await runQuery(sql, params)).changes });
+    await limpiar('DELETE FROM dispositivo_pruebas_usadas WHERE expira_en <= CURRENT_TIMESTAMP', []);
+    const prueba = await limpiar(`
+        INSERT INTO dispositivo_pruebas_usadas (tenant_id, device_id, hash_desafio, expira_en)
+        VALUES ($1, $2, $3, CURRENT_TIMESTAMP + INTERVAL '5 minutes')
+        ON CONFLICT DO NOTHING
+    `, [tenant, id, hashDesafio]);
+    if (!prueba.rowCount) throw errorDispositivoNoAutorizado();
 
     const sqlActualizacion = `
         UPDATE dispositivos_pos SET ultimo_acceso = CURRENT_TIMESTAMP
@@ -186,15 +170,17 @@ async function obtenerEstadoDispositivoParaSesion(tenantId, deviceId, pool = nul
  */
 async function verificarUsuarioEnTenant(pool, tenantId, nombreUsuario, pin, ip = 'local') {
     return verificarUsuarioPostgres(
-        async (sql, params) => (await consultarConPoolTenant(pool, tenantId, sql, params)).rows[0],
+        (sql, params) => consultarConPoolTenant(pool, tenantId, sql, params),
         exigirTenantId(tenantId), nombreUsuario, pin, ip
     );
 }
 
 async function verificarUsuarioPostgres(consultar, tenant, nombreUsuario, pin, ip) {
     const usuario = String(nombreUsuario || '').trim();
-    const claveRL = obtenerClaveRateLimitLogin(`tenant:${tenant}:usuario:${usuario}`, ip);
-    verificarBloqueoLogin(claveRL);
+    const claveCuentaIntento = `cuenta:${tenant}:usuario:${usuario.toLowerCase()}`;
+    const usaProxy = String(process.env.TRUST_PROXY || '').trim().toLowerCase() === 'true';
+    const claveRL = usaProxy ? `ip:${String(ip || 'local').trim().toLowerCase()}` : null;
+    if (claveRL) await verificarBloqueoPersistente(consultar, claveRL, MAX_INTENTOS_LOGIN, TIEMPO_BLOQUEO_LOGIN_MS, 'ip');
 
     const candidato = await consultar(`
         SELECT id, tenant_id, nombre AS nombre_visible, nombre_usuario, rol,
@@ -204,16 +190,16 @@ async function verificarUsuarioPostgres(consultar, tenant, nombreUsuario, pin, i
           AND LOWER(nombre_usuario) = LOWER($2)
           AND activo = 1
         LIMIT 1
-    `, [tenant, usuario]);
-    const claveCuenta = obtenerClaveCuenta(candidato, `tenant:${tenant}:usuario:${usuario}`);
-    verificarBloqueoCuenta(claveCuenta);
+    `, [tenant, usuario]).then((resultado) => resultado.rows[0]);
+    const claveCuenta = claveCuentaIntento;
+    await verificarBloqueoPersistente(consultar, claveCuenta, MAX_INTENTOS_CUENTA, TIEMPO_BLOQUEO_CUENTA_MS, 'cuenta', VENTANA_INTENTOS_CUENTA_MS);
 
     if (!candidato || !(await compararPassword(pin, candidato.pin_o_password))) {
-        registrarFalloLogin(claveRL, claveCuenta);
+        await registrarFalloPersistente(consultar, claveCuenta, claveRL);
         return undefined;
     }
 
-    limpiarIntentosLogin(claveRL);
+    await limpiarIntentosPersistentes(consultar, claveCuenta, claveRL);
     return {
         id: candidato.id,
         tenantId: candidato.tenant_id,
@@ -284,45 +270,42 @@ function formatearMinutosYSegundos(segundosTotales) {
     return `${mins}:${segs < 10 ? '0' : ''}${segs}`;
 }
 
-function verificarBloqueoLogin(clave) {
-    const registro = intentosFallidosLogin.get(clave);
-    if (!registro) return;
-
+async function verificarBloqueoPersistente(consultar, clave, maxIntentos, bloqueoMs, tipo, ventanaMs = bloqueoMs) {
+    const r = (await consultar('SELECT contador, primer_intento, bloqueado_hasta FROM login_intentos WHERE clave = $1', [clave])).rows[0];
+    if (!r) return;
     const ahora = Date.now();
-    if (registro.bloqueadoHasta && registro.bloqueadoHasta > ahora) {
-        const segundosRestantes = Math.ceil((registro.bloqueadoHasta - ahora) / 1000);
-        const reloj = formatearMinutosYSegundos(segundosRestantes);
-        throw new Error(
-            `Cuenta bloqueada temporalmente tras ${MAX_INTENTOS_LOGIN} intentos fallidos. Intenta nuevamente en ${reloj} (min:seg).`
-        );
+    const bloqueadoHasta = r.bloqueado_hasta ? new Date(r.bloqueado_hasta).getTime() : 0;
+    const primer = new Date(r.primer_intento).getTime();
+    if (bloqueadoHasta > ahora || (!bloqueadoHasta && ahora - primer <= ventanaMs && Number(r.contador) >= maxIntentos)) {
+        const segundos = Math.ceil(((bloqueadoHasta || ahora + bloqueoMs) - ahora) / 1000);
+        const texto = tipo === 'cuenta' ? 'exceso de intentos fallidos' : `${maxIntentos} intentos fallidos`;
+        const error = new Error(`Acceso bloqueado temporalmente por ${texto}. Intenta nuevamente en ${formatearMinutosYSegundos(segundos)} (min:seg).`);
+        error.status = 429;
+        throw error;
     }
-
-    if (registro.bloqueadoHasta && registro.bloqueadoHasta <= ahora) {
-        intentosFallidosLogin.delete(clave);
+    if ((bloqueadoHasta && bloqueadoHasta <= ahora) || ahora - primer > ventanaMs) {
+        await consultar('DELETE FROM login_intentos WHERE clave = $1', [clave]);
     }
 }
 
-function registrarIntentoFallidoLogin(clave) {
-    const ahora = Date.now();
-    purgarEntradasExpiradas(intentosFallidosLogin, TIEMPO_BLOQUEO_LOGIN_MS);
-    const actual = intentosFallidosLogin.get(clave) || { intentos: 0, bloqueadoHasta: null, primerIntento: ahora };
-    actual.intentos += 1;
-
-    if (actual.intentos >= MAX_INTENTOS_LOGIN) {
-        actual.bloqueadoHasta = ahora + TIEMPO_BLOQUEO_LOGIN_MS;
-        intentosFallidosLogin.set(clave, actual);
-        const segundosRestantes = Math.ceil(TIEMPO_BLOQUEO_LOGIN_MS / 1000);
-        const reloj = formatearMinutosYSegundos(segundosRestantes);
-        throw new Error(
-            `Demasiados intentos fallidos (${MAX_INTENTOS_LOGIN}). El acceso se ha bloqueado temporalmente por ${reloj} (min:seg).`
-        );
+async function registrarFalloPersistente(consultar, claveCuenta, claveIp) {
+    const claves = [claveCuenta, claveIp].filter(Boolean);
+    for (const clave of claves) {
+        const max = clave.startsWith('ip:') ? MAX_INTENTOS_LOGIN : MAX_INTENTOS_CUENTA;
+        const ventana = clave.startsWith('ip:') ? TIEMPO_BLOQUEO_LOGIN_MS : VENTANA_INTENTOS_CUENTA_MS;
+        await consultar(`
+            INSERT INTO login_intentos (clave, contador, primer_intento, bloqueado_hasta)
+            VALUES ($1, 1, CURRENT_TIMESTAMP, NULL)
+            ON CONFLICT (clave) DO UPDATE SET
+                contador = CASE WHEN login_intentos.primer_intento < CURRENT_TIMESTAMP - ($2 * INTERVAL '1 millisecond') THEN 1 ELSE login_intentos.contador + 1 END,
+                primer_intento = CASE WHEN login_intentos.primer_intento < CURRENT_TIMESTAMP - ($2 * INTERVAL '1 millisecond') THEN CURRENT_TIMESTAMP ELSE login_intentos.primer_intento END,
+                bloqueado_hasta = CASE WHEN login_intentos.contador + 1 >= $3 THEN CURRENT_TIMESTAMP + INTERVAL '15 minutes' ELSE login_intentos.bloqueado_hasta END
+        `, [clave, ventana, max]);
     }
-
-    intentosFallidosLogin.set(clave, actual);
 }
 
-function limpiarIntentosLogin(clave) {
-    intentosFallidosLogin.delete(clave);
+async function limpiarIntentosPersistentes(consultar, claveCuenta, claveIp) {
+    for (const clave of [claveCuenta, claveIp].filter(Boolean)) await consultar('DELETE FROM login_intentos WHERE clave = $1', [clave]);
 }
 
 function obtenerClaveCuenta(candidato, identificadorIntentado) {
@@ -334,50 +317,31 @@ function obtenerClaveCuenta(candidato, identificadorIntentado) {
     return `intento:${String(identificadorIntentado || 'desconocido').trim().toLowerCase()}`;
 }
 
-function verificarBloqueoCuenta(claveCuenta) {
-    const registro = intentosFallidosCuenta.get(claveCuenta);
-    if (!registro) return;
-    const ahora = Date.now();
-
-    if (registro.bloqueadoHasta && registro.bloqueadoHasta > ahora) {
-        const reloj = formatearMinutosYSegundos(Math.ceil((registro.bloqueadoHasta - ahora) / 1000));
-        throw new Error(
-            `Cuenta bloqueada temporalmente por exceso de intentos fallidos (${MAX_INTENTOS_CUENTA}) desde distintos orígenes. Intenta nuevamente en ${reloj} (min:seg).`
-        );
-    }
-
-    const bloqueoVencido = registro.bloqueadoHasta && registro.bloqueadoHasta <= ahora;
-    const ventanaVencida = !registro.bloqueadoHasta && ahora - registro.primerIntento > VENTANA_INTENTOS_CUENTA_MS;
-    if (bloqueoVencido || ventanaVencida) {
-        intentosFallidosCuenta.delete(claveCuenta);
-    }
-}
-
-function registrarIntentoFallidoCuenta(claveCuenta) {
-    const ahora = Date.now();
-    purgarEntradasExpiradas(intentosFallidosCuenta, VENTANA_INTENTOS_CUENTA_MS);
-    let actual = intentosFallidosCuenta.get(claveCuenta);
-    if (!actual || (!actual.bloqueadoHasta && ahora - actual.primerIntento > VENTANA_INTENTOS_CUENTA_MS)) {
-        actual = { intentos: 0, primerIntento: ahora, bloqueadoHasta: null };
-    }
-    actual.intentos += 1;
-    if (actual.intentos >= MAX_INTENTOS_CUENTA && !actual.bloqueadoHasta) {
-        actual.bloqueadoHasta = ahora + TIEMPO_BLOQUEO_CUENTA_MS;
-    }
-    intentosFallidosCuenta.set(claveCuenta, actual);
-}
-
-function registrarFalloLogin(claveIp, claveCuenta) {
-    registrarIntentoFallidoCuenta(claveCuenta);
-    registrarIntentoFallidoLogin(claveIp);
-}
-
 async function compararPassword(pinPlano, passwordGuardado) {
     const pinStr = String(pinPlano ?? '');
     if (!pinStr || !passwordGuardado) return false;
 
     if (!esHashBcrypt(passwordGuardado)) return false;
     return await bcrypt.compare(pinStr, passwordGuardado);
+}
+
+async function verificarLimitePublicoIp(ip, limite = 60) {
+    const clave = `publico:ip:${String(ip || 'local').trim().toLowerCase()}`;
+    const r = await getQuery('SELECT contador, bloqueado_hasta FROM login_intentos WHERE clave = $1', [clave]);
+    const ahora = Date.now();
+    if (r?.bloqueado_hasta && new Date(r.bloqueado_hasta).getTime() > ahora) {
+        const error = new Error('Demasiadas consultas públicas. Intenta nuevamente más tarde.');
+        error.status = 429;
+        throw error;
+    }
+    await runQuery(`
+        INSERT INTO login_intentos (clave, contador, primer_intento, bloqueado_hasta)
+        VALUES ($1, 1, CURRENT_TIMESTAMP, NULL)
+        ON CONFLICT (clave) DO UPDATE SET
+            contador = CASE WHEN login_intentos.primer_intento < CURRENT_TIMESTAMP - INTERVAL '1 minute' THEN 1 ELSE login_intentos.contador + 1 END,
+            primer_intento = CASE WHEN login_intentos.primer_intento < CURRENT_TIMESTAMP - INTERVAL '1 minute' THEN CURRENT_TIMESTAMP ELSE login_intentos.primer_intento END,
+            bloqueado_hasta = CASE WHEN login_intentos.contador + 1 >= $2 THEN CURRENT_TIMESTAMP + INTERVAL '1 minute' ELSE login_intentos.bloqueado_hasta END
+    `, [clave, limite]);
 }
 
 const NIVEL_ROL = {
@@ -392,7 +356,15 @@ function esRolAdministrativo(rol) {
 }
 
 async function verificarUsuario(nombre, pin, ip = 'local') {
-    return verificarUsuarioPostgres(getQuery, obtenerTenantId(), nombre, pin, ip);
+    const consultar = async (sql, params) => {
+        if (/^\s*SELECT/i.test(sql)) {
+            const rows = await allQuery(sql, params);
+            return { rows, rowCount: rows.length };
+        }
+        const resultado = await runQuery(sql, params);
+        return { rows: [], rowCount: resultado.changes };
+    };
+    return verificarUsuarioPostgres(consultar, obtenerTenantId(), nombre, pin, ip);
 }
 
 async function autenticarUsuarioPorId(usuarioId, pin, nombreUsuario = null, ip = 'local') {
@@ -403,32 +375,15 @@ async function autenticarUsuarioPorId(usuarioId, pin, nombreUsuario = null, ip =
         return usuario;
     }
 
-    const identificadorTenant = `tenant:${tenant}:id:${Number(usuarioId || 0)}`;
-    const claveRL = obtenerClaveRateLimitLogin(identificadorTenant, ip);
-    verificarBloqueoLogin(claveRL);
-
     const candidato = await getQuery(
-        `SELECT id, nombre, rol, pin_o_password, tenant_id
+        `SELECT id, nombre_usuario
          FROM usuarios WHERE id = $1 AND activo = 1 AND tenant_id = $2`,
         [usuarioId, tenant]
     );
-
-    const claveCuenta = obtenerClaveCuenta(candidato, identificadorTenant);
-    verificarBloqueoCuenta(claveCuenta);
-
-    if (!candidato) {
-        registrarFalloLogin(claveRL, claveCuenta);
-        throw new Error('Credenciales incorrectas o usuario inactivo.');
-    }
-
-    const coincide = await compararPassword(pin, candidato.pin_o_password);
-    if (!coincide) {
-        registrarFalloLogin(claveRL, claveCuenta);
-        throw new Error('Credenciales incorrectas o usuario inactivo.');
-    }
-
-    limpiarIntentosLogin(claveRL);
-    return { id: candidato.id, nombre: candidato.nombre, rol: candidato.rol };
+    if (!candidato) throw new Error('Credenciales incorrectas o usuario inactivo.');
+    const usuario = await verificarUsuario(candidato.nombre_usuario, pin, ip);
+    if (!usuario || Number(usuario.id) !== Number(usuarioId)) throw new Error('Credenciales incorrectas o usuario inactivo.');
+    return usuario;
 }
 
 async function obtenerUsuarioPorId(id) {
@@ -625,6 +580,7 @@ module.exports = {
     verificarPruebaDispositivo,
     obtenerEstadoDispositivoParaSesion,
     verificarUsuarioEnTenant,
+    verificarLimitePublicoIp,
     crearUsuarioEnTenant,
     obtenerUsuarioPorIdEnTenant
 };
