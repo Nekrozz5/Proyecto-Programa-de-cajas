@@ -18,6 +18,7 @@ PostgreSQL es el único motor de persistencia. El registro central y cada negoci
 | [docs/ADR-001-POSTGRES-ONLY.md](docs/ADR-001-POSTGRES-ONLY.md) | Decisión aceptada de usar PostgreSQL como fuente canónica. |
 | [docs/MODELO_NEGOCIO_Y_PLANES.md](docs/MODELO_NEGOCIO_Y_PLANES.md) | Modelo comercial, funciones por plan, colaboración y uso obligatorio de Trello. |
 | [docs/CONTRATO_INFRA_AWS.md](docs/CONTRATO_INFRA_AWS.md) | Reglas de ramas, integración y contrato entre Red AWS, RDS y la aplicación. |
+| [docs/DOCKER_ECS_FARGATE.md](docs/DOCKER_ECS_FARGATE.md) | Empaquetado Docker para ECS Fargate, variables secretas, health check HTTP y diagnóstico de `.next` en OneDrive. |
 | [.agents/PROJECT_CONTEXT.md](.agents/PROJECT_CONTEXT.md) | Reglas de negocio, directrices técnicas y variables de entorno. |
 
 ---

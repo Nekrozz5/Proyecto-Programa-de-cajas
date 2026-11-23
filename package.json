@@ -1,6 +1,6 @@
 {
   "name": "programa-cajas",
-  "version": "3.1.0",
+  "version": "3.1.1",
   "description": "Sistema POS y Control de Cajas en AWS con Next.js y PostgreSQL",
   "scripts": {
     "test": "npm run simular",
