@@ -109,13 +109,14 @@ async function crearTokenSesion(usuario) {
         const pool = contextoActual?.tenantId === tenantId && contextoActual.pool
             ? contextoActual.pool
             : (tenant ? await obtenerPoolTenant(tenant) : null);
-        if (pool) {
-            const expiraEn = new Date(Date.now() + ttlSegundos * 1000).toISOString();
-            await pool.query(`
-                INSERT INTO sesiones_admin (tenant_id, sesion_id, usuario_id, expira_en)
-                VALUES ($1, $2, $3, $4)
-            `, [tenantId, payload.sid, payload.id, expiraEn]);
+        if (!pool) {
+            throw new Error('No se puede crear una sesión administrativa sin acceso al tenant.');
         }
+        const expiraEn = new Date(Date.now() + ttlSegundos * 1000).toISOString();
+        await pool.query(`
+            INSERT INTO sesiones_admin (tenant_id, sesion_id, usuario_id, expira_en)
+            VALUES ($1, $2, $3, $4)
+        `, [tenantId, payload.sid, payload.id, expiraEn]);
     }
 
     return await new SignJWT(payload)
@@ -141,7 +142,8 @@ async function verificarTokenSesion(token) {
             if (!payload.sid) return null;
             const tenant = await obtenerTenantPorId(String(payload.tenantId));
             const pool = tenant ? await obtenerPoolTenant(tenant) : null;
-            if (pool) await exigirSesionAdministrativaEnPool(payload, pool);
+            if (!tenant || !pool) return null;
+            if (!await exigirSesionAdministrativaEnPool(payload, pool)) return null;
         }
 
         if (payload.rol === 'user' && (!Number.isSafeInteger(Number(payload.deviceId)) || Number(payload.deviceId) <= 0)) {
