@@ -225,7 +225,8 @@ export default function TabConfigFiscal({
                     </button>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-5 rounded-lg border border-slate-200 bg-slate-50 p-4">
+                {/* Personalización visual reservada para una fase posterior; se conserva la lógica y la persistencia. */}
+                <div className="hidden grid grid-cols-1 md:grid-cols-2 gap-4 mb-5 rounded-lg border border-slate-200 bg-slate-50 p-4">
                     <div className="md:col-span-2">
                         <h3 className="text-sm font-bold text-slate-900">Identidad visual del negocio</h3>
                         <p className="mt-1 text-xs text-slate-600">
