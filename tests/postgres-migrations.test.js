@@ -33,19 +33,19 @@ test('la base PostgreSQL vacía migra de forma atómica, concurrente e idempoten
 
         assert.deepEqual(await Promise.all([
             ejecutarMigracionesEnPool(pool), ejecutarMigracionesEnPool(pool)
-        ]), [3, 3]);
+        ]), [5, 5]);
         const historial = () => pool.query('SELECT version, applied_at FROM schema_migrations ORDER BY version');
         const { rows: aplicadas } = await historial();
-        assert.deepEqual(aplicadas.map(({ version }) => version), [1, 2, 3]);
+        assert.deepEqual(aplicadas.map(({ version }) => version), [1, 2, 3, 4, 5]);
         assert.ok(aplicadas.every(({ applied_at }) => applied_at instanceof Date));
         assert.deepEqual((await tablasPublicas()).rows.map(({ tablename }) => tablename), [
             'cajas', 'cajas_fisicas', 'categorias', 'combo_componentes', 'configuracion_negocio',
             'configuracion_smtp', 'detalle_movimientos', 'detalle_movimientos_combos',
-            'detalle_movimientos_modificadores', 'dispositivos_pos', 'grupos_modificadores',
-            'insumos', 'modificadores_opciones', 'movimientos', 'movimientos_insumos',
+            'detalle_movimientos_modificadores', 'dispositivo_pruebas_usadas', 'dispositivos_pos', 'grupos_modificadores',
+            'insumos', 'login_intentos', 'modificadores_opciones', 'movimientos', 'movimientos_insumos',
             'movimientos_pagos', 'movimientos_productos_directos', 'notificacion_destinatarios',
             'producto_grupos_modificadores', 'producto_lotes', 'productos', 'recetas',
-            'schema_migrations', 'usuarios'
+            'schema_migrations', 'sesiones_admin', 'usuarios'
         ]);
         assert.equal((await pool.query('SELECT COUNT(*)::int AS total FROM configuracion_negocio')).rows[0].total, 0);
 
@@ -63,7 +63,7 @@ test('la base PostgreSQL vacía migra de forma atómica, concurrente e idempoten
         assert.deepEqual(leido, {
             precio: 0.3, costo: 1.23456789, fecha_inicio_vigencia: new Date('2026-01-01T12:00:00Z')
         });
-        assert.equal(await ejecutarMigracionesEnPool(pool), 3);
+        assert.equal(await ejecutarMigracionesEnPool(pool), 5);
         assert.deepEqual((await historial()).rows, aplicadas);
 
         await pool.query("INSERT INTO categorias (nombre) VALUES ('Papelería')");

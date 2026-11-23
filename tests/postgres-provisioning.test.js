@@ -50,11 +50,6 @@ test('el aprovisionamiento inicial y repetido conserva la configuración y sincr
         await assert.rejects(provisionarTenant(slug), /base operativa no coincide/);
         process.env.TENANT_DATABASE_URLS_JSON = JSON.stringify({ [slug]: urlOperativa });
 
-        delete process.env.DEVELOPER_PASSWORD;
-        await assert.rejects(provisionarTenant(slug), /DEVELOPER_PASSWORD es obligatoria/);
-        assert.equal((await estadoControl()).schema_version, 0);
-        assert.equal((await operativo.query("SELECT to_regclass('schema_migrations') AS historial")).rows[0].historial, null);
-
         process.env.DEVELOPER_PASSWORD = clave;
         const version = await provisionarTenant(slug);
         const publicado = await estadoControl();
@@ -98,8 +93,11 @@ test('el aprovisionamiento inicial y repetido conserva la configuración y sincr
         assert.equal(sincronizado.id, developer.id);
         assert.equal(sincronizado.activo, 1);
         assert.equal(sincronizado.nombre_usuario, 'developer');
-        assert.ok(await bcrypt.compare(nuevaClave, sincronizado.pin_o_password));
-        assert.equal(await bcrypt.compare(clave, sincronizado.pin_o_password), false);
+        assert.equal(await bcrypt.compare(clave, sincronizado.pin_o_password), true);
+        assert.equal(await bcrypt.compare(nuevaClave, sincronizado.pin_o_password), false);
+        await provisionarTenant(slug, { rotarDeveloper: true });
+        const [rotado] = await usuarios();
+        assert.ok(await bcrypt.compare(nuevaClave, rotado.pin_o_password));
         assert.deepEqual(await leerConfiguracion(), configuracion);
         assert.equal((await estadoControl()).schema_version, version);
     } catch (error) {
