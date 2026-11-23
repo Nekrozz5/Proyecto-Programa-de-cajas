@@ -35,15 +35,26 @@ tarea debe integrarse primero.
 La rama de red debe documentar y exponer:
 
 - Región seleccionada: `us-east-2`.
-- VPC y CIDR.
-- Subredes privadas destinadas a RDS.
-- Identificadores de subredes o referencias CDK consumibles por RDS.
-- Security Group de la aplicación.
-- Security Group de RDS.
-- Regla PostgreSQL `5432` permitida únicamente desde el Security Group de la
-  aplicación.
-- Outputs estables para que el stack de base de datos no dependa de nombres
-  internos cambiantes.
+- VPC `programa-cajas-dev`, CIDR `10.42.0.0/16`, con dos Availability Zones.
+- Subredes privadas aisladas `database`, una por Availability Zone, con máscara
+  `/24`; no tienen ruta de salida a Internet y son las únicas subredes que el
+  stack de RDS debe consumir.
+- Security Group de la aplicación: `programa-cajas-dev-app`.
+- Security Group de RDS: `programa-cajas-dev-db`.
+- La única entrada al Security Group de RDS es TCP `5432` desde el Security
+  Group de la aplicación; no se permite CIDR público.
+- Outputs estables del stack de red:
+
+  | Output | Uso por el stack de RDS |
+  | --- | --- |
+  | `VpcId` | Identificar la VPC compartida |
+  | `DatabaseSubnetIds` | Seleccionar las subredes privadas aisladas |
+  | `ApplicationSecurityGroupId` | Referencia del origen permitido |
+  | `DatabaseSecurityGroupId` | Asociar el SG a la instancia PostgreSQL |
+
+El `DatabaseStack` consume referencias CDK (`vpc` y
+`databaseSecurityGroup`) producidas por `NetworkStack`; no recrea la VPC, las
+subredes ni las reglas de seguridad.
 
 La rama de RDS debe consumir ese contrato y no recrear la VPC ni modificar las
 reglas de red sin coordinarlo. Debe documentar:
@@ -52,7 +63,8 @@ reglas de red sin coordinarlo. Debe documentar:
 - Clase y almacenamiento del entorno de desarrollo.
 - Nombre de la base de control.
 - Política para crear una base por tenant.
-- Cifrado, backups automáticos y SSL/TLS.
+- Cifrado en reposo habilitado, backups automáticos durante 7 días y conexión
+  de clientes mediante SSL/TLS (`sslmode=require`).
 - Secretos y permisos necesarios, sin incluir valores secretos.
 
 ## Límites de archivos
@@ -80,6 +92,22 @@ Antes de abrir una solicitud de integración, dejar en la tarjeta de Trello:
 4. Outputs, nombres o interfaces que otro stack debe consumir.
 5. Variables de entorno nuevas, sin valores sensibles.
 6. Riesgos, decisiones pendientes y pasos para probarlo.
+
+## Actualización obligatoria antes del PR
+
+Cada responsable debe actualizar su rama de trabajo antes de abrir el PR:
+
+```powershell
+git fetch origin
+git merge origin/main
+git status
+git diff --check
+```
+
+Si `git merge` informa conflictos, deben resolverse y validarse en la rama de
+trabajo. Antes de solicitar la fusión, revisar `git diff origin/main...HEAD` y
+ejecutar `npm run cdk:synth`; no se debe resolver un conflicto directamente en
+`main`.
 
 ## Uso de asistentes de IA distintos
 
