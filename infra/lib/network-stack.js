@@ -27,9 +27,31 @@ class NetworkStack extends cdk.Stack {
         this.applicationSecurityGroup = new ec2.SecurityGroup(this, 'ApplicationSecurityGroup', {
             vpc: this.vpc,
             securityGroupName: 'programa-cajas-dev-app',
-            description: 'Permite trafico de la aplicacion hacia servicios internos.',
+            description: 'ECS recibe trafico solo desde el ALB y accede a PostgreSQL.',
             allowAllOutbound: true
         });
+
+        // Se conserva el recurso y output de aplicación para no romper el
+        // contrato Red AWS -> RDS; este SG representa las tareas ECS.
+        this.ecsSecurityGroup = this.applicationSecurityGroup;
+
+        this.loadBalancerSecurityGroup = new ec2.SecurityGroup(this, 'LoadBalancerSecurityGroup', {
+            vpc: this.vpc,
+            securityGroupName: 'programa-cajas-dev-alb',
+            description: 'ALB publico; reenvia solo al puerto HTTP de ECS.',
+            allowAllOutbound: false
+        });
+
+        this.loadBalancerSecurityGroup.addIngressRule(
+            ec2.Peer.anyIpv4(),
+            ec2.Port.tcp(443),
+            'HTTPS publico al ALB'
+        );
+        this.loadBalancerSecurityGroup.addIngressRule(
+            ec2.Peer.anyIpv6(),
+            ec2.Port.tcp(443),
+            'HTTPS publico al ALB'
+        );
 
         this.databaseSecurityGroup = new ec2.SecurityGroup(this, 'DatabaseSecurityGroup', {
             vpc: this.vpc,
@@ -41,7 +63,19 @@ class NetworkStack extends cdk.Stack {
         this.databaseSecurityGroup.addIngressRule(
             this.applicationSecurityGroup,
             ec2.Port.tcp(5432),
-            'PostgreSQL desde ECS o la aplicación autorizada'
+            'PostgreSQL desde ECS o la aplicacion autorizada'
+        );
+
+        this.applicationSecurityGroup.addIngressRule(
+            this.loadBalancerSecurityGroup,
+            ec2.Port.tcp(3000),
+            'HTTP de la aplicacion desde el ALB'
+        );
+
+        this.loadBalancerSecurityGroup.addEgressRule(
+            this.applicationSecurityGroup,
+            ec2.Port.tcp(3000),
+            'Reenvio del ALB hacia ECS'
         );
 
         new cdk.CfnOutput(this, 'VpcId', {
@@ -55,6 +89,14 @@ class NetworkStack extends cdk.Stack {
         new cdk.CfnOutput(this, 'ApplicationSecurityGroupId', {
             value: this.applicationSecurityGroup.securityGroupId,
             exportName: `${this.stackName}-ApplicationSecurityGroupId`
+        });
+        new cdk.CfnOutput(this, 'EcsSecurityGroupId', {
+            value: this.ecsSecurityGroup.securityGroupId,
+            exportName: `${this.stackName}-EcsSecurityGroupId`
+        });
+        new cdk.CfnOutput(this, 'LoadBalancerSecurityGroupId', {
+            value: this.loadBalancerSecurityGroup.securityGroupId,
+            exportName: `${this.stackName}-LoadBalancerSecurityGroupId`
         });
         new cdk.CfnOutput(this, 'DatabaseSecurityGroupId', {
             value: this.databaseSecurityGroup.securityGroupId,

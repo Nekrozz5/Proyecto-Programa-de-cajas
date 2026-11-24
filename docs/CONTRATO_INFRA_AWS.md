@@ -3,6 +3,10 @@
 Este documento define cómo trabajar en paralelo sin romper la integración entre
 la red AWS, PostgreSQL y la aplicación.
 
+La topología detallada y la matriz de puertos están en
+[RED_AWS_VPC_SUBREDES_SG.md](RED_AWS_VPC_SUBREDES_SG.md). Ese documento es la
+referencia operativa para revisar la red antes de crear RDS.
+
 ## Reglas de Git
 
 - `main` es la rama protegida de integración; no se trabaja directamente allí.
@@ -51,6 +55,8 @@ La rama de red debe documentar y exponer:
   | `DatabaseSubnetIds` | Seleccionar las subredes privadas aisladas |
   | `ApplicationSecurityGroupId` | Referencia del origen permitido |
   | `DatabaseSecurityGroupId` | Asociar el SG a la instancia PostgreSQL |
+  | `EcsSecurityGroupId` | SG de las tareas ECS; actualmente es el SG de aplicación |
+  | `LoadBalancerSecurityGroupId` | SG del ALB público HTTPS |
 
 El `DatabaseStack` consume referencias CDK (`vpc` y
 `databaseSecurityGroup`) producidas por `NetworkStack`; no recrea la VPC, las
@@ -63,8 +69,17 @@ reglas de red sin coordinarlo. Debe documentar:
 - Clase y almacenamiento del entorno de desarrollo.
 - Nombre de la base de control.
 - Política para crear una base por tenant.
-- Cifrado en reposo habilitado, backups automáticos durante 7 días y conexión
-  de clientes mediante SSL/TLS (`sslmode=require`).
+- Cifrado en reposo habilitado, backups automáticos y conexión de clientes
+  mediante SSL/TLS (`sslmode=require`). En el plan AWS FREE actual se usa una
+  retención de 1 día; `RDS_BACKUP_RETENTION_DAYS=7` permite recuperar la
+  retención prevista cuando el plan lo permita.
+- El parámetro `rds.force_ssl=1` rechaza conexiones PostgreSQL sin TLS. La
+  validación operativa usa `scripts/verify-rds-ssl.js` con el bundle CA de RDS
+  y comprueba `pg_stat_ssl` en `control_plane` y `negocio_cafeteria`.
+- RDS crea `control_plane` como base inicial. Después de que la instancia esté
+  disponible, `scripts/provision-rds-databases.js` crea de forma idempotente
+  `negocio_cafeteria` usando el secreto generado por RDS; luego se ejecutan las
+  migraciones del control plane y del tenant.
 - Secretos y permisos necesarios, sin incluir valores secretos.
 
 ## Límites de archivos
