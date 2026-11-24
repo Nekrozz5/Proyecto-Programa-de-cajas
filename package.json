@@ -1,6 +1,6 @@
 {
   "name": "programa-cajas",
-  "version": "3.1.1",
+  "version": "3.1.2",
   "description": "Sistema POS y Control de Cajas en AWS con Next.js y PostgreSQL",
   "scripts": {
     "test": "npm run simular",
@@ -17,6 +17,8 @@
     "demo:seed": "node --env-file-if-exists=.env.local scripts/seed_demo.js",
     "simular": "node --env-file-if-exists=.env.local tests/simulador_integral.js",
     "backup": "node --env-file-if-exists=.env.local scripts/backup-postgres.js",
+    "provision:rds-databases": "node scripts/provision-rds-databases.js",
+    "verify:rds-ssl": "node scripts/verify-rds-ssl.js",
     "cdk:synth": "cdk synth --strict",
     "cdk:diff": "cdk diff"
   },
