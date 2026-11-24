@@ -125,3 +125,14 @@ DEVELOPER_PASSWORD=<clave_acceso_tecnico>
 # SMTP_USER=correo@dominio.com
 # SMTP_PASS=app_password
 ```
+
+## 7. Entorno WSL y checkouts
+- El desarrollo y las operaciones Docker/AWS se ejecutan desde WSL.
+- Ruta habitual del checkout en WSL: `~/proyectos/programa-cajas`.
+- Ruta del checkout visible desde Windows/Codex: `/mnt/c/Users/monta/OneDrive/Desktop/programa-cajas`.
+- Tratar ambas rutas como checkouts potencialmente distintos; confirmar la ruta actual antes de editar o ejecutar scripts.
+- Docker funciona mediante Docker Desktop + integración WSL; validar con `docker info`.
+- Desde WSL, usar `aws.exe` si el AWS CLI no está instalado en Linux.
+- Región AWS del proyecto: `us-east-2`.
+- Verificación mínima antes de operaciones cloud: `docker info` y `aws.exe sts get-caller-identity`.
+- Usar `deploy/push-ecr.sh` para publicar imágenes desde WSL y `deploy/push-ecr.ps1` desde Windows PowerShell.

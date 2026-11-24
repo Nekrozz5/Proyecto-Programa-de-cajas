@@ -94,3 +94,15 @@ Constraints for each level:
 - MUST flag best practices and explain trade-offs
 - MUST still execute the user's choice if they disagree with a suggestion
 <!-- END AWS Agent Toolkit rules -->
+
+## Entorno de ejecución WSL
+
+- El proyecto se ejecuta desde una terminal WSL; ejecutar allí los comandos de Docker, Node y AWS.
+- Checkout WSL habitual: `~/proyectos/programa-cajas`.
+- Checkout Windows/Codex: `/mnt/c/Users/monta/OneDrive/Desktop/programa-cajas`.
+- Estas rutas pueden ser checkouts distintos; no asumir que los cambios de uno aparecen en el otro.
+- Docker usa Docker Desktop mediante la integración WSL. Verificar disponibilidad con `docker info`.
+- AWS CLI se invoca como `aws.exe` desde WSL cuando `aws` no está instalado dentro de la distribución.
+- Región AWS seleccionada: `us-east-2`.
+- Antes de operar contra AWS desde WSL, verificar `docker info` y `aws.exe sts get-caller-identity`.
+- Preferir scripts Bash (`deploy/*.sh`) desde WSL; usar scripts PowerShell (`deploy/*.ps1`) solo desde Windows PowerShell.
