@@ -85,7 +85,7 @@ Instrucciones específicas:
 Restricciones para ahorro de tokens:
 - NO inspecciones ni leas archivos fuera de la lista indicada.
 - Aplica cambios quirúrgicos reemplazando únicamente las secciones necesarias.
-- No ejecutes pruebas masivas ni builds a menos que se indique.
+- NO ejecutes `npm run test`, `npm run test:*`, `npm run simular`, `npm run build` ni `npm run dev` salvo petición explícita.
 
 Definición de Terminado (DoD): <Criterio exacto para dar la fase por completada>.
 Al finalizar, responde únicamente con un resumen de 3 viñetas de lo realizado y confirma que el DoD fue cumplido.

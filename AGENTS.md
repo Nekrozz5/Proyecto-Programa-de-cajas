@@ -95,14 +95,15 @@ Constraints for each level:
 - MUST still execute the user's choice if they disagree with a suggestion
 <!-- END AWS Agent Toolkit rules -->
 
-## Entorno de ejecución WSL
+## Entorno de ejecución WSL (Único Workspace Autorizado)
 
-- El proyecto se ejecuta desde una terminal WSL; ejecutar allí los comandos de Docker, Node y AWS.
-- Checkout WSL habitual: `~/proyectos/programa-cajas`.
-- Checkout Windows/Codex: `/mnt/c/Users/monta/OneDrive/Desktop/programa-cajas`.
-- Estas rutas pueden ser checkouts distintos; no asumir que los cambios de uno aparecen en el otro.
-- Docker usa Docker Desktop mediante la integración WSL. Verificar disponibilidad con `docker info`.
-- AWS CLI se invoca como `aws.exe` desde WSL cuando `aws` no está instalado dentro de la distribución.
-- Región AWS seleccionada: `us-east-2`.
-- Antes de operar contra AWS desde WSL, verificar `docker info` y `aws.exe sts get-caller-identity`.
-- Preferir scripts Bash (`deploy/*.sh`) desde WSL; usar scripts PowerShell (`deploy/*.ps1`) solo desde Windows PowerShell.
+- **Workspace exclusivo:** trabaja únicamente dentro de `/home/jairo/proyectos/programa-cajas` en **WSL (Linux)**.
+- **Prohibido trabajar en Windows:** no leas, edites ni ejecutes comandos sobre `C:\...` ni sobre `/mnt/c/Users/monta/OneDrive/Desktop/programa-cajas`. Si detectas que la sesión corre en Windows o fuera de `/home/jairo/proyectos/programa-cajas`, detente y avisa al usuario sin modificar archivos.
+- Ejecuta Node, npm, Docker (`docker info`) y scripts (`deploy/*.sh`) desde WSL; usa `aws.exe` cuando `aws` no esté instalado dentro de WSL (región seleccionada: `us-east-2`).
+- Antes de operar contra AWS o contenedores desde WSL, verifica `docker info` y `aws.exe sts get-caller-identity`.
+- No uses scripts PowerShell (`deploy/*.ps1`) salvo petición explícita para Windows.
+
+## Comandos bajo demanda estricta [ON-DEMAND-ONLY]
+
+- **Nunca** ejecutes automáticamente `npm run test`, `npm run test:*`, `npm run simular`, `npm run build`, `npm run dev` ni `next dev` / `next build` / `next start`.
+- Si una tarea requiere compilar, levantar servidor o correr pruebas, **indica únicamente el comando exacto** al usuario para que lo ejecute en su terminal; solo ejecútalos tú si el usuario lo pide de forma explícita en el turno actual.

@@ -89,8 +89,8 @@ Para maximizar la densidad de información y el ahorro de tokens, las siguientes
   - La IA **nunca** ejecuta `git add` ni `git commit` de forma automática tras cambios rutinarios. Solo interviene en Git ante solicitud explícita del usuario (ej. *"haz commit"*, *"prepara el repositorio"*, *"sube a github"*).
   - Operaciones remotas autenticadas (`git push`, subida de ramas/tags) son **exclusivas del usuario humano**. La IA proporciona únicamente el comando exacto.
   - **Versionamiento Semántico (SemVer) Obligatorio en Subidas:** Cada vez que el usuario pida subir cambios a GitHub o preparar el repositorio, la IA debe evaluar e incrementar obligatoriamente la versión según SemVer (`MAJOR.MINOR.PATCH`) en `package.json` (`"version": "X.Y.Z"`).
-- **Diagnósticos y Suites de Pruebas [ON-DEMAND-ONLY]:**
-  - La IA no ejecuta suites de estrés ni compilaciones pesadas de verificación tras cada ajuste menor. Solo se ejecutan cuando el usuario lo solicite (ej. *"ejecuta las pruebas"*, *"busca bugs"*).
+- **Diagnósticos, Compilación y Servidor [ON-DEMAND-ONLY]:**
+  - La IA **nunca** ejecuta `npm run test`, `npm run test:*`, `npm run simular`, `npm run build`, `npm run dev` ni `next dev` / `next build` / `next start` por iniciativa propia (tampoco tras cambios grandes). Solo se ejecutan ante orden explícita del usuario; de lo contrario, se sugiere únicamente el comando exacto al final.
 - **Planificación Estructurada y Presupuesto de Modelos (`phase-planner`):**
   - Ante nuevas funcionalidades o refactorizaciones extensas, invocar `.agents/skills/phase-planner/SKILL.md` para segmentar el trabajo en fases atómicas con prompt quirúrgico, archivos acotados y criterios de aceptación verificables.
   - **Asignación Racional de Modelo y Agente por Fase (Cero Quema Inútil de Tokens):** Cada fase planificada debe declarar obligatoriamente:
@@ -126,13 +126,11 @@ DEVELOPER_PASSWORD=<clave_acceso_tecnico>
 # SMTP_PASS=app_password
 ```
 
-## 7. Entorno WSL y checkouts
-- El desarrollo y las operaciones Docker/AWS se ejecutan desde WSL.
-- Ruta habitual del checkout en WSL: `~/proyectos/programa-cajas`.
-- Ruta del checkout visible desde Windows/Codex: `/mnt/c/Users/monta/OneDrive/Desktop/programa-cajas`.
-- Tratar ambas rutas como checkouts potencialmente distintos; confirmar la ruta actual antes de editar o ejecutar scripts.
+## 7. Entorno WSL (Único Workspace Autorizado)
+- **Workspace exclusivo:** operar únicamente sobre `/home/jairo/proyectos/programa-cajas` en WSL (Linux).
+- **Prohibido operar en el checkout de Windows** (`/mnt/c/Users/monta/OneDrive/Desktop/programa-cajas` o rutas `C:\...`); si la sesión está fuera de `/home/jairo/proyectos/programa-cajas` o en Windows, detenerse y avisar al usuario sin modificar archivos.
 - Docker funciona mediante Docker Desktop + integración WSL; validar con `docker info`.
 - Desde WSL, usar `aws.exe` si el AWS CLI no está instalado en Linux.
 - Región AWS del proyecto: `us-east-2`.
 - Verificación mínima antes de operaciones cloud: `docker info` y `aws.exe sts get-caller-identity`.
-- Usar `deploy/push-ecr.sh` para publicar imágenes desde WSL y `deploy/push-ecr.ps1` desde Windows PowerShell.
+- Usar `deploy/push-ecr.sh` para publicar imágenes desde WSL (no usar `deploy/*.ps1` salvo petición explícita).
